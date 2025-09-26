@@ -1,0 +1,20 @@
+registries:
+  inkling: https://registry.inkling.dev
+scopes:
+  - com.inktools
+  - com.magi
+unity:
+  editor: 6000.2.0f1
+  rp: urp
+  rp_version: 17.0.3
+packages:
+  com.unity.inputsystem: 1.7.0
+  com.unity.sentis: 2.0.0
+  com.magi.unitytools: 0.1.0
+  com.inktools.sim: 0.1.0
+policy:
+  allowGitDependencies: false
+  bannedApis:
+    - Resources.Load
+    - FindObjectOfType
+
