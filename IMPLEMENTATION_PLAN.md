@@ -393,6 +393,65 @@ Create a debug overlay UI that displays:
 - Graph showing performance over last 60 frames
 - Export button for performance reports
 Make it mobile-friendly with minimal performance impact
+
+---
+
+## Phase 1B: LOD0 Fluid Simulation — Concise Implementation Plan (for Claude)
+
+This section captures the exact steps to get a stable, performant LOD0 fluid loop running in the current Unity project, plus minimal capture/composition wiring. Keep scope tight and measurable.
+
+1) Immediate Fixes (Unblock Play Mode) ✅ COMPLETED
+- [x] Compute shader assignment: Added stub kernels to Fluids.compute (Advection, Diffusion, Divergence, Pressure, SubtractGradient, Vorticity, VorticityConfinement)
+- [x] Input System: Replaced all `UnityEngine.Input` usage with new Input System APIs:
+  - `using UnityEngine.InputSystem;`
+  - `var mouse = Mouse.current; if (mouse != null) { var pos = mouse.position.ReadValue(); ... }`
+  - Guard with a toggle (e.g., `enableMouseInject`) and null checks; ensure `Inkling.SimulationLOD0.asmdef` references `Unity.InputSystem`.
+
+2) SimDriver (Minimal Stable Loop)
+- RT allocation (enableRandomWrite = true on compute targets):
+  - Velocity (RGHalf), Density (RGBAHalf), Pressure (R16F), Divergence (R16F), Vorticity (R16F).
+- Dispatch order per frame:
+  - Advection → Diffusion (Jacobi N iterations) → ComputeDivergence → ComputePressure (Jacobi M iterations) → SubtractGradient → ApplyVorticity (optional Buoyancy).
+- Expose parameters via [SerializeField]: `deltaTime`, `viscosity`, `diffusion`, `dissipation`, `vorticityStrength`, `buoyancySigma/Weight/Ambient`, `jacobiIterationsDiffuse`, `jacobiIterationsPressure`.
+- Display: Blit a density channel to a display RT (shown via RawImage) for immediate visual verification.
+
+3) Recorder (Runtime Dataset) ✅ COMPLETED
+- [x] Write `*.meta.json` alongside PNG triplets per frame: color space (Linear/sRGB), RT formats, sim params, iteration counts, frame index, timestamps, capture version.
+- [x] Add `CaptureBatch(int frames, float intervalSec)` to automate small datasets.
+- [x] Added manual capture control via StartCapture()/StopCapture() methods.
+
+4) Foveated Composition (Seam Blend)
+- Add a simple feathered seam blend shader/material.
+- Update `FoveatedComposer.Compose(center, periphery, target)` to draw center over periphery with a feather mask; define center-rect UVs; keep color space consistent.
+
+5) Sentis/ONNX (Keep Simple for Now) ✅ PARTIALLY COMPLETED
+- [ ] Export ONNX at opset 13; keep `.onnx` + `.onnx.bytes` (Unity imports `.bytes` as TextAsset).
+- [x] SentisRunner implemented with TextAsset .onnx.bytes loading support.
+- [x] Unity.Sentis added to assembly references.
+
+6) Perf & Overlay
+- Add Stopwatches around sim/infer/compose; show timings in `DevOverlay` and log averages every ~120 frames.
+
+7) Packaging (Next Repo Step)
+- Later, move fluid compute to `Packages/com.inktools.sim/Runtime/Compute/Fluids.compute` and expose a tiny InkTools API for retrieval; keep game code (SimDriver) in `Assets/_Project`.
+
+8) Test Flow
+- Desktop: 512×512 loop visually stable; sim frame time ≤ 2–3 ms on dev PC with modest Jacobi counts.
+- Device pilot: build to one mobile target; verify sim timings and memory; adjust iteration counts to meet budgets (sim ≤ 4–6 ms).
+
+9) Reference Mapping (ofxFlowTools → Our Kernels)
+- Advect → Advection
+- JacobiDiffusion → Diffusion (N iterations)
+- Divergence → ComputeDivergence
+- JacobiPressure → ComputePressure (M iterations)
+- Gradient → SubtractGradient
+- VorticityCurl/Force → ApplyVorticity
+- Buoyancy → part of AddForces/Buoyancy block
+
+10) Acceptance Criteria (Phase 1B)
+- Play mode shows evolving density at 512×512; no kernel/mouse input errors.
+- Recorder outputs `*_hires.png`, `*_lores_physics.png`, and `*.meta.json` with consistent metadata.
+- Sim timings visible and within desktop budgets; initial mobile pilot completed with notes.
 ```
 
 ### Step 7: Test Scenes and Validation
@@ -432,21 +491,21 @@ Create a test scene demonstrating material interactions:
 ## Implementation Checklist
 
 ### Week 1: Foundation
-- [ ] Set up Unity 6.2 project structure
-- [ ] Create base scenes with AI assistant
-- [ ] Implement basic fluid simulation compute shaders
-- [ ] Test simulation at various resolutions
+- [x] Set up Unity 6.2 project structure
+- [x] Create base scenes with Bootstrap component
+- [x] Implement basic fluid simulation compute shaders (stub kernels)
+- [x] Test simulation at various resolutions (using test pattern)
 
 ### Week 2: Data Pipeline
-- [ ] Complete simulation recorder tool
-- [ ] Capture initial dataset (100+ frames per effect)
-- [ ] Create baseline stylization shaders
+- [x] Complete simulation recorder tool (with manual capture control)
+- [ ] Capture initial dataset (100+ frames per effect) - Needs real fluid sim
+- [x] Create baseline stylization shaders
 - [ ] Implement A/B comparison viewer
 
 ### Week 3: ML Integration
 - [ ] Train first U-Net model (Python side)
 - [ ] Export to ONNX and test in Unity
-- [ ] Implement Sentis inference pipeline
+- [x] Implement Sentis inference pipeline (SentisRunner ready)
 - [ ] Compare ML vs baseline performance
 
 ### Week 4: Optimization & Polish
@@ -471,11 +530,30 @@ Create a test scene demonstrating material interactions:
 
 ## Next Actions
 
-1. Open Unity 6.2 and create the project structure
-2. Use AI assistant with provided prompts to generate initial scenes
-3. Copy compute shader templates from this plan
-4. Begin implementing FluidSimulationManager
-5. Set up performance monitoring from day one
+1. ✅ Unity 6.2 project structure created
+2. ✅ Bootstrap component auto-generates scenes
+3. ⚠️ Implement real fluid simulation algorithms in Fluids.compute (currently stubs)
+4. ✅ SimDriver replaces FluidSimulationManager concept
+5. ✅ Performance monitoring implemented in SimDriver and DevOverlay
+
+## Current State & Immediate Next Steps
+
+### What's Working:
+- Test pattern generation and display
+- SimDriver with all compute shader kernels (stub implementations)
+- SimulationRecorder with manual capture control
+- Performance monitoring (DevOverlay)
+- New Input System integration
+- Package structure with InkTools and MagiUnityTools
+- UI helpers (ScenarioDropdownHelper, ElementSpriteGenerator)
+
+### What Needs Implementation:
+1. **Real Fluid Simulation** - Replace stub kernels in Fluids.compute with actual Navier-Stokes solver
+2. **Force Injection** - Implement AddForce kernel to respond to mouse/touch input
+3. **Visual Output** - Make density field visible (currently just test patterns)
+4. **Capture Real Data** - Once fluid sim works, capture training datasets
+5. **Train Models** - Use captured data to train U-Net stylization models
+6. **A/B Testing** - Compare ML inference vs baseline shader performance
 
 ## Integration Points
 
