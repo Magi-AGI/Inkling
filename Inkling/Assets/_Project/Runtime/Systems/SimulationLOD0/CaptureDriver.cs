@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-namespace Inkling.Systems.SimulationLOD0
+namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 {
     public class CaptureDriver : MonoBehaviour
     {

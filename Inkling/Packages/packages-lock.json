@@ -1,5 +1,19 @@
 {
   "dependencies": {
+    "com.inktools.sim": {
+      "version": "file:../../../InkTools/InkTools/Assets/_Project/InkTools.Simulation",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {
+        "com.unity.collections": "2.5.1"
+      }
+    },
+    "com.magi.unitytools": {
+      "version": "file:../../../MagiUnityTools/MagiUnityTools/Assets/_Project/MagiUnityTools",
+      "depth": 0,
+      "source": "local",
+      "dependencies": {}
+    },
     "com.unity.ai.assistant": {
       "version": "1.0.0-pre.12",
       "depth": 0,
@@ -79,9 +93,9 @@
       "depth": 1,
       "source": "registry",
       "dependencies": {
+        "com.unity.modules.physics": "1.0.0",
         "com.unity.modules.androidjni": "1.0.0",
         "com.unity.modules.uielements": "1.0.0",
-        "com.unity.modules.physics": "1.0.0",
         "com.unity.modules.screencapture": "1.0.0"
       },
       "url": "https://packages.unity.com"
@@ -234,8 +248,8 @@
       "depth": 1,
       "source": "registry",
       "dependencies": {
-        "com.unity.collections": "2.4.2",
-        "com.unity.burst": "1.7.2"
+        "com.unity.burst": "1.7.2",
+        "com.unity.collections": "2.4.2"
       },
       "url": "https://packages.unity.com"
     },

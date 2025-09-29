@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Inkling.Dev
+namespace Magi.Inkling.Dev
 {
     public class DevOverlay : MonoBehaviour
     {

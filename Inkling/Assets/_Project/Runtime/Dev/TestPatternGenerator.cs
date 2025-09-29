@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Inkling.Dev
+namespace Magi.Inkling.Runtime.Dev
 {
     public class TestPatternGenerator : MonoBehaviour
     {

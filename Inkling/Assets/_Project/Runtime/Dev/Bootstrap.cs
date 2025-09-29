@@ -1,8 +1,8 @@
 using UnityEngine;
 using UnityEngine.UI;
-using Inkling.Systems.SimulationLOD0;
+using Magi.Inkling.Runtime.Systems.SimulationLOD0;
 
-namespace Inkling.Dev
+namespace Magi.Inkling.Runtime.Dev
 {
     public class Bootstrap : MonoBehaviour
     {
@@ -49,7 +49,7 @@ namespace Inkling.Dev
 
         void SetupUI(RenderTexture rt)
         {
-            var canvas = FindObjectOfType<Canvas>();
+            var canvas = FindFirstObjectByType<Canvas>();
             if (canvas == null)
             {
                 var go = new GameObject("Canvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
