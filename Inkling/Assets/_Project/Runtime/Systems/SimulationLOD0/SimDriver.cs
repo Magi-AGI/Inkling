@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
+using Magi.UnityTools.Runtime.Core;
 
 namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 {
@@ -13,14 +14,14 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
     public class SimDriver : MonoBehaviour
     {
         [Header("Compute Shader")]
-        [SerializeField] private ComputeShader fluidCompute;
+        [SerializeField] public ComputeShader fluidCompute;
 
         [Header("Simulation Parameters")]
         [SerializeField] private int resolution = 256;
         [SerializeField] private float viscosity = 0.01f;
         [SerializeField] private float vorticity = 2.0f;
-        [SerializeField] private float dissipation = 0.98f;
-        [SerializeField] private float velocityDissipation = 0.99f;
+        [SerializeField] private float dissipation = 0.999f;  // Slower fade for density
+        [SerializeField] private float velocityDissipation = 0.995f;  // Slower fade for velocity
         [SerializeField] private float timestep = 0.016f;
 
         // Public properties for metadata export
@@ -34,11 +35,14 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
         [Header("Solver Settings")]
         [SerializeField] private int pressureIterations = 20;
         [SerializeField] private int diffusionIterations = 2;
+        [SerializeField] private bool useRedBlackSolver = true; // Use faster Red-Black Gauss-Seidel
 
         [Header("Injection")]
         [SerializeField] private bool autoInject = true;
-        [SerializeField] private float injectionRadius = 0.05f;
-        [SerializeField] private float injectionForce = 100f;
+        [SerializeField] private float injectionForce = 500f;  // Increased for better visibility
+        [SerializeField] private float densityAmount = 5.0f;    // More density
+        [SerializeField] private float forceRadius = 30f;       // Larger injection area
+        [SerializeField] private float forceStrength = 10f;     // Stronger forces
         [SerializeField] private Color injectionColor = Color.white;
 
         [Header("Display")]
@@ -48,11 +52,13 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
         [Header("Performance")]
         [SerializeField] private bool measurePerformance = true;
 
-        // Render textures (ping-pong buffers)
-        private RenderTexture velocityA, velocityB;
-        private RenderTexture densityA, densityB;
-        private RenderTexture pressure, divergence;
+        // Render textures (using PingPongRenderTexture from MagiUnityTools)
+        private PingPongRenderTexture velocity;
+        private PingPongRenderTexture density;
+        private PingPongRenderTexture pressure;
+        private RenderTexture divergence;
         private RenderTexture vorticityTex;
+        private RenderTexture obstacles;
         private RenderTexture displayRT;
 
         // Kernel indices
@@ -60,12 +66,15 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
         private int kernelDiffusion;
         private int kernelDivergence;
         private int kernelPressure;
+        private int kernelPressureRedBlack;
         private int kernelSubtractGradient;
         private int kernelVorticity;
         private int kernelVorticityConfinement;
         private int kernelAddForce;
         private int kernelAddDensity;
         private int kernelClear;
+        private int kernelUpdateObstacles;
+        private int kernelApplyObstacleBoundary;
 
         // Performance tracking
         private Stopwatch stopwatch = new Stopwatch();
@@ -100,6 +109,19 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
                 kernelAddForce = fluidCompute.FindKernel("AddForce");
                 kernelAddDensity = fluidCompute.FindKernel("AddDensity");
                 kernelClear = fluidCompute.FindKernel("Clear");
+
+                // Try to find optional kernels
+                try
+                {
+                    kernelPressureRedBlack = fluidCompute.FindKernel("PressureRedBlack");
+                    kernelUpdateObstacles = fluidCompute.FindKernel("UpdateObstacles");
+                    kernelApplyObstacleBoundary = fluidCompute.FindKernel("ApplyObstacleBoundary");
+                }
+                catch
+                {
+                    // Optional kernels - not critical if missing
+                    useRedBlackSolver = false;
+                }
             }
             catch (System.Exception)
             {
@@ -114,6 +136,17 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
             {
                 SetShaderConstants();
                 ClearBuffers();
+
+                // Initialize obstacles
+                if (kernelUpdateObstacles != 0)
+                {
+                    InitializeObstacles();
+                }
+
+                // Add initial density seed so we can see something
+                InjectDensity(new Vector2(0.5f, 0.5f), Color.white);
+                InjectDensity(new Vector2(0.3f, 0.7f), new Color(1f, 0.5f, 0f, 1f)); // Orange
+                InjectDensity(new Vector2(0.7f, 0.3f), new Color(0f, 0.5f, 1f, 1f)); // Blue
             }
 
             Debug.Log($"[SimDriver] Initialized {resolution}x{resolution} simulation");
@@ -121,18 +154,13 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 
         private void AllocateRenderTextures()
         {
-            // Velocity buffers (RG for X/Y components)
-            velocityA = CreateRT(RenderTextureFormat.RGHalf, "VelocityA");
-            velocityB = CreateRT(RenderTextureFormat.RGHalf, "VelocityB");
-
-            // Density buffers (RGBA for multiple ink types or color channels)
-            densityA = CreateRT(RenderTextureFormat.ARGBHalf, "DensityA");
-            densityB = CreateRT(RenderTextureFormat.ARGBHalf, "DensityB");
-
-            // Solver buffers
-            pressure = CreateRT(RenderTextureFormat.RHalf, "Pressure");
+            // Use PingPongRenderTexture from MagiUnityTools for cleaner ping-pong management
+            velocity = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.RGHalf, "Velocity");
+            density = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.ARGBHalf, "Density");
+            pressure = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.RHalf, "Pressure");
             divergence = CreateRT(RenderTextureFormat.RHalf, "Divergence");
             vorticityTex = CreateRT(RenderTextureFormat.RHalf, "Vorticity");
+            obstacles = CreateRT(RenderTextureFormat.RFloat, "Obstacles");
 
             // Display output
             displayRT = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32);
@@ -153,12 +181,27 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 
         private void SetShaderConstants()
         {
+            // Set all parameters expected by INIT_PARAMS macro
             fluidCompute.SetInt("_Resolution", resolution);
             fluidCompute.SetFloat("_DeltaTime", timestep);
             fluidCompute.SetFloat("_Viscosity", viscosity);
-            fluidCompute.SetFloat("_Vorticity", vorticity);
+            fluidCompute.SetFloat("_VorticityStrength", vorticity);
             fluidCompute.SetFloat("_Dissipation", dissipation);
-            fluidCompute.SetFloat("_VelocityDissipation", velocityDissipation);
+            fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
+
+            // Jacobi iteration parameters for diffusion
+            float dx = 1.0f / resolution;
+            fluidCompute.SetFloat("_Alpha", dx * dx / (viscosity * timestep));
+            fluidCompute.SetFloat("_InverseBeta", 1.0f / (4.0f + dx * dx / (viscosity * timestep)));
+
+            // Set default force parameters (will be overridden when injecting)
+            fluidCompute.SetVector("_ForcePosition", Vector2.zero);
+            fluidCompute.SetVector("_ForceDirection", Vector2.zero);
+            fluidCompute.SetFloat("_ForceRadius", forceRadius);
+            fluidCompute.SetFloat("_ForceStrength", 0f);
+            fluidCompute.SetFloat("_DensityAmount", 0f);
+
+            // Additional useful parameters
             fluidCompute.SetVector("_TexelSize", new Vector4(1f / resolution, 1f / resolution, resolution, resolution));
         }
 
@@ -166,10 +209,22 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
         {
             int threadGroups = Mathf.CeilToInt(resolution / 8f);
 
-            fluidCompute.SetTexture(kernelClear, "_VelocityWrite", velocityA);
-            fluidCompute.SetTexture(kernelClear, "_DensityWrite", densityA);
-            fluidCompute.SetTexture(kernelClear, "_PressureWrite", pressure);
+            fluidCompute.SetTexture(kernelClear, "_VelocityWrite", velocity.Write);
+            fluidCompute.SetTexture(kernelClear, "_DensityWrite", density.Write);
+            fluidCompute.SetTexture(kernelClear, "_PressureWrite", pressure.Write);
+            fluidCompute.SetTexture(kernelClear, "_DivergenceWrite", divergence);
+            fluidCompute.SetTexture(kernelClear, "_VorticityMag", vorticityTex);
             fluidCompute.Dispatch(kernelClear, threadGroups, threadGroups, 1);
+        }
+
+        private void InitializeObstacles()
+        {
+            int threadGroups = Mathf.CeilToInt(resolution / 8f);
+
+            fluidCompute.SetTexture(kernelUpdateObstacles, "_ObstacleWrite", obstacles);
+            fluidCompute.Dispatch(kernelUpdateObstacles, threadGroups, threadGroups, 1);
+
+            Debug.Log("[SimDriver] Initialized obstacles");
         }
 
         private void Update()
@@ -207,25 +262,28 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
             int threadGroups = Mathf.CeilToInt(resolution / 8f);
             var sw = measurePerformance ? stopwatch : null;
 
+            // Set global parameters that are constant for the frame
+            SetShaderConstants();
+
             // 1. Advection - Move quantities along velocity field
             if (sw != null) sw.Restart();
 
             // Advect velocity
-            fluidCompute.SetTexture(kernelAdvection, "_VelocityRead", velocityA);
-            fluidCompute.SetTexture(kernelAdvection, "_VelocityWrite", velocityB);
-            fluidCompute.SetTexture(kernelAdvection, "_QuantityRead", velocityA);
-            fluidCompute.SetTexture(kernelAdvection, "_QuantityWrite", velocityB);
+            fluidCompute.SetTexture(kernelAdvection, "_VelocityRead", velocity.Read);
+            fluidCompute.SetTexture(kernelAdvection, "_VelocityWrite", velocity.Write);
+            fluidCompute.SetTexture(kernelAdvection, "_QuantityRead", velocity.Read);
+            fluidCompute.SetTexture(kernelAdvection, "_QuantityWrite", velocity.Write);
             fluidCompute.SetFloat("_Dissipation", velocityDissipation);
             fluidCompute.Dispatch(kernelAdvection, threadGroups, threadGroups, 1);
-            SwapBuffers(ref velocityA, ref velocityB);
+            velocity.Swap();
 
             // Advect density
-            fluidCompute.SetTexture(kernelAdvection, "_VelocityRead", velocityA);
-            fluidCompute.SetTexture(kernelAdvection, "_QuantityRead", densityA);
-            fluidCompute.SetTexture(kernelAdvection, "_QuantityWrite", densityB);
+            fluidCompute.SetTexture(kernelAdvection, "_VelocityRead", velocity.Read);
+            fluidCompute.SetTexture(kernelAdvection, "_QuantityRead", density.Read);
+            fluidCompute.SetTexture(kernelAdvection, "_QuantityWrite", density.Write);
             fluidCompute.SetFloat("_Dissipation", dissipation);
             fluidCompute.Dispatch(kernelAdvection, threadGroups, threadGroups, 1);
-            SwapBuffers(ref densityA, ref densityB);
+            density.Swap();
 
             if (sw != null) advectionMs = (float)sw.Elapsed.TotalMilliseconds;
 
@@ -236,10 +294,10 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 
                 for (int i = 0; i < diffusionIterations; i++)
                 {
-                    fluidCompute.SetTexture(kernelDiffusion, "_VelocityRead", velocityA);
-                    fluidCompute.SetTexture(kernelDiffusion, "_VelocityWrite", velocityB);
+                    fluidCompute.SetTexture(kernelDiffusion, "_VelocityRead", velocity.Read);
+                    fluidCompute.SetTexture(kernelDiffusion, "_VelocityWrite", velocity.Write);
                     fluidCompute.Dispatch(kernelDiffusion, threadGroups, threadGroups, 1);
-                    SwapBuffers(ref velocityA, ref velocityB);
+                    velocity.Swap();
                 }
 
                 if (sw != null) diffusionMs = (float)sw.Elapsed.TotalMilliseconds;
@@ -251,16 +309,16 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
                 if (sw != null) sw.Restart();
 
                 // Calculate vorticity
-                fluidCompute.SetTexture(kernelVorticity, "_VelocityRead", velocityA);
+                fluidCompute.SetTexture(kernelVorticity, "_VelocityRead", velocity.Read);
                 fluidCompute.SetTexture(kernelVorticity, "_VorticityMag", vorticityTex);
                 fluidCompute.Dispatch(kernelVorticity, threadGroups, threadGroups, 1);
 
                 // Apply vorticity confinement
-                fluidCompute.SetTexture(kernelVorticityConfinement, "_VelocityRead", velocityA);
-                fluidCompute.SetTexture(kernelVorticityConfinement, "_VelocityWrite", velocityB);
+                fluidCompute.SetTexture(kernelVorticityConfinement, "_VelocityRead", velocity.Read);
+                fluidCompute.SetTexture(kernelVorticityConfinement, "_VelocityWrite", velocity.Write);
                 fluidCompute.SetTexture(kernelVorticityConfinement, "_VorticityMag", vorticityTex);
                 fluidCompute.Dispatch(kernelVorticityConfinement, threadGroups, threadGroups, 1);
-                SwapBuffers(ref velocityA, ref velocityB);
+                velocity.Swap();
 
                 if (sw != null) vorticityMs = (float)sw.Elapsed.TotalMilliseconds;
             }
@@ -269,21 +327,47 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
             if (sw != null) sw.Restart();
 
             // Calculate divergence
-            fluidCompute.SetTexture(kernelDivergence, "_VelocityRead", velocityA);
+            fluidCompute.SetTexture(kernelDivergence, "_VelocityRead", velocity.Read);
             fluidCompute.SetTexture(kernelDivergence, "_DivergenceWrite", divergence);
             fluidCompute.Dispatch(kernelDivergence, threadGroups, threadGroups, 1);
 
-            // Clear pressure
-            fluidCompute.SetTexture(kernelClear, "_PressureWrite", pressure);
-            fluidCompute.Dispatch(kernelClear, threadGroups, threadGroups, 1);
+            // Skip clearing pressure - the Clear kernel clears ALL fields which we don't want
+            // TODO: Create a separate ClearPressure kernel that only clears pressure
+            // For now, pressure will accumulate but should stabilize through Jacobi iterations
 
-            // Jacobi iterations for pressure
-            for (int i = 0; i < pressureIterations; i++)
+            // Clear pressure using PingPongRenderTexture's Clear method
+            pressure.Clear(Color.clear);
+
+            // Choose pressure solver based on settings
+            if (useRedBlackSolver && kernelPressureRedBlack != 0)
             {
-                fluidCompute.SetTexture(kernelPressure, "_PressureRead", pressure);
-                fluidCompute.SetTexture(kernelPressure, "_DivergenceRead", divergence);
-                fluidCompute.SetTexture(kernelPressure, "_PressureWrite", pressure);
-                fluidCompute.Dispatch(kernelPressure, threadGroups, threadGroups, 1);
+                // Red-Black Gauss-Seidel (faster convergence)
+                for (int i = 0; i < pressureIterations; i++)
+                {
+                    // Red cells pass (set alpha = 0 to select red cells)
+                    fluidCompute.SetFloat("_Alpha", 0f);
+                    fluidCompute.SetTexture(kernelPressureRedBlack, "_PressureRead", pressure.Read);
+                    fluidCompute.SetTexture(kernelPressureRedBlack, "_DivergenceRead", divergence);
+                    fluidCompute.Dispatch(kernelPressureRedBlack, threadGroups, threadGroups, 1);
+
+                    // Black cells pass (set alpha = 1 to select black cells)
+                    fluidCompute.SetFloat("_Alpha", 1f);
+                    fluidCompute.SetTexture(kernelPressureRedBlack, "_PressureRead", pressure.Read);
+                    fluidCompute.SetTexture(kernelPressureRedBlack, "_DivergenceRead", divergence);
+                    fluidCompute.Dispatch(kernelPressureRedBlack, threadGroups, threadGroups, 1);
+                }
+            }
+            else
+            {
+                // Standard Jacobi iterations with ping-pong
+                for (int i = 0; i < pressureIterations; i++)
+                {
+                    fluidCompute.SetTexture(kernelPressure, "_PressureRead", pressure.Read);
+                    fluidCompute.SetTexture(kernelPressure, "_DivergenceRead", divergence);
+                    fluidCompute.SetTexture(kernelPressure, "_PressureWrite", pressure.Write);
+                    fluidCompute.Dispatch(kernelPressure, threadGroups, threadGroups, 1);
+                    pressure.Swap();
+                }
             }
 
             if (sw != null) pressureMs = (float)sw.Elapsed.TotalMilliseconds;
@@ -291,32 +375,56 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
             // 5. Subtract pressure gradient (make velocity divergence-free)
             if (sw != null) sw.Restart();
 
-            fluidCompute.SetTexture(kernelSubtractGradient, "_VelocityRead", velocityA);
-            fluidCompute.SetTexture(kernelSubtractGradient, "_VelocityWrite", velocityB);
-            fluidCompute.SetTexture(kernelSubtractGradient, "_PressureRead", pressure);
+            fluidCompute.SetTexture(kernelSubtractGradient, "_VelocityRead", velocity.Read);
+            fluidCompute.SetTexture(kernelSubtractGradient, "_VelocityWrite", velocity.Write);
+            fluidCompute.SetTexture(kernelSubtractGradient, "_PressureRead", pressure.Read);
             fluidCompute.Dispatch(kernelSubtractGradient, threadGroups, threadGroups, 1);
-            SwapBuffers(ref velocityA, ref velocityB);
+            velocity.Swap();
+
+            // 6. Apply obstacle boundaries (if available)
+            if (kernelApplyObstacleBoundary != 0)
+            {
+                fluidCompute.SetTexture(kernelApplyObstacleBoundary, "_VelocityRead", velocity.Read);
+                fluidCompute.SetTexture(kernelApplyObstacleBoundary, "_VelocityWrite", velocity.Write);
+                fluidCompute.SetTexture(kernelApplyObstacleBoundary, "_ObstacleRead", obstacles);
+                fluidCompute.Dispatch(kernelApplyObstacleBoundary, threadGroups, threadGroups, 1);
+                velocity.Swap();
+            }
 
             if (sw != null) projectionMs = (float)sw.Elapsed.TotalMilliseconds;
         }
 
         private void InjectAtMousePosition()
         {
-            if (Camera.main == null) return;
+            if (Mouse.current == null) return;
 
-            Vector3 mousePos = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector3.zero;
-            mousePos.z = 10f;
-            Vector3 worldPos = Camera.main.ScreenToWorldPoint(mousePos);
+            // Get mouse position in screen space
+            Vector2 mousePos = Mouse.current.position.ReadValue();
 
-            // Convert to UV space (0-1)
+            // Convert to normalized viewport coordinates (0-1)
             Vector2 uv = new Vector2(
-                (worldPos.x + 5f) / 10f,  // Assuming -5 to 5 world space
-                (worldPos.y + 5f) / 10f
+                mousePos.x / Screen.width,
+                mousePos.y / Screen.height
             );
 
+            // Clamp to valid range
+            uv.x = Mathf.Clamp01(uv.x);
+            uv.y = Mathf.Clamp01(uv.y);
+
             // Calculate velocity from mouse delta - use new Input System
-            Vector2 mouseDelta = Mouse.current != null ? Mouse.current.delta.ReadValue() : Vector2.zero;
-            Vector2 velocity = mouseDelta * injectionForce * 0.01f; // Scale down delta as it's in pixels
+            Vector2 mouseDelta = Mouse.current.delta.ReadValue();
+
+            // Convert delta to UV space and scale
+            Vector2 velocity = new Vector2(
+                mouseDelta.x / Screen.width,
+                mouseDelta.y / Screen.height
+            ) * injectionForce;
+
+            // Debug to verify injection position
+            if (mouseDelta.magnitude > 0.1f || Mouse.current.leftButton.wasPressedThisFrame)
+            {
+                Debug.Log($"[SimDriver] Injecting at UV: {uv}, Velocity: {velocity.magnitude}");
+            }
 
             // Inject force and density
             InjectForce(uv, velocity);
@@ -325,32 +433,54 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 
         private void InjectForce(Vector2 position, Vector2 force)
         {
+            if (fluidCompute == null) return;
+
             int threadGroups = Mathf.CeilToInt(resolution / 8f);
 
-            fluidCompute.SetVector("_InjectionPoint", new Vector4(position.x, position.y, injectionRadius, 0));
-            fluidCompute.SetVector("_InjectionForce", new Vector4(force.x, force.y, 0, 0));
-            fluidCompute.SetTexture(kernelAddForce, "_VelocityRead", velocityA);
-            fluidCompute.SetTexture(kernelAddForce, "_VelocityWrite", velocityB);
+            // Convert UV position to pixel coordinates
+            Vector2 pixelPos = position * resolution;
+
+            fluidCompute.SetVector("_ForcePosition", pixelPos);
+            fluidCompute.SetVector("_ForceDirection", force.normalized);
+            fluidCompute.SetFloat("_ForceRadius", forceRadius);
+            fluidCompute.SetFloat("_ForceStrength", forceStrength * force.magnitude);
+            fluidCompute.SetFloat("_DeltaTime", timestep);
+            fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
+
+            fluidCompute.SetTexture(kernelAddForce, "_VelocityRead", velocity.Read);
+            fluidCompute.SetTexture(kernelAddForce, "_VelocityWrite", velocity.Write);
             fluidCompute.Dispatch(kernelAddForce, threadGroups, threadGroups, 1);
-            SwapBuffers(ref velocityA, ref velocityB);
+            velocity.Swap();
         }
 
         private void InjectDensity(Vector2 position, Color color)
         {
+            if (fluidCompute == null) return;
+
             int threadGroups = Mathf.CeilToInt(resolution / 8f);
 
-            fluidCompute.SetVector("_InjectionPoint", new Vector4(position.x, position.y, injectionRadius, 0));
-            fluidCompute.SetVector("_InjectionColor", color);
-            fluidCompute.SetTexture(kernelAddDensity, "_DensityRead", densityA);
-            fluidCompute.SetTexture(kernelAddDensity, "_DensityWrite", densityB);
+            // Convert UV position to pixel coordinates
+            Vector2 pixelPos = position * resolution;
+
+            // Debug log to verify injection is happening (commented out to avoid spam)
+            // Debug.Log($"Injecting density at {pixelPos} with amount {color.a * densityAmount}");
+
+            fluidCompute.SetVector("_ForcePosition", pixelPos);
+            fluidCompute.SetFloat("_ForceRadius", forceRadius);
+            fluidCompute.SetFloat("_DensityAmount", color.a * densityAmount);
+            fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
+            fluidCompute.SetFloat("_DeltaTime", timestep);
+
+            fluidCompute.SetTexture(kernelAddDensity, "_DensityRead", density.Read);
+            fluidCompute.SetTexture(kernelAddDensity, "_DensityWrite", density.Write);
             fluidCompute.Dispatch(kernelAddDensity, threadGroups, threadGroups, 1);
-            SwapBuffers(ref densityA, ref densityB);
+            density.Swap();
         }
 
         private void UpdateDisplay()
         {
             // Blit density or velocity to display RT
-            Graphics.Blit(displayVelocity ? velocityA : densityA, displayRT);
+            Graphics.Blit(displayVelocity ? velocity.Read : density.Read, displayRT);
 
             // Update display renderer if assigned
             if (displayRenderer != null)
@@ -359,13 +489,10 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
             }
         }
 
-        private void SwapBuffers(ref RenderTexture a, ref RenderTexture b)
-        {
-            (a, b) = (b, a);
-        }
+        // SwapBuffers method removed - using PingPongBuffer.Swap() instead
 
-        public RenderTexture GetDensityTexture() => densityA;
-        public RenderTexture GetVelocityTexture() => velocityA;
+        public RenderTexture GetDensityTexture() => density?.Read;
+        public RenderTexture GetVelocityTexture() => velocity?.Read;
         public RenderTexture GetDisplayTexture() => displayRT;
 
         public float GetLastFrameMs() => lastFrameMs;
@@ -377,13 +504,12 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
         private void OnDestroy()
         {
             // Clean up render textures
-            if (velocityA) velocityA.Release();
-            if (velocityB) velocityB.Release();
-            if (densityA) densityA.Release();
-            if (densityB) densityB.Release();
-            if (pressure) pressure.Release();
+            velocity?.Dispose();
+            density?.Dispose();
+            pressure?.Dispose();
             if (divergence) divergence.Release();
             if (vorticityTex) vorticityTex.Release();
+            if (obstacles) obstacles.Release();
             if (displayRT) displayRT.Release();
         }
 

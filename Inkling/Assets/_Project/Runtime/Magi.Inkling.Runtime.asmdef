@@ -5,7 +5,6 @@
         "Unity.Mathematics",
         "Unity.Burst",
         "Unity.InputSystem",
-        "Unity.Sentis",
         "UnityEngine.UI",
         "Magi.InkTools.Runtime",
         "Magi.InkTools.Simulation",

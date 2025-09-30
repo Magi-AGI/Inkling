@@ -1,17 +1,12 @@
 registries:
-  inkling: https://registry.inkling.dev
-scopes:
-  - com.inktools
-  - com.magi
 unity:
   editor: 6000.2.0f1
-  rp: urp
-  rp_version: 17.0.3
+  rp: hdrp
+  rp_version: 17.2.0
 packages:
-  com.unity.inputsystem: 1.7.0
-  com.unity.sentis: 2.0.0
-  com.magi.unitytools: 0.1.0
-  com.inktools.sim: 0.1.0
+  com.unity.inputsystem: 1.14.2
+  com.magi.unitytools: file:../../../MagiUnityTools/MagiUnityTools/Assets/_Project/MagiUnityTools
+  com.inktools.sim: file:../../../InkTools/InkTools/Assets/_Project/InkTools.Simulation
 policy:
   allowGitDependencies: false
   bannedApis:
