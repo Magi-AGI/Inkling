@@ -1,0 +1,11 @@
+{
+    "scopedRegistries":  [
+
+                         ],
+    "dependencies":  {
+                         "com.magi.unitytools":  "file:../../../MagiUnityTools/MagiUnityTools/Assets/_Project/MagiUnityTools",
+                         "com.inktools.sim":  "file:../../../InkTools/InkTools/Assets/_Project/InkTools.Simulation",
+                         "com.unity.render-pipelines.high-definition":  "17.2.0",
+                         "com.unity.inputsystem":  "1.14.2"
+                     }
+}

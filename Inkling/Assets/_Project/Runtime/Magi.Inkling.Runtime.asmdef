@@ -1,0 +1,38 @@
+{
+    "name": "Magi.Inkling.Runtime",
+    "rootNamespace": "Magi.Inkling.Runtime",
+    "references": [
+        "Unity.Mathematics",
+        "Unity.Burst",
+        "Unity.InputSystem",
+        "UnityEngine.UI",
+        "Magi.InkTools.Runtime",
+        "Magi.InkTools.Simulation",
+        "Magi.UnityTools.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.burst",
+            "expression": "1.0.0",
+            "define": "BURST_PRESENT"
+        },
+        {
+            "name": "com.unity.mathematics",
+            "expression": "1.0.0",
+            "define": "MATHEMATICS_PRESENT"
+        },
+        {
+            "name": "com.unity.sentis",
+            "expression": "1.0.0",
+            "define": "SENTIS_PRESENT"
+        }
+    ],
+    "noEngineReferences": false
+}

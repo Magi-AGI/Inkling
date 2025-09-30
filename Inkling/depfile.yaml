@@ -1,0 +1,15 @@
+registries:
+unity:
+  editor: 6000.2.0f1
+  rp: hdrp
+  rp_version: 17.2.0
+packages:
+  com.unity.inputsystem: 1.14.2
+  com.magi.unitytools: file:../../../MagiUnityTools/MagiUnityTools/Assets/_Project/MagiUnityTools
+  com.inktools.sim: file:../../../InkTools/InkTools/Assets/_Project/InkTools.Simulation
+policy:
+  allowGitDependencies: false
+  bannedApis:
+    - Resources.Load
+    - FindObjectOfType
+
