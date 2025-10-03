@@ -15,7 +15,7 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
         [Header("Capture Settings")]
         [SerializeField] public string outputFolder = "Datasets/Captures";
         [SerializeField] private string scenarioName = "scene01";
-        [SerializeField] private int frameIndex = 0;
+        [SerializeField] private int frameIndex = 0; 
 
         [Header("Render Textures")]
         [SerializeField] public RenderTexture hiRes; // 512x512 RGBAHalf for mobile
