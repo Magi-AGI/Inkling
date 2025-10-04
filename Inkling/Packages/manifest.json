@@ -13,7 +13,7 @@
                          "com.unity.modules.imageconversion":  "1.0.0",
                          "com.unity.nuget.mono-cecil":  "1.11.5",
                          "com.unity.ext.nunit":  "2.0.5",
-                         "com.magi.unitytools":  "file:..\\..\\..\\MagiUnityTools\\MagiUnityTools\\Assets\\_Project\\MagiUnityTools",
+                         "com.magi.unitytools":  "file:..\\..\\..\\MagiUnityTools\\MagiUnityTools\\Assets\\_Project\\Scripts\\UnityTools",
                          "com.unity.modules.uielements":  "1.0.0",
                          "com.unity.modules.audio":  "1.0.0",
                          "com.unity.collections":  "2.5.7",
@@ -22,7 +22,7 @@
                          "com.unity.modules.imgui":  "1.0.0",
                          "com.unity.modules.physics":  "1.0.0",
                          "com.unity.modules.animation":  "1.0.0",
-                         "com.inktools.sim":  "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\InkTools.Simulation",
+                         "com.inktools.sim":  "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\Scripts\\FluidSimulation",
                          "com.unity.modules.terrain":  "1.0.0",
                          "com.unity.modules.ui":  "1.0.0",
                          "com.unity.rendering.light-transport":  "1.0.1",
@@ -32,6 +32,7 @@
                          "com.unity.searcher":  "4.9.3",
                          "com.unity.modules.unitywebrequest":  "1.0.0",
                          "com.unity.visualeffectgraph":  "17.2.0",
-                         "com.unity.test-framework":  "1.5.1"
+                         "com.unity.test-framework":  "1.5.1",
+                         "com.inktools.core":  "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\Scripts\\FluidTools"
                      }
 }

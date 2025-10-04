@@ -132,7 +132,7 @@ namespace Magi.Inkling.Runtime.Dev
                 {
                     // Try the local project path
                     computeShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
-                        "Assets/_Project/InkTools.Simulation/Runtime/Compute/Fluids.compute");
+                        "Assets/_Project/Scripts/FluidSimulation/Runtime/Compute/Fluids.compute");
                 }
             }
             #endif
@@ -174,4 +174,5 @@ namespace Magi.Inkling.Runtime.Dev
         }
     }
 }
+
 

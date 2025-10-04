@@ -58,7 +58,7 @@ Create a mobile-optimized scene for fluid simulation with these GameObjects:
 **Fluids.compute not appearing in asset picker:**
 1. Check Package Manager (Window > Package Manager)
    - Look for "InkTools Simulation" in "In Project" view
-   - If missing, check Packages/manifest.json has: `"com.inktools.sim": "file:../../../InkTools/InkTools/Assets/_Project/InkTools.Simulation"`
+   - If missing, check Packages/manifest.json has: `"com.inktools.sim": "file:../../InkTools/InkTools/Assets/_Project/Scripts/FluidSimulation"`
 2. Right-click in Project window > Reimport All
 3. Restart Unity Editor to force package refresh
 
@@ -159,8 +159,8 @@ Create asmdefs for proper code organization:
     "Unity.Burst",
     "Unity.InputSystem",
     "Unity.Sentis",
-    "Magi.UnityTools.Runtime",
-    "Magi.InkTools.Runtime"
+    "Magi.UnityTools",
+    "Magi.InkTools"
   ],
   "includePlatforms": [],
   "excludePlatforms": []
@@ -220,4 +220,7 @@ Once the minimal LOD0 simulation is ready in `com.inktools.sim`:
 ## Current Status
 
 The core infrastructure is in place. Use Unity's AI assistant with the prompts above to quickly generate the scene GameObjects and UI. Focus on getting the baseline stylizer working first as the non-ML fallback, then layer in ML inference once models are trained.
+
+
+
 

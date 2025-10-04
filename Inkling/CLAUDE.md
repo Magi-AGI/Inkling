@@ -26,7 +26,7 @@ The codebase uses **per-system assembly definitions** for clean dependency manag
 
 - **Magi.Inkling.Runtime**: Main runtime assembly
   - References: Unity.Mathematics, Unity.Burst, Unity.InputSystem, UnityEngine.UI
-  - References custom packages: Magi.InkTools.Runtime, Magi.InkTools.Simulation, Magi.UnityTools.Runtime
+  - References custom packages: Magi.InkTools, Magi.InkTools.Simulation, Magi.UnityTools
   - Location: `Assets/_Project/Runtime/Magi.Inkling.Runtime.asmdef`
 
 ### Custom Package Dependencies
@@ -36,8 +36,8 @@ Configured via `depfile.yaml` and `Packages/manifest.json`:
 ```yaml
 packages:
   com.unity.inputsystem: 1.14.2
-  com.magi.unitytools: file:../../../MagiUnityTools/MagiUnityTools/Assets/_Project/MagiUnityTools
-  com.inktools.sim: file:../../../InkTools/InkTools/Assets/_Project/InkTools.Simulation
+  com.magi.unitytools: file:../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts/UnityTools
+  com.inktools.sim: file:../../InkTools/InkTools/Assets/_Project/Scripts/FluidSimulation
 ```
 
 **Important:** Package paths are relative to the parent directory structure. These packages must exist in sibling repositories.
@@ -90,7 +90,7 @@ Per `depfile.yaml` policy:
 
 **Location:** Check both:
 - `Packages/com.inktools.sim/Runtime/Compute/Fluids.compute`
-- `Assets/_Project/InkTools.Simulation/Runtime/Compute/Fluids.compute` (fallback)
+- `Assets/_Project/Scripts/FluidSimulation/Compute/Fluids.compute` (fallback)
 
 **Required Kernels:**
 - `Advection`, `Diffusion`, `Divergence`
@@ -311,3 +311,6 @@ Inkling/                                    # Unity project root
 - Check for null when using Mouse.current (Input System)
 - Performance-critical: measure all operations, target mobile budgets
 - Git branch: `FirstPass` (working branch), merge target: `main`
+
+
+

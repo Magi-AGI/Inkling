@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
-using Magi.UnityTools.Runtime.Core;
+using Magi.UnityTools.Core;
 
 namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 {

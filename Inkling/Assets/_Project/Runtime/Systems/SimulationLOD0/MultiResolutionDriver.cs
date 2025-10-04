@@ -1,6 +1,6 @@
 using UnityEngine;
 using UnityEngine.Rendering;
-using Magi.UnityTools.Runtime.Core;
+using Magi.UnityTools.Core;
 
 namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 {

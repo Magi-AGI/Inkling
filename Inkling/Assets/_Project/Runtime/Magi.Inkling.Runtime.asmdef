@@ -1,4 +1,4 @@
-﻿{
+{
     "name": "Magi.Inkling.Runtime",
     "rootNamespace": "Magi.Inkling.Runtime",
     "references": [
@@ -6,7 +6,7 @@
         "Unity.Burst",
         "Unity.InputSystem",
         "UnityEngine.UI",
-        "Magi.InkTools.Runtime",
+        "Magi.InkTools",
         "Magi.InkTools.Simulation",
         "Magi.UnityTools"
     ],
