@@ -4,12 +4,12 @@
 
 ### ✅ Completed Components
 
-1. **SimDriver.cs** - Fluid simulation driver with RT allocation and kernel dispatch (Assets/_Project/Runtime/Systems/SimulationLOD0/)
-2. **SimulationRecorder.cs** - Runtime capture with JSON metadata export (Assets/_Project/Runtime/Systems/SimulationLOD0/)
-3. **SentisRunner.cs** - TextAsset .onnx.bytes support with Load/Run implementation (Assets/_Project/Runtime/Systems/Inference/)
-4. **BaselineStylizer.shader** - Self-contained non-ML fallback (Assets/_Project/Runtime/Systems/Foveation/)
-5. **BlendSeam.shader** - Foveation seam blending with feather mask (Assets/_Project/Runtime/Systems/Foveation/Shaders/)
-6. **FoveatedComposer.cs** - Composite with proper seam blending (Assets/_Project/Runtime/Systems/Foveation/)
+1. **SimDriver.cs** - Fluid simulation driver with RT allocation and kernel dispatch (Assets/_Project/Scripts/Systems/SimulationLOD0/)
+2. **SimulationRecorder.cs** - Runtime capture with JSON metadata export (Assets/_Project/Scripts/Systems/SimulationLOD0/)
+3. **SentisRunner.cs** - TextAsset .onnx.bytes support with Load/Run implementation (Assets/_Project/Scripts/Systems/Inference/)
+4. **BaselineStylizer.shader** - Self-contained non-ML fallback (Assets/_Project/Scripts/Systems/Foveation/)
+5. **BlendSeam.shader** - Foveation seam blending with feather mask (Assets/_Project/Scripts/Systems/Foveation/Shaders/)
+6. **FoveatedComposer.cs** - Composite with proper seam blending (Assets/_Project/Scripts/Systems/Foveation/)
 7. **Fluids.compute** - GPU fluid solver (InkTools/Packages/com.inktools.sim/Runtime/Compute/)
 
 ### 🎮 Unity AI Assistant Prompts for Scene Setup
@@ -58,7 +58,7 @@ Create a mobile-optimized scene for fluid simulation with these GameObjects:
 **Fluids.compute not appearing in asset picker:**
 1. Check Package Manager (Window > Package Manager)
    - Look for "InkTools Simulation" in "In Project" view
-   - If missing, check Packages/manifest.json has: `"com.inktools.sim": "file:../../InkTools/InkTools/Assets/_Project/Scripts/FluidSimulation"`
+   - If missing, check Packages/manifest.json has: `"com.inktools.sim": "file:../../InkTools/InkTools/Assets/_Project/Scripts/Simulation"`
 2. Right-click in Project window > Reimport All
 3. Restart Unity Editor to force package refresh
 
@@ -149,11 +149,11 @@ This will configure the correct versions from depfile.yaml for Unity 6.x:
 
 Create asmdefs for proper code organization:
 
-**Assets/_Project/Runtime/Magi.Inkling.Runtime.asmdef**
+**Assets/_Project/Scripts/Magi.Inkling.asmdef**
 ```json
 {
-  "name": "Magi.Inkling.Runtime",
-  "rootNamespace": "Magi.Inkling.Runtime",
+  "name": "Magi.Inkling",
+  "rootNamespace": "Magi.Inkling",
   "references": [
     "Unity.Mathematics",
     "Unity.Burst",
@@ -220,6 +220,7 @@ Once the minimal LOD0 simulation is ready in `com.inktools.sim`:
 ## Current Status
 
 The core infrastructure is in place. Use Unity's AI assistant with the prompts above to quickly generate the scene GameObjects and UI. Focus on getting the baseline stylizer working first as the non-ML fallback, then layer in ML inference once models are trained.
+
 
 
 

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
-namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
+namespace Magi.Inkling.Systems.SimulationLOD0
 {
     /// <summary>
     /// Runtime simulation recorder with metadata export for ML training datasets.

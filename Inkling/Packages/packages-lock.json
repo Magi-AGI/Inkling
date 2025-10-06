@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "com.inktools.core": {
-      "version": "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\Scripts\\FluidTools",
+      "version": "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\Scripts\\Core",
       "depth": 0,
       "source": "local",
       "dependencies": {
@@ -10,7 +10,7 @@
       }
     },
     "com.inktools.sim": {
-      "version": "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\Scripts\\FluidSimulation",
+      "version": "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\Scripts\\Simulation",
       "depth": 0,
       "source": "local",
       "dependencies": {
@@ -19,7 +19,7 @@
       }
     },
     "com.magi.unitytools": {
-      "version": "file:..\\..\\..\\MagiUnityTools\\MagiUnityTools\\Assets\\_Project\\Scripts\\UnityTools",
+      "version": "file:..\\..\\..\\MagiUnityTools\\MagiUnityTools\\Assets\\_Project\\Scripts",
       "depth": 0,
       "source": "local",
       "dependencies": {

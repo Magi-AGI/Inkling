@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Magi.UnityTools.Core;
 
-namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
+namespace Magi.Inkling.Systems.SimulationLOD0
 {
     /// <summary>
     /// Manages multi-resolution rendering for fluid simulation.

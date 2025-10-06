@@ -1,6 +1,6 @@
 {
-    "name": "Magi.Inkling.Runtime",
-    "rootNamespace": "Magi.Inkling.Runtime",
+    "name": "Magi.Inkling",
+    "rootNamespace": "Magi.Inkling",
     "references": [
         "Unity.Mathematics",
         "Unity.Burst",

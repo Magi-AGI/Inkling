@@ -1,11 +1,11 @@
 using UnityEngine;
 using UnityEngine.UI;
-using Magi.Inkling.Runtime.Systems.SimulationLOD0;
+using Magi.Inkling.Systems.SimulationLOD0;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
 
-namespace Magi.Inkling.Runtime.Dev
+namespace Magi.Inkling.Dev
 {
     public class Bootstrap : MonoBehaviour
     {
@@ -132,7 +132,7 @@ namespace Magi.Inkling.Runtime.Dev
                 {
                     // Try the local project path
                     computeShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
-                        "Assets/_Project/Scripts/FluidSimulation/Runtime/Compute/Fluids.compute");
+                        "Assets/_Project/Scripts/Simulation/Compute/Fluids.compute");
                 }
             }
             #endif
@@ -174,5 +174,6 @@ namespace Magi.Inkling.Runtime.Dev
         }
     }
 }
+
 
 

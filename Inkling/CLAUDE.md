@@ -24,10 +24,10 @@ The project uses a **nested Unity project structure**:
 
 The codebase uses **per-system assembly definitions** for clean dependency management:
 
-- **Magi.Inkling.Runtime**: Main runtime assembly
+- **Magi.Inkling**: Main runtime assembly
   - References: Unity.Mathematics, Unity.Burst, Unity.InputSystem, UnityEngine.UI
   - References custom packages: Magi.InkTools, Magi.InkTools.Simulation, Magi.UnityTools
-  - Location: `Assets/_Project/Runtime/Magi.Inkling.Runtime.asmdef`
+  - Location: `Assets/_Project/Scripts/Magi.Inkling.asmdef`
 
 ### Custom Package Dependencies
 
@@ -36,8 +36,8 @@ Configured via `depfile.yaml` and `Packages/manifest.json`:
 ```yaml
 packages:
   com.unity.inputsystem: 1.14.2
-  com.magi.unitytools: file:../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts/UnityTools
-  com.inktools.sim: file:../../InkTools/InkTools/Assets/_Project/Scripts/FluidSimulation
+  com.magi.unitytools: file:../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts
+  com.inktools.sim: file:../../InkTools/InkTools/Assets/_Project/Scripts/Simulation
 ```
 
 **Important:** Package paths are relative to the parent directory structure. These packages must exist in sibling repositories.
@@ -90,7 +90,7 @@ Per `depfile.yaml` policy:
 
 **Location:** Check both:
 - `Packages/com.inktools.sim/Runtime/Compute/Fluids.compute`
-- `Assets/_Project/Scripts/FluidSimulation/Compute/Fluids.compute` (fallback)
+- `Assets/_Project/Scripts/Simulation/Compute/Fluids.compute` (fallback)
 
 **Required Kernels:**
 - `Advection`, `Diffusion`, `Divergence`
@@ -183,7 +183,7 @@ Captures/
 4. Dispatch in `SimulateFrame()` or `Update()`
 
 **Create new stylization shader:**
-- Add compute shader to `Assets/_Project/Runtime/Systems/Foveation/`
+- Add compute shader to `Assets/_Project/Scripts/Systems/Foveation/`
 - Reference via Inspector (no Resources.Load)
 - Dispatch after simulation, before composition
 
@@ -250,7 +250,7 @@ RenderTexture current = velocity.Read;
 
 3. **Input not working**
    - Verify `com.unity.inputsystem` in packages
-   - Check `Magi.Inkling.Runtime.asmdef` references Unity.InputSystem
+   - Check `Magi.Inkling.asmdef` references Unity.InputSystem
    - Ensure `Mouse.current` null check before use
 
 4. **Black output / no fluid visible**
@@ -291,7 +291,7 @@ Inkling/                                    # Unity project root
 │       │   │   │   └── FoveatedComposer.cs
 │       │   │   └── Rendering/
 │       │   │       └── InkRenderPipeline.cs
-│       │   └── Magi.Inkling.Runtime.asmdef
+│       │   └── Magi.Inkling.asmdef
 │       ├── Scenes/
 │       │   └── Main.unity
 │       └── README_Assemblies.md
@@ -311,6 +311,8 @@ Inkling/                                    # Unity project root
 - Check for null when using Mouse.current (Input System)
 - Performance-critical: measure all operations, target mobile budgets
 - Git branch: `FirstPass` (working branch), merge target: `main`
+
+
 
 
 

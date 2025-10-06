@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace Magi.Inkling.Runtime.Systems.Rendering
+namespace Magi.Inkling.Systems.Rendering
 {
     /// <summary>
     /// ScriptableObject for storing ink gradient presets.

@@ -5,7 +5,7 @@ using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
 using Magi.UnityTools.Core;
 
-namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
+namespace Magi.Inkling.Systems.SimulationLOD0
 {
     /// <summary>
     /// Drives the fluid simulation compute shader with ping-pong buffers and proper kernel dispatch order.
@@ -18,10 +18,10 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 
         [Header("Simulation Parameters")]
         [SerializeField] private int resolution = 256;
-        [SerializeField] private float viscosity = 0.01f;
-        [SerializeField] private float vorticity = 2.0f;
+        [SerializeField] private float viscosity = 0.0001f;  // Lower viscosity for more fluid movement
+        [SerializeField] private float vorticity = 5.0f;  // Higher vorticity for more swirls
         [SerializeField] private float dissipation = 0.999f;  // Slower fade for density
-        [SerializeField] private float velocityDissipation = 0.995f;  // Slower fade for velocity
+        [SerializeField] private float velocityDissipation = 0.99f;  // Keep velocity longer
         [SerializeField] private float timestep = 0.016f;
 
         // Public properties for metadata export
@@ -33,16 +33,16 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
         public int Resolution => resolution;
 
         [Header("Solver Settings")]
-        [SerializeField] private int pressureIterations = 20;
-        [SerializeField] private int diffusionIterations = 2;
+        [SerializeField] private int pressureIterations = 40;  // Increased for better convergence
+        [SerializeField] private int diffusionIterations = 0;   // Disable diffusion for now (it slows things down)
         [SerializeField] private bool useRedBlackSolver = true; // Use faster Red-Black Gauss-Seidel
 
         [Header("Injection")]
-        [SerializeField] private bool autoInject = true;
-        [SerializeField] private float injectionForce = 500f;  // Increased for better visibility
-        [SerializeField] private float densityAmount = 5.0f;    // More density
-        [SerializeField] private float forceRadius = 30f;       // Larger injection area
-        [SerializeField] private float forceStrength = 10f;     // Stronger forces
+        [SerializeField] private bool autoInject = false;  // Disable auto-inject by default
+        [SerializeField] private float injectionForce = 100f;  // Direct velocity multiplier
+        [SerializeField] private float densityAmount = 10.0f;    // More density
+        [SerializeField] private float forceRadius = 40f;       // Larger injection area
+        [SerializeField] private float forceStrength = 50f;     // Force gets multiplied by velocity magnitude
         [SerializeField] private Color injectionColor = Color.white;
 
         [Header("Display")]
@@ -234,7 +234,15 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
             if (measurePerformance) stopwatch.Restart();
 
             // User input injection - use new Input System
-            if (autoInject || (Mouse.current != null && Mouse.current.leftButton.isPressed))
+            // Only inject if mouse is actually moving OR button was just pressed
+            bool shouldInject = false;
+            if (Mouse.current != null && Mouse.current.leftButton.isPressed)
+            {
+                Vector2 mouseDelta = Mouse.current.delta.ReadValue();
+                shouldInject = mouseDelta.magnitude > 0.01f || Mouse.current.leftButton.wasPressedThisFrame;
+            }
+
+            if (shouldInject || autoInject)
             {
                 InjectAtMousePosition();
             }
@@ -331,15 +339,15 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
             fluidCompute.SetTexture(kernelDivergence, "_DivergenceWrite", divergence);
             fluidCompute.Dispatch(kernelDivergence, threadGroups, threadGroups, 1);
 
-            // Skip clearing pressure - the Clear kernel clears ALL fields which we don't want
-            // TODO: Create a separate ClearPressure kernel that only clears pressure
-            // For now, pressure will accumulate but should stabilize through Jacobi iterations
-
-            // Clear pressure using PingPongRenderTexture's Clear method
-            pressure.Clear(Color.clear);
+            // DON'T clear pressure - let it persist for better convergence
+            // Clearing it every frame causes instability
+            // pressure.Clear(Color.clear);
 
             // Choose pressure solver based on settings
-            if (useRedBlackSolver && kernelPressureRedBlack != 0)
+            // TEMPORARILY DISABLE Red-Black solver due to in-place write issues
+            // Use standard Jacobi instead
+            bool useJacobi = true;  // Force Jacobi for now
+            if (!useJacobi && useRedBlackSolver && kernelPressureRedBlack != 0)
             {
                 // Red-Black Gauss-Seidel (faster convergence)
                 for (int i = 0; i < pressureIterations; i++)
@@ -414,21 +422,30 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
             // Calculate velocity from mouse delta - use new Input System
             Vector2 mouseDelta = Mouse.current.delta.ReadValue();
 
-            // Convert delta to UV space and scale
+            // Convert mouse delta to velocity in pixel space
+            // Scale directly by injectionForce - keep it simple!
             Vector2 velocity = new Vector2(
-                mouseDelta.x / Screen.width,
-                mouseDelta.y / Screen.height
+                mouseDelta.x,
+                mouseDelta.y
             ) * injectionForce;
 
             // Debug to verify injection position
             if (mouseDelta.magnitude > 0.1f || Mouse.current.leftButton.wasPressedThisFrame)
             {
-                Debug.Log($"[SimDriver] Injecting at UV: {uv}, Velocity: {velocity.magnitude}");
+                Vector2 pixelPos = uv * resolution;
+                float expectedVelAfterForce = velocity.magnitude * forceStrength * timestep;
+                Debug.Log($"[SimDriver] Injecting at UV: {uv} (pixel: {pixelPos}), Mouse Delta: {mouseDelta}, Velocity (pixels/frame): {velocity} (mag: {velocity.magnitude}), Expected velocity after force injection: {expectedVelAfterForce} pixels, ForceStrength: {forceStrength}, InjectionForce: {injectionForce}");
             }
 
             // Inject force and density
             InjectForce(uv, velocity);
             InjectDensity(uv, injectionColor);
+
+            // Debug: Log the parameters being set
+            if (Mouse.current.leftButton.wasPressedThisFrame)
+            {
+                Debug.Log($"[SimDriver] Simulation params - Resolution: {resolution}, Timestep: {timestep}, Viscosity: {viscosity}, Vorticity: {vorticity}, VelDissipation: {velocityDissipation}, PressureIterations: {pressureIterations}");
+            }
         }
 
         private void InjectForce(Vector2 position, Vector2 force)
@@ -479,8 +496,17 @@ namespace Magi.Inkling.Runtime.Systems.SimulationLOD0
 
         private void UpdateDisplay()
         {
-            // Blit density or velocity to display RT
-            Graphics.Blit(displayVelocity ? velocity.Read : density.Read, displayRT);
+            if (displayVelocity)
+            {
+                // Visualize velocity as color (need to remap from [-range, +range] to [0, 1])
+                // For now, just show velocity magnitude
+                Graphics.Blit(velocity.Read, displayRT);
+            }
+            else
+            {
+                // Show density
+                Graphics.Blit(density.Read, displayRT);
+            }
 
             // Update display renderer if assigned
             if (displayRenderer != null)

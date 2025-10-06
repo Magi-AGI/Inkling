@@ -4,13 +4,15 @@ unity:
   rp: hdrp
   rp_version: 17.2.0
 packages:
-  com.inktools.core: file:../../InkTools/InkTools/Assets/_Project/Scripts/FluidTools
-  com.magi.unitytools: file:../../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts/UnityTools
-  com.inktools.sim: file:../../InkTools/InkTools/Assets/_Project/Scripts/FluidSimulation
+  com.inktools.core: file:../../InkTools/InkTools/Assets/_Project/Scripts/Core
+  com.magi.unitytools: file:../../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts
+  com.inktools.sim: file:../../InkTools/InkTools/Assets/_Project/Scripts/Simulation
   com.unity.inputsystem: 1.14.2
 policy:
   allowGitDependencies: false
   bannedApis:
     - Resources.Load
     - FindObjectOfType
+
+
 

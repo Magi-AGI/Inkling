@@ -1,7 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-namespace Magi.Inkling.Runtime.UI
+namespace Magi.Inkling.UI
 {
     /// <summary>
     /// Generates simple colored sprites for element types at runtime.

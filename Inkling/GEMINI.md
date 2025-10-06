@@ -14,7 +14,7 @@ This document provides guidance to the Gemini code assistant when working with t
 - **Custom Packages:** The project relies on local packages (`com.magi.unitytools`, `com.inktools.sim`) for shared functionality.
 
 **Architecture:**
-- The core logic is organized into assembly definitions (`.asmdef`) to enforce clear dependencies. The main runtime code lives in `Magi.Inkling.Runtime`.
+- The core logic is organized into assembly definitions (`.asmdef`) to enforce clear dependencies. The main runtime code lives in `Magi.Inkling`.
 - The simulation is driven by compute shaders, with `SimDriver.cs` orchestrating the process.
 - The project follows a pattern of dependency injection and direct references, avoiding expensive runtime lookups like `Resources.Load` and `FindObjectOfType`.
 
@@ -57,7 +57,7 @@ This document provides guidance to the Gemini code assistant when working with t
 
 ### Project Structure
 
-- **Runtime Code:** All core runtime logic should be placed within `Assets/_Project/Runtime/`.
+- **Runtime Code:** All core runtime logic should be placed within `Assets/_Project/Scripts/`.
 - **Assembly Definitions:** Keep code within the boundaries of the existing `.asmdef` files. Create new assemblies for new, distinct systems.
 - **Scenes:** All scenes should be located in `Assets/_Project/Scenes/`.
 - **Assets:** Models, materials, and textures should be organized under `Assets/_Project/Models/` and `Assets/_-Project/Materials/`.

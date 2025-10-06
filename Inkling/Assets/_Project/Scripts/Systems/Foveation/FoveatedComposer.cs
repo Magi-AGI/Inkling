@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace Magi.Inkling.Runtime.Systems.Foveation
+namespace Magi.Inkling.Systems.Foveation
 {
     /// <summary>
     /// Composites foveated render layers with proper seam blending.

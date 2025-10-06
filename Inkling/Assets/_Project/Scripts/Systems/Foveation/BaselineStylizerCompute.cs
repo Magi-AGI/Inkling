@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Debug = UnityEngine.Debug;
 
-namespace Magi.Inkling.Runtime.Systems.Foveation
+namespace Magi.Inkling.Systems.Foveation
 {
     /// <summary>
     /// Compute shader-based baseline stylizer for non-ML fallback.

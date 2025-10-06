@@ -168,6 +168,7 @@ MonoBehaviour:
   loResScale: 2
   scenario: test01
   outputFolder: Captures
+  fluidComputeShader: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
 --- !u!1 &57066474
 GameObject:
   m_ObjectHideFlags: 0
@@ -927,7 +928,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 63cefbfa91c7e5844992b184edde2d9b, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Magi.Inkling.Runtime::Magi.Inkling.Runtime.Systems.SimulationLOD0.SimulationRecorder
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Runtime.Systems.SimulationLOD0.SimulationRecorder
   outputFolder: Datasets/Captures
   scenarioName: scene01
   frameIndex: 0
@@ -936,7 +937,7 @@ MonoBehaviour:
   isCapturing: 0
   targetFrameCount: 100
   captureInterval: 0.033
-  simDriver: {fileID: 1299845687}
+  simDriver: {fileID: 0}
   viscosity: 0.01
   vorticity: 2
   dissipation: 0.98
@@ -1059,54 +1060,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
---- !u!1 &1070086887
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1070086888}
-  - component: {fileID: 1070086889}
-  m_Layer: 0
-  m_Name: Inference
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1070086888
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1070086887}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1070086889
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1070086887}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 136125b63260697418d30cc5d6d0a336, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Inkling.Inference::Inkling.Systems.Inference.SentisRunner
-  onnxBytes: {fileID: 4900000, guid: 2fabaf81b1a3f6a48949beaa36437aa2, type: 3}
-  inputChannels: 4
-  outputChannels: 4
-  measureTiming: 1
 --- !u!1 &1076450974
 GameObject:
   m_ObjectHideFlags: 0
@@ -1255,7 +1208,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1299845688}
-  - component: {fileID: 1299845687}
+  - component: {fileID: 1299845689}
   m_Layer: 0
   m_Name: SimulationDriver
   m_TagString: Untagged
@@ -1263,36 +1216,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1299845687
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1299845686}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d1287d2b938b49841921f5d42725fa39, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Magi.Inkling.Runtime::Magi.Inkling.Runtime.Systems.SimulationLOD0.SimDriver
-  fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
-  resolution: 256
-  viscosity: 0.01
-  vorticity: 2
-  dissipation: 0.98
-  velocityDissipation: 0.99
-  timestep: 0.016
-  pressureIterations: 20
-  diffusionIterations: 2
-  autoInject: 1
-  injectionForce: 100
-  densityAmount: 1
-  forceRadius: 20
-  forceStrength: 5
-  injectionColor: {r: 1, g: 1, b: 1, a: 1}
-  displayRenderer: {fileID: 0}
-  displayVelocity: 0
-  measurePerformance: 1
 --- !u!4 &1299845688
 Transform:
   m_ObjectHideFlags: 0
@@ -1308,6 +1231,37 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1299845689
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1299845686}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1287d2b938b49841921f5d42725fa39, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.SimDriver
+  fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
+  resolution: 1024
+  viscosity: 0.0001
+  vorticity: 5
+  dissipation: 0.999
+  velocityDissipation: 0.99
+  timestep: 0.016
+  pressureIterations: 20
+  diffusionIterations: 2
+  useRedBlackSolver: 1
+  autoInject: 0
+  injectionForce: 5000
+  densityAmount: 10
+  forceRadius: 40
+  forceStrength: 100
+  injectionColor: {r: 1, g: 1, b: 1, a: 1}
+  displayRenderer: {fileID: 1485820108}
+  displayVelocity: 0
+  measurePerformance: 1
 --- !u!1 &1314578116
 GameObject:
   m_ObjectHideFlags: 0
@@ -1814,7 +1768,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 94c0d561c9f5e7c4ea5719af2cc26387, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Magi.Inkling.Runtime::Magi.Inkling.Runtime.Dev.TestPatternGenerator
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Runtime.Dev.TestPatternGenerator
   target: {fileID: 8400000, guid: 831ab56c2ef61cc4a8e6fb5c9cf23b3a, type: 2}
   animate: 1
   colorA: {r: 0.1, g: 0.6, b: 1, a: 1}
@@ -2558,7 +2512,6 @@ SceneRoots:
   m_Roots:
   - {fileID: 529788512}
   - {fileID: 1748668266}
-  - {fileID: 1070086888}
   - {fileID: 1107126955}
   - {fileID: 1314578117}
   - {fileID: 1052313593}

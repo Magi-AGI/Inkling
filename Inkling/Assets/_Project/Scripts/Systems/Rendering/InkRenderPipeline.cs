@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace Magi.Inkling.Runtime.Systems.Rendering
+namespace Magi.Inkling.Systems.Rendering
 {
     /// <summary>
     /// Manages the full ink rendering pipeline from simulation to final display.
@@ -11,7 +11,7 @@ namespace Magi.Inkling.Runtime.Systems.Rendering
     {
         [Header("Pipeline Components")]
         [SerializeField] private ComputeShader simulationCompute; // From InkTools
-        // [SerializeField] private Magi.Inkling.Runtime.Systems.Foveation.BaselineStylizerCompute baselineStylizer;
+        // [SerializeField] private Magi.Inkling.Systems.Foveation.BaselineStylizerCompute baselineStylizer;
         [SerializeField] private Material baselineStylizer; // Using material-based stylizer for now
         [SerializeField] private Material gradientRenderMaterial;
 

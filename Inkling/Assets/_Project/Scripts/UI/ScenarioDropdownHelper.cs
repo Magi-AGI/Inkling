@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 
-namespace Magi.Inkling.Runtime.UI
+namespace Magi.Inkling.UI
 {
     /// <summary>
     /// Helper to populate a dropdown with scenario options including colored sprites.

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Unity 6 project (Editor `6000.2.5f1`). Primary code lives under `Assets/_Project/Runtime` with modules:
+- Unity 6 project (Editor `6000.2.5f1`). Primary code lives under `Assets/_Project/Scripts` with modules:
   - `Dev/` (bootstrapping, debug helpers), `Systems/` (Foveation, Rendering, SimulationLOD0), `UI/` (runtime UI).
   - Scenes in `Assets/_Project/Scenes/` (e.g., `Main.unity`).
   - Assets and models in `Assets/_Project/Models/` and `Assets/_Project/Materials/`.
@@ -20,7 +20,7 @@
 ## Coding Style & Naming Conventions
 - C# with 4‑space indentation, Allman braces, nullable where appropriate.
 - Naming: PascalCase for types/methods/properties; camelCase for fields; `[SerializeField] private` for inspector fields; avoid `m_` unless matching existing files.
-- Assembly definitions: keep code within `Magi.Inkling.Runtime` asmdef boundaries; avoid cross‑module leaks.
+- Assembly definitions: keep code within `Magi.Inkling` asmdef boundaries; avoid cross‑module leaks.
 
 ## Testing Guidelines
 - Use Unity Test Framework. Place tests under `Assets/Tests/EditMode` and `Assets/Tests/PlayMode`.
