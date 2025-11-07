@@ -23,7 +23,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Quality Settings")]
         [SerializeField] private FilterMode upsampleFilter = FilterMode.Bilinear;
+#pragma warning disable 0414 // Field assigned but never used - reserved for temporal upsampling feature
         [SerializeField] private float temporalBlend = 0.9f;
+#pragma warning restore 0414
 
         // Render textures for multi-resolution pipeline
         private RenderTexture displayDensity;

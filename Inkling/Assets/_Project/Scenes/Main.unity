@@ -445,6 +445,64 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 220699601}
   m_CullTransparentMesh: 1
+--- !u!1 &273307170
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 273307172}
+  - component: {fileID: 273307171}
+  m_Layer: 0
+  m_Name: Inkling1
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &273307171
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 273307170}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8a6fc1f4b5d0ec34390a649f9e1b6055, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.TexturedInjector
+  simDriver: {fileID: 1299845689}
+  injectionMask: {fileID: 2800000, guid: 5c6ec9fc2fc640f42bec7f06aa71891a, type: 3}
+  maskResolution: 64
+  inkColor: {r: 0, g: 1, b: 1, a: 1}
+  densityMultiplier: 5
+  alphaThreshold: 0.1
+  autonomous: 1
+  moveSpeed: 0.1
+  rotationSpeed: 45
+  movementBounds: {x: 0.9, y: 0.9}
+  injectWhileMoving: 1
+  injectionInterval: 0.033
+  addVelocityTrail: 1
+  velocityScale: 50
+--- !u!4 &273307172
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 273307170}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -9.68741, y: 0, z: -17.78803}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &525871409
 GameObject:
   m_ObjectHideFlags: 0
@@ -1250,17 +1308,21 @@ MonoBehaviour:
   dissipation: 0.999
   velocityDissipation: 0.99
   timestep: 0.016
-  pressureIterations: 20
-  diffusionIterations: 2
+  pressureIterations: 40
+  diffusionIterations: 0
   useRedBlackSolver: 1
   autoInject: 0
-  injectionForce: 5000
+  injectionForce: 100
   densityAmount: 10
   forceRadius: 40
-  forceStrength: 100
+  forceStrength: 50
   injectionColor: {r: 1, g: 1, b: 1, a: 1}
+  currentInkType: 0
   displayRenderer: {fileID: 1485820108}
   displayVelocity: 0
+  useGradientRendering: 1
+  gradientPreset: {fileID: 11400000, guid: 82755fa6fa9f7a84d8c1df4c8cb7e343, type: 2}
+  gradientMaterial: {fileID: 2100000, guid: 8fb7b721f0d7666468899181f1032e28, type: 2}
   measurePerformance: 1
 --- !u!1 &1314578116
 GameObject:
@@ -1756,7 +1818,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1646552707
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2372,7 +2434,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1985421571
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2521,3 +2583,4 @@ SceneRoots:
   - {fileID: 952377854}
   - {fileID: 1646552708}
   - {fileID: 1485820109}
+  - {fileID: 273307172}
