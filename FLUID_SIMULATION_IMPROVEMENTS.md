@@ -2,23 +2,23 @@
 
 Based on comprehensive analysis of ofxFlowTools and sail_redux architectural patterns.
 
-## ✅ IMPLEMENTATION COMPLETE
+## �o. IMPLEMENTATION COMPLETE (Fluid Core)
 
-All planned improvements have been successfully implemented!
+All planned **fluid-simulation** improvements have been successfully implemented in the shared `InkTools` package and are driven from Inkling via `SimDriver`.
 
 ## Current Implementation Status
 
 ### Working Components
-- ✅ Basic Navier-Stokes fluid dynamics implementation
-- ✅ Semi-Lagrangian advection for stability
-- ✅ Jacobi iteration for pressure solving
-- ✅ Vorticity confinement for turbulent flow
-- ✅ Ping-pong buffer management via MagiUnityTools
-- ✅ Mouse/touch input for force injection
-- ✅ **NEW:** Obstacle and boundary handling
-- ✅ **NEW:** Red-Black Gauss-Seidel pressure solver
-- ✅ **NEW:** Multi-resolution rendering pipeline
-- ✅ **NEW:** Optical flow integration support
+- �o. Basic Navier-Stokes fluid dynamics implementation
+- �o. Semi-Lagrangian advection for stability
+- �o. Jacobi iteration for pressure solving
+- �o. Vorticity confinement for turbulent flow
+- �o. Ping-pong buffer management via MagiUnityTools
+- �o. Mouse/touch input for force injection
+- �o. **NEW:** Obstacle and boundary handling
+- �o. **NEW:** Red-Black Gauss-Seidel pressure solver
+- �o. **NEW:** Multi-resolution rendering pipeline (kernels + `MultiResolutionDriver`)
+- �o. **NEW:** Optical flow integration support (kernels in `OpticalFlow.hlsl`)
 
 ### Known Issues
 - Package reference fixed (MagiUnityTools now correctly referenced)
@@ -41,33 +41,33 @@ ifloat inverseSolid = 1.0 - ceil(texture(Obstacle, st).x - 0.5);
 fragColor = Dissipation * texture(Backbuffer, coord) * inverseSolid;
 ```
 
-### 2. Optical Flow Integration ✅ IMPLEMENTED
+### 2. Optical Flow Integration �o. IMPLEMENTED
 Camera-based fluid interaction now available:
-- ✅ Gradient-based optical flow (Lucas-Kanade method)
-- ✅ Horn-Schunck global optical flow
-- ✅ Pyramidal flow for large motions
-- ✅ Phase correlation flow
-- ✅ Video frame difference extraction
-- ✅ Bridge to inject flow into fluid velocity
+- �o. Gradient-based optical flow (Lucas-Kanade method)
+- �o. Horn-Schunck global optical flow
+- �o. Pyramidal flow for large motions
+- �o. Phase correlation flow
+- �o. Video frame difference extraction
+- �o. Bridge to inject flow into fluid velocity
 
-### 3. Improved Pressure Solver ✅ IMPLEMENTED
+### 3. Improved Pressure Solver �o. IMPLEMENTED
 Enhanced pressure projection includes:
-- ✅ Red-Black Gauss-Seidel for 2x faster convergence
-- ✅ Better boundary condition handling
-- ✅ Obstacle-aware pressure solving
-- ✅ No-slip boundary conditions
-- ✅ Configurable solver selection (Jacobi vs Red-Black)
+- �o. Red-Black Gauss-Seidel for 2x faster convergence
+- �o. Better boundary condition handling
+- �o. Obstacle-aware pressure solving
+- �o. No-slip boundary conditions
+- �o. Configurable solver selection (Jacobi vs Red-Black)
 
-### 4. Multi-Resolution Support ✅ IMPLEMENTED
-- ✅ Separate simulation resolution from display resolution
-- ✅ Lower resolution physics, higher resolution rendering
-- ✅ Bilinear and bicubic upsampling
-- ✅ Temporal upsampling with motion compensation
-- ✅ Adaptive resolution based on velocity magnitude
-- ✅ MultiResolutionDriver component for easy configuration
+### 4. Multi-Resolution Support �o. IMPLEMENTED
+- �o. Separate simulation resolution from display resolution
+- �o. Lower resolution physics, higher resolution rendering
+- �o. Bilinear and bicubic upsampling
+- �o. Temporal upsampling with motion compensation
+- �o. Adaptive resolution based on velocity magnitude
+- �o. MultiResolutionDriver component for easy configuration
 - Automatic scaling between resolutions
 
-## Unity Architecture Improvements from sail_redux
+## Unity Architecture Improvements from sail_redux (Planned)
 
 ### 1. Service Architecture Pattern
 
@@ -218,102 +218,6 @@ public class FluidSimulationTests
         _settings = ScriptableObject.CreateInstance<FluidSimulationSettings>();
         _service = Substitute.For<IFluidSimulationService>();
     }
-
-    [Test]
-    public void Initialize_WithValidSettings_ReturnsSuccess()
-    {
-        var result = _service.Initialize(_settings);
-        Assert.IsTrue(result.IsSuccess);
-    }
-
-    [UnityTest]
-    public IEnumerator InjectForce_UpdatesVelocityField() => UniTask.ToCoroutine(async () =>
-    {
-        await _service.Initialize(_settings);
-        var result = _service.InjectForce(Vector2.one * 0.5f, Vector2.up * 10);
-
-        await UniTask.Delay(100);
-
-        var velocityTex = _service.GetVelocityTexture();
-        Assert.IsNotNull(velocityTex);
-    });
 }
 ```
 
-## Compute Shader Optimizations
-
-### 1. Shared Memory Optimization
-Use shared memory for neighbor lookups:
-
-```hlsl
-groupshared ifloat4 tile[10][10]; // 8x8 work + 1 pixel border
-
-[numthreads(8,8,1)]
-void PressureSolve(uint3 id : SV_DispatchThreadID, uint3 tid : SV_GroupThreadID)
-{
-    // Load tile with borders
-    LoadTileWithBorders(tid);
-    GroupMemoryBarrierWithGroupSync();
-
-    // Compute using shared memory
-    ifloat4 neighbors = GatherNeighborsFromTile(tid);
-    // ... pressure solve
-}
-```
-
-### 2. Multi-Pass Optimization
-Split operations for better cache coherence:
-- Pass 1: Calculate divergence
-- Pass 2a: Red cells pressure update
-- Pass 2b: Black cells pressure update
-- Pass 3: Subtract gradient
-
-### 3. Texture Format Optimization
-- Use RGFloat for velocity (2 components)
-- Use RFloat for pressure/divergence (1 component)
-- Use ARGB32 for display only
-
-## Implementation Priority
-
-### Phase 1: Core Improvements ✅
-- [x] Fix package references
-- [x] Verify basic fluid simulation works
-- [x] Document architecture analysis
-
-### Phase 2: Architecture Refactor
-- [ ] Implement service pattern for FluidSimulationService
-- [ ] Create ScriptableObject settings
-- [ ] Add Result pattern for error handling
-- [ ] Implement proper lifecycle management
-
-### Phase 3: Algorithm Enhancements
-- [ ] Add obstacle/boundary support
-- [ ] Implement Red-Black Gauss-Seidel solver
-- [ ] Add optical flow integration
-- [ ] Multi-resolution rendering
-
-### Phase 4: UI and Polish
-- [ ] Implement MVC pattern for UI
-- [ ] Add performance monitoring
-- [ ] Create visual debugging tools
-- [ ] Add comprehensive testing
-
-### Phase 5: Advanced Features
-- [ ] Temperature/buoyancy simulation
-- [ ] Multiple fluid types
-- [ ] 3D fluid simulation support
-- [ ] Network synchronization
-
-## Performance Targets
-
-Based on ofxFlowTools benchmarks:
-- 256x256 simulation: 60+ FPS on integrated graphics
-- 512x512 simulation: 60+ FPS on discrete GPU
-- 1024x1024 simulation: 30+ FPS on high-end GPU
-
-## References
-
-- **ofxFlowTools**: Core fluid dynamics algorithms, shader techniques
-- **sail_redux**: Unity architecture patterns, service design
-- **Stable Fluids** (Jos Stam, 1999): Mathematical foundation
-- **GPU Gems 3, Chapter 38**: GPU implementation details

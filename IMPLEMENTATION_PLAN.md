@@ -426,8 +426,8 @@ This section captures the exact steps to get a stable, performant LOD0 fluid loo
 
 5) Sentis/ONNX (Keep Simple for Now) ✅ PARTIALLY COMPLETED
 - [ ] Export ONNX at opset 13; keep `.onnx` + `.onnx.bytes` (Unity imports `.bytes` as TextAsset).
-- [x] SentisRunner implemented with TextAsset .onnx.bytes loading support.
-- [x] Unity.Sentis added to assembly references.
+- [ ] SentisRunner (runtime) with TextAsset .onnx.bytes loading support.
+- [x] Unity.Sentis added to assembly references (via `Magi.Inkling.asmdef` version defines).
 
 6) Perf & Overlay
 - Add Stopwatches around sim/infer/compose; show timings in `DevOverlay` and log averages every ~120 frames.
@@ -504,8 +504,8 @@ Create a test scene demonstrating material interactions:
 
 ### Week 3: ML Integration
 - [ ] Train first U-Net model (Python side)
-- [ ] Export to ONNX and test in Unity
-- [x] Implement Sentis inference pipeline (SentisRunner ready)
+- [ ] Export to ONNX and verify in Unity (Sentis)
+- [ ] Implement Sentis inference pipeline (SentisRunner + inference scene)
 - [ ] Compare ML vs baseline performance
 
 ### Week 4: Optimization & Polish
@@ -556,8 +556,63 @@ Create a test scene demonstrating material interactions:
 6. **A/B Testing** - Compare ML inference vs baseline shader performance
 
 ## Integration Points
+ 
+  - **InkTools**: Reference implementation for fluid dynamics
+  - **InkModel**: Training pipeline for stylization models
+  - **MagiUnityTools**: Use singleton patterns and performance utilities
+  - **MagiUnityDependencyManager**: Configure dependencies via depfile.yaml
 
-- **InkTools**: Reference implementation for fluid dynamics
-- **InkModel**: Training pipeline for stylization models
-- **MagiUnityTools**: Use singleton patterns and performance utilities
-- **MagiUnityDependencyManager**: Configure dependencies via depfile.yaml
+## Next Actions (Updated)
+
+1. �o. Unity 6.2 project structure created (`Inkling/Inkling`)
+2. �o. Bootstrap component wires `SimDriver` + `SimulationRecorder` into `Main.unity`
+3. �o. Real fluid simulation implemented in `InkTools` (`Fluids.compute`) and driven by `SimDriver`
+4. �o. Baseline stylization and gradient rendering integrated (Tier 0)
+5. [ ] ML inference runtime (`SentisRunner` + inference scene)
+6. [ ] Foveation and multi-resolution wired into the main scene (`FoveatedComposer`, `MultiResolutionDriver`)
+7. [ ] Particle-based density path re-enabled and validated
+8. [ ] Capture UI and DevOverlay/perf wiring completed
+
+## Current State & Immediate Next Steps (Updated)
+
+### What's Working:
+- Test pattern generation and display
+- **GPU fluid simulation** via `SimDriver` + `Fluids.compute` (InkTools)
+- `SimulationRecorder` with manual capture control and JSON metadata
+- On-screen performance metrics in `SimDriver.OnGUI` (per-kernel timings)
+- New Input System integration
+- Package structure with InkTools and MagiUnityTools
+- UI helpers (`ScenarioDropdownHelper`, `ElementSpriteGenerator`) ready for use
+
+### What Needs Implementation (Now):
+1. **ML Inference Runtime**
+   - Implement `SentisRunner` in `Assets/_Project/Scripts/Systems/Inference/` to:
+     - Load `unet_fp32.onnx.bytes` as a Sentis model
+     - Run inference on hi/lo-res simulation textures
+     - Output a stylized RenderTexture compatible with the existing gradient pipeline
+   - Create an “ML Inference Test” scene per `Inkling/Inkling/Assets/UNITY_SCENE_SETUP.md`.
+
+2. **Foveated Rendering Integration**
+   - Fix the `FoveatedComposer` component reference in `Main.unity` (old assembly name → `Magi.Inkling.Systems.Foveation.FoveatedComposer`).
+   - Optionally add `MultiResolutionDriver` to:
+     - Upsample sim density/velocity to a higher-resolution display RT
+     - Provide center/periphery textures to `FoveatedComposer` for blending.
+
+3. **Particle-Based Density Path**
+   - Re-enable and debug the particle kernels in `SimDriver.SimulateFrame()` (currently commented as “Debug and re-enable particle simulation”).
+   - Update `StampDensity`/injection paths to write into the particle buffer where appropriate and validate behavior vs texture-based density.
+
+4. **Capture UI & Scenario Flow**
+   - Add a small capture control panel UI using:
+     - `ScenarioDropdownHelper` for scenario selection
+     - `ElementSpriteGenerator` for colored icons
+   - Expose controls for frame count, start/stop capture, and progress display, driving `SimulationRecorder`’s batch APIs.
+
+5. **DevOverlay & Perf Plumbing**
+   - Route `SimDriver`’s timing data (and future inference/compose timings) into `DevOverlay` instead of relying solely on `OnGUI` labels inside `SimDriver`.
+   - Keep a simple toggle to hide/show the overlay in production builds.
+
+6. **A/B Testing and Quality Tiers**
+   - Once ML inference is working, add:
+     - A/B comparison scene: baseline stylizer vs ML stylizer
+     - Simple quality tier toggles (Tier 0 baseline-only, Tier 1 hybrid, Tier 2 full ML + foveation) as described in the README.

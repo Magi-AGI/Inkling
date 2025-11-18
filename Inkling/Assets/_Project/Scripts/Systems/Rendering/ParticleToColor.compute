@@ -1,0 +1,153 @@
+// Renders iparticle buffers to an RGBA texture using simple per-ink gradients.
+// This is a first-pass renderer; lifetime-aware gradients can be wired by
+// adjusting how t is computed per channel.
+
+#pragma kernel ParticleToColor
+
+// Match iparticle layout from Magi.InkTools.Simulation.iparticle
+struct iparticle
+{
+    float fire;
+    float water;
+    float plantSeeded;
+    float plantGrown;
+    float steam;
+    float glitter;
+    float blackBody;
+    float electricitySeeded;
+    float electricityGrown;
+    float ice;
+
+    float red;
+    float green;
+    float blue;
+    float alpha;
+};
+
+StructuredBuffer<iparticle> _ParticlesRead;
+RWTexture2D<float4> _Output;
+
+// Gradient textures for core ink types
+Texture2D _FireGradientTex;
+Texture2D _WaterGradientTex;
+Texture2D _MetalGradientTex;
+Texture2D _ElectricityGradientTex;
+Texture2D _IceGradientTex;
+Texture2D _PlantGradientTex;
+Texture2D _SteamGradientTex;
+Texture2D _DustGradientTex;
+
+SamplerState samplerLinearClamp;
+
+int _Resolution;
+float _GlobalSaturation;
+float _GlobalBrightness;
+
+[numthreads(8, 8, 1)]
+void ParticleToColor(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Resolution || id.y >= _Resolution)
+        return;
+
+    uint index = id.y * _Resolution + id.x;
+    iparticle p = _ParticlesRead[index];
+
+    float3 color = 0;
+    float alpha = 0;
+
+    // Helper to sample a 1D gradient texture at t in [0,1]
+    float2 uv;
+    float3 sampleCol;
+
+    // Fire
+    if (p.fire > 0.0)
+    {
+        uv = float2(saturate(p.fire), 0.5);
+        sampleCol = _FireGradientTex.Sample(samplerLinearClamp, uv).rgb;
+        color += sampleCol;
+        alpha = max(alpha, p.fire);
+    }
+
+    // Water
+    if (p.water > 0.0)
+    {
+        uv = float2(saturate(p.water), 0.5);
+        sampleCol = _WaterGradientTex.Sample(samplerLinearClamp, uv).rgb;
+        color += sampleCol;
+        alpha = max(alpha, p.water);
+    }
+
+    // Ice
+    if (p.ice > 0.0)
+    {
+        uv = float2(saturate(p.ice), 0.5);
+        sampleCol = _IceGradientTex.Sample(samplerLinearClamp, uv).rgb;
+        color += sampleCol;
+        alpha = max(alpha, p.ice);
+    }
+
+    // Plant (seeded/grown combined for now)
+    float plant = max(p.plantSeeded, p.plantGrown);
+    if (plant > 0.0)
+    {
+        uv = float2(saturate(plant), 0.5);
+        sampleCol = _PlantGradientTex.Sample(samplerLinearClamp, uv).rgb;
+        color += sampleCol;
+        alpha = max(alpha, plant);
+    }
+
+    // Steam
+    if (p.steam > 0.0)
+    {
+        uv = float2(saturate(p.steam), 0.5);
+        sampleCol = _SteamGradientTex.Sample(samplerLinearClamp, uv).rgb;
+        color += sampleCol;
+        alpha = max(alpha, p.steam);
+    }
+
+    // Electricity (seeded/grown)
+    float electricity = max(p.electricitySeeded, p.electricityGrown);
+    if (electricity > 0.0)
+    {
+        uv = float2(saturate(electricity), 0.5);
+        sampleCol = _ElectricityGradientTex.Sample(samplerLinearClamp, uv).rgb;
+        color += sampleCol;
+        alpha = max(alpha, electricity);
+    }
+
+    // Glitter (for now, treat as dust)
+    float dust = max(p.glitter, 0.0);
+    if (dust > 0.0)
+    {
+        uv = float2(saturate(dust), 0.5);
+        sampleCol = _DustGradientTex.Sample(samplerLinearClamp, uv).rgb;
+        color += sampleCol;
+        alpha = max(alpha, dust);
+    }
+
+    // Black body darkens the color
+    if (p.blackBody > 0.0)
+    {
+        float darken = 1.0 - saturate(p.blackBody);
+        color *= darken;
+        alpha = max(alpha, p.blackBody);
+    }
+
+    // Apply global saturation/brightness
+    float3 hsv;
+    // Approximate RGB->HSV (cheap)
+    float maxc = max(color.r, max(color.g, color.b));
+    float minc = min(color.r, min(color.g, color.b));
+    float delta = maxc - minc;
+    float v = maxc;
+    float s = (maxc > 0.0) ? (delta / maxc) : 0.0;
+    s *= _GlobalSaturation;
+    v *= _GlobalBrightness;
+
+    // Reconstruct RGB with modified s,v but original hue is approximated by normalizing color
+    float3 dir = (maxc > 0.0) ? (color / maxc) : float3(1, 1, 1);
+    color = dir * v * s;
+
+    _Output[int2(id.xy)] = float4(color, saturate(alpha));
+}
+

@@ -19,6 +19,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private Color inkColorOverride = Color.cyan;  // Only used if useTextureColors = false
         [SerializeField] private float densityMultiplier = 1.0f;  // Subtle density for fast dissipation
         [Range(0, 1)] [SerializeField] private float alphaThreshold = 0.1f;
+        [Range(0, 1)] [SerializeField] private float blackLuminanceThreshold = 0.2f;
 
         [Header("Movement")]
         [SerializeField] private bool autonomous = true;
@@ -43,6 +44,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private bool maskValid = false;
         private int actualMaskWidth = 0;   // Actual texture width
         private int actualMaskHeight = 0;  // Actual texture height
+        private Texture2D stampTexture;
 
         private void Start()
         {
@@ -92,6 +94,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
                 // Update maskResolution to match actual texture (for display purposes)
                 maskResolution = Mathf.Min(actualMaskWidth, actualMaskHeight);
+
+                // Allocate or resize reusable stamp texture
+                if (stampTexture == null ||
+                    stampTexture.width != actualMaskWidth ||
+                    stampTexture.height != actualMaskHeight)
+                {
+                    if (stampTexture != null)
+                    {
+                        Destroy(stampTexture);
+                    }
+
+                    stampTexture = new Texture2D(actualMaskWidth, actualMaskHeight, TextureFormat.RGBAHalf, false);
+                }
 
                 maskValid = true;
                 Debug.Log($"[TexturedInjector] Mask '{injectionMask.name}' loaded successfully ({actualMaskWidth}x{actualMaskHeight})");
@@ -226,8 +241,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 return;
             }
 
-            // Create stamped texture with color overrides applied if needed
-            Texture2D stampTexture = new Texture2D(actualMaskWidth, actualMaskHeight, TextureFormat.RGBAHalf, false);
+            if (stampTexture == null)
+            {
+                if (Time.frameCount % 120 == 0)
+                    Debug.LogWarning("[TexturedInjector] stampTexture was null during InjectAtPosition; re-validating mask.");
+                ValidateMask();
+                if (stampTexture == null)
+                {
+                    return;
+                }
+            }
+
+            // Create stamped texture with color overrides applied if needed (reusing the same Texture2D)
+            // Only non-black pixels are written here; black pixels are handled via ClearDensityWithMask
             Color[] stampPixels = new Color[cachedMaskPixels.Length];
 
             for (int i = 0; i < cachedMaskPixels.Length; i++)
@@ -241,7 +267,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     continue;
                 }
 
-                // Apply density multiplier and color override if needed
+                // Classify black vs colored using luminance
+                float luminance = 0.299f * maskColor.r + 0.587f * maskColor.g + 0.114f * maskColor.b;
+                bool isBlack = luminance < blackLuminanceThreshold;
+
+                if (isBlack)
+                {
+                    // Black pixels are not injected as density; they are used only for clearing
+                    stampPixels[i] = Color.clear;
+                    continue;
+                }
+
+                // Apply density multiplier and color override if needed for colored pixels
                 if (useTextureColors)
                 {
                     stampPixels[i] = maskColor * densityMultiplier;
@@ -255,8 +292,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             stampTexture.SetPixels(stampPixels);
             stampTexture.Apply();
 
-            // StampDensity now handles both black pixels (->bb channel) and colored pixels (->f/w/i channels)
+            // GPU stamp colored portions into the RT-based density field
             simDriver.StampDensity(uvPosition, stampTexture);
+
+            // Use the original mask to clear density in black regions so black inks
+            // appear solid and do not advect/linger
+            simDriver.ClearDensityWithMask(uvPosition, injectionMask, blackLuminanceThreshold);
 
             // Inject velocity if moving
             if (addVelocityTrail)
@@ -267,9 +308,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     simDriver.InjectForce(uvPosition, movementVelocity);
                 }
             }
-
-            // Cleanup
-            Destroy(stampTexture);
 
             // Debug log occasionally
             if (Time.frameCount % 120 == 0)
@@ -300,6 +338,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public void TriggerInjection()
         {
             InjectAtPosition(position);
+        }
+
+        private void OnDestroy()
+        {
+            if (stampTexture != null)
+            {
+                Destroy(stampTexture);
+                stampTexture = null;
+            }
         }
 
         private void OnDrawGizmos()
