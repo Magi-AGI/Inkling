@@ -1324,17 +1324,14 @@ MonoBehaviour:
   displayVelocity: 0
   useParticleDisplay: 0
   useCpuCreatureComposite: 0
-  useGradientRendering: 1
+  useGradientRendering: 0
   gradientPreset: {fileID: 11400000, guid: 82755fa6fa9f7a84d8c1df4c8cb7e343, type: 2}
   gradientMaterial: {fileID: 2100000, guid: 8fb7b721f0d7666468899181f1032e28, type: 2}
-  measurePerformance: 1
-  densityStampShader: {fileID: 4800000, guid: 8a8122c28f2b84949a817112ae252002, type: 3}
+  measurePerformance: 0
+  densityStampShader: {fileID: 0}
   useParticleSimulation: 1
-  useParticleAdvection: 0
-  useParticleDissipation: 1
-  maxParticleSimResolution: 512
-  particleToColorCompute: {fileID: 0}
-  useParticleRenderPass: 0
+  particleToColorCompute: {fileID: 7200000, guid: 0334aaf5539bd7649886292613ec7ad8, type: 3}
+  useParticleRenderPass: 1
 --- !u!1 &1314578116
 GameObject:
   m_ObjectHideFlags: 0

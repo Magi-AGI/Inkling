@@ -83,9 +83,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Creature / Stamp Rendering")]
         [SerializeField] private Shader densityStampShader;
-        [Header("Particle Rendering")]
-        [SerializeField] private ComputeShader particleToColorCompute;
-        [SerializeField] private bool useParticleRenderPass = false;
+
+        [Header("Particle Simulation")]
+        [SerializeField] private bool useParticleSimulation = false;
+        [Tooltip("When enabled (with useParticleSimulation), runs AdvectParticles each frame.")]
+        [SerializeField] private bool useParticleAdvection = false;
+        [Tooltip("When enabled (with useParticleSimulation), runs DissipateParticles each frame.")]
+        [SerializeField] private bool useParticleDissipation = true;
+        [Tooltip("Safety cap: particle kernels are skipped when resolution exceeds this value.")]
+        [SerializeField] private int maxParticleSimResolution = 512;
+
+        // Debug flags
+        private bool hasLoggedBlackBodyStamp = false;
 
         // Render textures (using PingPongRenderTexture from MagiUnityTools)
         private PingPongRenderTexture velocity;
@@ -105,7 +114,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         // Materials
         private Material densityStampMaterial;
-        private Magi.Inkling.Systems.Rendering.InkGradientPreset.GradientTextures particleGradientTextures;
+        [Header("Particle Rendering")]
+        [SerializeField] private ComputeShader particleToColorCompute;
+        [SerializeField] private bool useParticleRenderPass = false;
 
         // Kernel indices
         private int kernelAdvection;
@@ -135,7 +146,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private void Start()
         {
             InitializeSimulation();
-            InitializeParticleGradients();
         }
 
         private void EnsureStampMaterial()
@@ -158,31 +168,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             densityStampMaterial = new Material(shader);
         }
 
-        private void InitializeParticleGradients()
-        {
-            if (gradientPreset == null)
-            {
-                return;
-            }
 
-            // Generate gradient textures once for particle rendering
-            particleGradientTextures = gradientPreset.GenerateTextures();
-
-            if (particleToColorCompute != null)
-            {
-                particleToColorCompute.SetTexture(0, "_FireGradientTex", particleGradientTextures.fireTexture);
-                particleToColorCompute.SetTexture(0, "_WaterGradientTex", particleGradientTextures.waterTexture);
-                particleToColorCompute.SetTexture(0, "_MetalGradientTex", particleGradientTextures.metalTexture);
-                particleToColorCompute.SetTexture(0, "_ElectricityGradientTex", particleGradientTextures.electricityTexture);
-                particleToColorCompute.SetTexture(0, "_IceGradientTex", particleGradientTextures.iceTexture);
-                particleToColorCompute.SetTexture(0, "_PlantGradientTex", particleGradientTextures.plantTexture);
-                particleToColorCompute.SetTexture(0, "_SteamGradientTex", particleGradientTextures.steamTexture);
-                particleToColorCompute.SetTexture(0, "_DustGradientTex", particleGradientTextures.dustTexture);
-
-                particleToColorCompute.SetFloat("_GlobalSaturation", gradientPreset.globalSaturation);
-                particleToColorCompute.SetFloat("_GlobalBrightness", gradientPreset.globalBrightness);
-            }
-        }
 
         private void InitializeSimulation()
         {
@@ -279,8 +265,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             Debug.Log($"[SimDriver] Allocated particle buffer: {particleCount} particles, stride {stride} bytes");
 
-            // Display output
+            // Display output (used as UAV by particle render pass)
             displayRT = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32);
+            displayRT.enableRandomWrite = true;
+            displayRT.filterMode = FilterMode.Bilinear;
+            displayRT.wrapMode = TextureWrapMode.Clamp;
             displayRT.name = "DisplayRT";
             displayRT.Create();
         }
@@ -471,6 +460,38 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 fluidCompute.SetFloat("_Dissipation", dissipation);
                 fluidCompute.Dispatch(kernelAdvection, threadGroups, threadGroups, 1);
                 density.Swap();
+            }
+
+            // Advect and dissipate particles (iparticle) if enabled and within safe resolution
+            if (useParticleSimulation && particlesBuffer != null)
+            {
+                if (resolution > maxParticleSimResolution)
+                {
+                    // Skip particle simulation at very high resolutions as a safety measure
+                    if (Time.frameCount % 600 == 0)
+                    {
+                        Debug.LogWarning($"[SimDriver] Particle simulation skipped (resolution {resolution} > maxParticleSimResolution {maxParticleSimResolution}).");
+                    }
+                }
+                else
+                {
+                    if (useParticleAdvection && kernelAdvectParticles != 0)
+                    {
+                        fluidCompute.SetBuffer(kernelAdvectParticles, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                        fluidCompute.SetBuffer(kernelAdvectParticles, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
+                        fluidCompute.SetTexture(kernelAdvectParticles, "_VelocityRead", velocity.Read);
+                        fluidCompute.Dispatch(kernelAdvectParticles, threadGroups, threadGroups, 1);
+                        SwapParticleBuffers();
+                    }
+
+                    if (useParticleDissipation && kernelDissipateParticles != 0)
+                    {
+                        fluidCompute.SetBuffer(kernelDissipateParticles, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                        fluidCompute.SetBuffer(kernelDissipateParticles, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
+                        fluidCompute.Dispatch(kernelDissipateParticles, threadGroups, threadGroups, 1);
+                        SwapParticleBuffers();
+                    }
+                }
             }
 
             if (sw != null) advectionMs = (float)sw.Elapsed.TotalMilliseconds;
@@ -689,6 +710,71 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fluidCompute.SetTexture(kernelAddDensity, "_DensityWrite", density.Write);
             fluidCompute.Dispatch(kernelAddDensity, threadGroups, threadGroups, 1);
             density.Swap();
+
+            // Mirror this injection into the particle buffer so iparticle remains authoritative.
+            InjectParticlesAtPoint(position, color);
+        }
+
+        /// <summary>
+        /// CPU helper: inject ink at a single UV position into the iparticle buffer
+        /// using a simple circular radius and mapping RGB to fire/water/ice channels.
+        /// </summary>
+        private void InjectParticlesAtPoint(Vector2 position, Color color)
+        {
+            if (particlesBuffer == null)
+            {
+                return;
+            }
+
+            int radiusPixels = Mathf.RoundToInt(forceRadius);
+            if (radiusPixels <= 0)
+            {
+                return;
+            }
+
+            int centerX = Mathf.RoundToInt(position.x * resolution);
+            int centerY = Mathf.RoundToInt(position.y * resolution);
+
+            int particleCount = resolution * resolution;
+            iparticle[] particles = new iparticle[particleCount];
+            particlesBuffer[0].GetData(particles);
+
+            float rMul = color.r * densityAmount;
+            float gMul = color.g * densityAmount;
+            float bMul = color.b * densityAmount;
+
+            int minX = Mathf.Max(0, centerX - radiusPixels);
+            int maxX = Mathf.Min(resolution - 1, centerX + radiusPixels);
+            int minY = Mathf.Max(0, centerY - radiusPixels);
+            int maxY = Mathf.Min(resolution - 1, centerY + radiusPixels);
+
+            float radiusSqr = radiusPixels * radiusPixels;
+
+            for (int y = minY; y <= maxY; y++)
+            {
+                int dy = y - centerY;
+                for (int x = minX; x <= maxX; x++)
+                {
+                    int dx = x - centerX;
+                    if (dx * dx + dy * dy > radiusSqr)
+                    {
+                        continue;
+                    }
+
+                    int idx = y * resolution + x;
+
+                    // Add ink proportionally; this mirrors the RT-based injection in a simple way.
+                    particles[idx].fire += (half)rMul;
+                    particles[idx].water += (half)gMul;
+                    particles[idx].ice  += (half)bMul;
+                }
+            }
+
+            // Keep both ping-pong buffers in sync while particle kernels are disabled.
+            for (int i = 0; i < particlesBuffer.Length; i++)
+            {
+                particlesBuffer[i].SetData(particles);
+            }
         }
 
         /// <summary>
@@ -735,6 +821,69 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             Graphics.Blit(tmp, target, densityStampMaterial);
 
             RenderTexture.ReleaseTemporary(tmp);
+        }
+
+        /// <summary>
+        /// CPU path: stamp a texture into the particle buffer (iparticle) so that
+        /// multi-ink interactions can be driven from the canonical particle state.
+        /// This is a transitional implementation and may be replaced by a GPU kernel.
+        /// </summary>
+        public void StampParticles(Vector2 uvPosition, Texture2D stamp)
+        {
+            if (particlesBuffer == null || stamp == null) return;
+
+            int stampWidth = stamp.width;
+            int stampHeight = stamp.height;
+            Color[] stampPixels = stamp.GetPixels();
+
+            int centerX = Mathf.RoundToInt(uvPosition.x * resolution);
+            int centerY = Mathf.RoundToInt(uvPosition.y * resolution);
+            int startX = centerX - stampWidth / 2;
+            int startY = centerY - stampHeight / 2;
+
+            int particleCount = resolution * resolution;
+            iparticle[] particles = new iparticle[particleCount];
+
+            // Read from first buffer; we will write back to all buffers to keep them in sync.
+            particlesBuffer[0].GetData(particles);
+
+            for (int y = 0; y < stampHeight; y++)
+            {
+                for (int x = 0; x < stampWidth; x++)
+                {
+                    int targetX = startX + x;
+                    int targetY = startY + y;
+
+                    if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution)
+                        continue;
+
+                    Color stampColor = stampPixels[y * stampWidth + x];
+                    if (stampColor.a < 0.01f)
+                        continue;
+
+                    int targetIdx = targetY * resolution + targetX;
+
+                    // Map RGB channels into iparticle ink channels.
+                    // Assumes stampColor already includes any density multiplier.
+                    particles[targetIdx].fire += (half)(stampColor.r * stampColor.a);
+                    particles[targetIdx].water += (half)(stampColor.g * stampColor.a);
+                    particles[targetIdx].ice  += (half)(stampColor.b * stampColor.a);
+                }
+            }
+
+            // Write back to all ping-pong buffers to keep them identical until
+            // particle kernels are re-enabled.
+            for (int i = 0; i < particlesBuffer.Length; i++)
+            {
+                particlesBuffer[i].SetData(particles);
+            }
+        }
+
+        private void SwapParticleBuffers()
+        {
+            int temp = particleReadIndex;
+            particleReadIndex = particleWriteIndex;
+            particleWriteIndex = temp;
         }
 
         /// <summary>
@@ -796,6 +945,103 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 Graphics.Blit(tmpObs, obstacles, densityStampMaterial);
 
                 RenderTexture.ReleaseTemporary(tmpObs);
+            }
+        }
+
+        /// <summary>
+        /// CPU path: stamp black/body ink into the iparticle buffer based on a mask texture.
+        /// Black pixels (by luminance) are written into the blackBody channel so that
+        /// gradient-based rendering can treat them as an overriding ink layer.
+        /// </summary>
+        /// <param name="uvPosition">Center position in UV space (0-1)</param>
+        /// <param name="mask">Source mask texture</param>
+        /// <param name="alphaThreshold">Minimum alpha for a pixel to be considered</param>
+        /// <param name="blackLuminanceThreshold">Luminance threshold for "black" classification</param>
+        public void StampBlackBody(Vector2 uvPosition, Texture2D mask, float alphaThreshold, float blackLuminanceThreshold)
+        {
+            if (particlesBuffer == null)
+            {
+                if (Time.frameCount % 120 == 0)
+                {
+                    Debug.LogWarning("[SimDriver] StampBlackBody aborted: particlesBuffer is null.");
+                }
+                return;
+            }
+
+            if (mask == null)
+            {
+                if (Time.frameCount % 120 == 0)
+                {
+                    Debug.LogWarning("[SimDriver] StampBlackBody aborted: mask is null.");
+                }
+                return;
+            }
+
+            int maskWidth = mask.width;
+            int maskHeight = mask.height;
+            Color[] maskPixels = mask.GetPixels();
+
+            int centerX = Mathf.RoundToInt(uvPosition.x * resolution);
+            int centerY = Mathf.RoundToInt(uvPosition.y * resolution);
+            int startX = centerX - maskWidth / 2;
+            int startY = centerY - maskHeight / 2;
+
+            int particleCount = resolution * resolution;
+            iparticle[] particles = new iparticle[particleCount];
+
+            // Read from first buffer; write back to all to keep them in sync
+            particlesBuffer[0].GetData(particles);
+
+            int blackPixelCount = 0;
+            float maxBlackAlpha = 0f;
+
+            for (int y = 0; y < maskHeight; y++)
+            {
+                for (int x = 0; x < maskWidth; x++)
+                {
+                    int targetX = startX + x;
+                    int targetY = startY + y;
+
+                    if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution)
+                        continue;
+
+                    Color maskColor = maskPixels[y * maskWidth + x];
+                    if (maskColor.a < alphaThreshold)
+                        continue;
+
+                    float luminance = 0.299f * maskColor.r + 0.587f * maskColor.g + 0.114f * maskColor.b;
+                    bool isBlack = luminance < blackLuminanceThreshold;
+                    if (!isBlack)
+                        continue;
+
+                    int targetIdx = targetY * resolution + targetX;
+
+                    // Mark black body presence; clamp to 1.0
+                    float current = (float)particles[targetIdx].blackBody;
+                    float updated = Mathf.Clamp01(current + maskColor.a);
+                    particles[targetIdx].blackBody = (half)updated;
+
+                    blackPixelCount++;
+                    if (maskColor.a > maxBlackAlpha)
+                    {
+                        maxBlackAlpha = maskColor.a;
+                    }
+                }
+            }
+
+            for (int i = 0; i < particlesBuffer.Length; i++)
+            {
+                particlesBuffer[i].SetData(particles);
+            }
+
+            // Debug log the first time we stamp black body ink,
+            // so we can verify the CPU path is actually finding black pixels.
+            if (!hasLoggedBlackBodyStamp)
+            {
+                int sampleIdx = Mathf.Clamp(centerY * resolution + centerX, 0, particleCount - 1);
+                float sampleBlack = (float)particles[sampleIdx].blackBody;
+                Debug.Log($"[SimDriver] StampBlackBody FIRST HIT at UV {uvPosition:F3}: blackPixels={blackPixelCount}, maxAlpha={maxBlackAlpha:F3}, sampleCenterBlack={sampleBlack:F3}");
+                hasLoggedBlackBodyStamp = true;
             }
         }
 
@@ -1033,6 +1279,35 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 // Apply gradient preset to material
                 gradientPreset.ApplyToMaterial(gradientMaterial);
 
+                // Drive the _SHOWCHANNELS_ON keyword from the _ShowChannels float property
+                // so the shader can switch between combined view and raw channel debug.
+                float showChannels = gradientMaterial.HasProperty("_ShowChannels")
+                    ? gradientMaterial.GetFloat("_ShowChannels")
+                    : 0f;
+
+                if (showChannels > 0.5f)
+                {
+                    gradientMaterial.EnableKeyword("_SHOWCHANNELS_ON");
+                }
+                else
+                {
+                    gradientMaterial.DisableKeyword("_SHOWCHANNELS_ON");
+                }
+
+                // Debug: log gradient usage and debug keyword occasionally
+                if (Time.frameCount % 120 == 0)
+                {
+                    bool showChannelsKeyword = gradientMaterial.IsKeywordEnabled("_SHOWCHANNELS_ON");
+                    Debug.Log($"[SimDriver] Gradient pass active. useGradientRendering={useGradientRendering}, showChannelsKeyword={showChannelsKeyword}, hasParticles={(particlesBuffer != null)}, particleResolution={resolution}, showChannelsProp={showChannels}");
+                }
+
+                // Provide particle buffer and resolution for direct gradient sampling
+                if (particlesBuffer != null)
+                {
+                    gradientMaterial.SetBuffer("_ParticlesRead", particlesBuffer[particleReadIndex]);
+                    gradientMaterial.SetInt("_ParticleResolution", resolution);
+                }
+
                 // Blit through gradient material
                 Graphics.Blit(sourceTexture, gradientRT, gradientMaterial);
                 Graphics.Blit(gradientRT, displayRT);
@@ -1206,11 +1481,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                   densityStampMaterial = null;
               }
 
-              if (particleGradientTextures != null)
-              {
-                  particleGradientTextures.Dispose();
-                  particleGradientTextures = null;
-              }
         }
 
         private void RenderParticlesToDisplay()
@@ -1222,7 +1492,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             int kernel = particleToColorCompute.FindKernel("ParticleToColor");
 
+            // Ensure brightness is reasonable even if no preset is assigned
+            float brightness = gradientPreset != null ? gradientPreset.globalBrightness : 1.0f;
+
             particleToColorCompute.SetInt("_Resolution", resolution);
+            particleToColorCompute.SetFloat("_GlobalBrightness", brightness);
             particleToColorCompute.SetBuffer(kernel, "_ParticlesRead", particlesBuffer[particleReadIndex]);
             particleToColorCompute.SetTexture(kernel, "_Output", displayRT);
 

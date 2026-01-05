@@ -1,153 +1,85 @@
-// Renders iparticle buffers to an RGBA texture using simple per-ink gradients.
-// This is a first-pass renderer; lifetime-aware gradients can be wired by
-// adjusting how t is computed per channel.
+// Renders iparticle buffers to an RGBA texture encoding per-ink intensities.
+// The final colorization is expected to happen in a separate gradient shader
+// (e.g., InkGradientRenderer), which interprets RGB as fire/water/metal
+// concentrations and samples gradient textures accordingly.
 
 #pragma kernel ParticleToColor
 
-// Match iparticle layout from Magi.InkTools.Simulation.iparticle
-struct iparticle
-{
-    float fire;
-    float water;
-    float plantSeeded;
-    float plantGrown;
-    float steam;
-    float glitter;
-    float blackBody;
-    float electricitySeeded;
-    float electricityGrown;
-    float ice;
-
-    float red;
-    float green;
-    float blue;
-    float alpha;
-};
+// Use the shared type definitions from InkTools (X-macro style) so that
+// iparticle matches exactly between C# and HLSL.
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
 
 StructuredBuffer<iparticle> _ParticlesRead;
 RWTexture2D<float4> _Output;
 
-// Gradient textures for core ink types
-Texture2D _FireGradientTex;
-Texture2D _WaterGradientTex;
-Texture2D _MetalGradientTex;
-Texture2D _ElectricityGradientTex;
-Texture2D _IceGradientTex;
-Texture2D _PlantGradientTex;
-Texture2D _SteamGradientTex;
-Texture2D _DustGradientTex;
-
-SamplerState samplerLinearClamp;
-
 int _Resolution;
-float _GlobalSaturation;
 float _GlobalBrightness;
 
 [numthreads(8, 8, 1)]
 void ParticleToColor(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= _Resolution || id.y >= _Resolution)
+    if ((int)id.x >= _Resolution || (int)id.y >= _Resolution)
         return;
 
-    uint index = id.y * _Resolution + id.x;
+    uint res = (uint)_Resolution;
+    uint index = id.y * res + id.x;
     iparticle p = _ParticlesRead[index];
 
     float3 color = 0;
     float alpha = 0;
 
-    // Helper to sample a 1D gradient texture at t in [0,1]
-    float2 uv;
-    float3 sampleCol;
+    // Fire intensity -> R channel
+    float fireIntensity = max(p.fire, 0.0);
 
-    // Fire
-    if (p.fire > 0.0)
+    // Water intensity -> G channel (includes some plant and steam contribution)
+    float plantSeeded = p.plantSeeded;
+    float plantGrown  = p.plantGrown;
+    float plantTotal  = plantSeeded + plantGrown;
+    float plant       = plantTotal;
+
+    float waterIntensity = max(p.water, 0.0);
+
+    if (plantTotal > 0.0)
     {
-        uv = float2(saturate(p.fire), 0.5);
-        sampleCol = _FireGradientTex.Sample(samplerLinearClamp, uv).rgb;
-        color += sampleCol;
-        alpha = max(alpha, p.fire);
+        // Lifetime proxy: grown fraction modulates contribution
+        float plantLife = saturate(plantGrown / plantTotal);
+        waterIntensity += plant * 0.5 * plantLife;
     }
 
-    // Water
-    if (p.water > 0.0)
+    waterIntensity += max(p.steam, 0.0) * 0.3;
+
+    // Metal/Electric intensity -> B channel (electricity + dust)
+    // Electricity: use seeded vs grown ratio as lifetime proxy for intensity
+    float electricitySeeded = p.electricitySeeded;
+    float electricityGrown  = p.electricityGrown;
+    float electricityTotal  = electricitySeeded + electricityGrown;
+    float electricity       = electricityTotal;
+    float metalIntensity    = 0.0;
+
+    if (electricityTotal > 0.0)
     {
-        uv = float2(saturate(p.water), 0.5);
-        sampleCol = _WaterGradientTex.Sample(samplerLinearClamp, uv).rgb;
-        color += sampleCol;
-        alpha = max(alpha, p.water);
+        float life = saturate(electricityGrown / electricityTotal);
+        metalIntensity += electricity * life;
     }
 
-    // Ice
-    if (p.ice > 0.0)
-    {
-        uv = float2(saturate(p.ice), 0.5);
-        sampleCol = _IceGradientTex.Sample(samplerLinearClamp, uv).rgb;
-        color += sampleCol;
-        alpha = max(alpha, p.ice);
-    }
-
-    // Plant (seeded/grown combined for now)
-    float plant = max(p.plantSeeded, p.plantGrown);
-    if (plant > 0.0)
-    {
-        uv = float2(saturate(plant), 0.5);
-        sampleCol = _PlantGradientTex.Sample(samplerLinearClamp, uv).rgb;
-        color += sampleCol;
-        alpha = max(alpha, plant);
-    }
-
-    // Steam
-    if (p.steam > 0.0)
-    {
-        uv = float2(saturate(p.steam), 0.5);
-        sampleCol = _SteamGradientTex.Sample(samplerLinearClamp, uv).rgb;
-        color += sampleCol;
-        alpha = max(alpha, p.steam);
-    }
-
-    // Electricity (seeded/grown)
-    float electricity = max(p.electricitySeeded, p.electricityGrown);
-    if (electricity > 0.0)
-    {
-        uv = float2(saturate(electricity), 0.5);
-        sampleCol = _ElectricityGradientTex.Sample(samplerLinearClamp, uv).rgb;
-        color += sampleCol;
-        alpha = max(alpha, electricity);
-    }
-
-    // Glitter (for now, treat as dust)
+    // Glitter/dust contributes to metal channel slightly
     float dust = max(p.glitter, 0.0);
-    if (dust > 0.0)
-    {
-        uv = float2(saturate(dust), 0.5);
-        sampleCol = _DustGradientTex.Sample(samplerLinearClamp, uv).rgb;
-        color += sampleCol;
-        alpha = max(alpha, dust);
-    }
+    metalIntensity += dust * 0.3;
 
-    // Black body darkens the color
-    if (p.blackBody > 0.0)
-    {
-        float darken = 1.0 - saturate(p.blackBody);
-        color *= darken;
-        alpha = max(alpha, p.blackBody);
-    }
+    // Pack into RGB: R=fire, G=water, B=metal/electric
+    color.r = fireIntensity;
+    color.g = waterIntensity;
+    color.b = metalIntensity;
 
-    // Apply global saturation/brightness
-    float3 hsv;
-    // Approximate RGB->HSV (cheap)
-    float maxc = max(color.r, max(color.g, color.b));
-    float minc = min(color.r, min(color.g, color.b));
-    float delta = maxc - minc;
-    float v = maxc;
-    float s = (maxc > 0.0) ? (delta / maxc) : 0.0;
-    s *= _GlobalSaturation;
-    v *= _GlobalBrightness;
+    // Black/body intensity from particle
+    float blackIntensity = max(p.blackBody, 0.0);
 
-    // Reconstruct RGB with modified s,v but original hue is approximated by normalizing color
-    float3 dir = (maxc > 0.0) ? (color / maxc) : float3(1, 1, 1);
-    color = dir * v * s;
+    // Alpha carries black/body intensity so the gradient pass can treat it as an override
+    alpha = blackIntensity;
+
+    // Apply simple global brightness scaling
+    color *= _GlobalBrightness;
 
     _Output[int2(id.xy)] = float4(color, saturate(alpha));
 }
-

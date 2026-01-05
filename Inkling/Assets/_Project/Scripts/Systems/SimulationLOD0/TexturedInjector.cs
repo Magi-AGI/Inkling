@@ -45,6 +45,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private int actualMaskWidth = 0;   // Actual texture width
         private int actualMaskHeight = 0;  // Actual texture height
         private Texture2D stampTexture;
+        private bool hasLoggedFirstInjection = false;
 
         private void Start()
         {
@@ -237,14 +238,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (simDriver == null || !maskValid || injectionMask == null)
             {
                 if (Time.frameCount % 120 == 0)
+                {
                     Debug.LogWarning($"[TexturedInjector] InjectAtPosition aborted: simDriver={simDriver != null}, maskValid={maskValid}, mask={injectionMask != null}");
+                }
                 return;
             }
 
             if (stampTexture == null)
             {
                 if (Time.frameCount % 120 == 0)
+                {
                     Debug.LogWarning("[TexturedInjector] stampTexture was null during InjectAtPosition; re-validating mask.");
+                }
                 ValidateMask();
                 if (stampTexture == null)
                 {
@@ -292,12 +297,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             stampTexture.SetPixels(stampPixels);
             stampTexture.Apply();
 
+            if (!hasLoggedFirstInjection)
+            {
+                hasLoggedFirstInjection = true;
+                Debug.Log($"[TexturedInjector] First injection at UV {uvPosition:F3} with mask {actualMaskWidth}x{actualMaskHeight}.");
+            }
+
             // GPU stamp colored portions into the RT-based density field
             simDriver.StampDensity(uvPosition, stampTexture);
 
+            // Also stamp into iparticle buffer so multi-ink interactions are represented
+            // in the canonical particle state.
+            simDriver.StampParticles(uvPosition, stampTexture);
+
             // Use the original mask to clear density in black regions so black inks
-            // appear solid and do not advect/linger
+            // appear solid and do not advect/linger, and to update obstacle map.
             simDriver.ClearDensityWithMask(uvPosition, injectionMask, blackLuminanceThreshold);
+
+            // Stamp black/body ink into the particle buffer so the gradient-based
+            // renderer can treat black as an overriding ink layer.
+            simDriver.StampBlackBody(uvPosition, injectionMask, alphaThreshold, blackLuminanceThreshold);
 
             // Inject velocity if moving
             if (addVelocityTrail)

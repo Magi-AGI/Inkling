@@ -1,0 +1,13 @@
+{
+    "name":  "com.inktools.core",
+    "displayName":  "c o r e",
+    "version":  "0.0.0-dev",
+    "unity":  "6000.2",
+    "description":  "Local package for com.inktools.core",
+    "author":  {
+                   "name":  "Magi-AGI"
+               },
+    "dependencies":  {
+
+                     }
+}

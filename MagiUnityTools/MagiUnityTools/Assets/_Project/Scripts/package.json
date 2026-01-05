@@ -1,0 +1,13 @@
+{
+    "name":  "com.magi.unitytools",
+    "displayName":  "u n i t y t o o l s",
+    "version":  "0.0.0-dev",
+    "unity":  "6000.2",
+    "description":  "Local package for com.magi.unitytools",
+    "author":  {
+                   "name":  "Magi-AGI"
+               },
+    "dependencies":  {
+
+                     }
+}
