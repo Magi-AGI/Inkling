@@ -10,6 +10,16 @@ namespace Magi.Inkling.Systems.Rendering
     [CreateAssetMenu(fileName = "InkGradientPreset", menuName = "Inkling/Ink Gradient Preset")]
     public class InkGradientPreset : ScriptableObject
     {
+        [Header("Override Textures (optional)")]
+        public Texture2D fireGradientTexOverride;
+        public Texture2D waterGradientTexOverride;
+        public Texture2D metalGradientTexOverride;
+        public Texture2D electricityGradientTexOverride;
+        public Texture2D iceGradientTexOverride;
+        public Texture2D plantGradientTexOverride;
+        public Texture2D steamGradientTexOverride;
+        public Texture2D dustGradientTexOverride;
+
         [Header("Fire/Heat")]
         public Gradient fireGradient = CreateFireGradient();
         [Range(0, 3)] public float fireEmission = 2.0f;
@@ -82,7 +92,18 @@ namespace Magi.Inkling.Systems.Rendering
         {
             if (material == null) return;
 
-            var textures = GenerateTextures();
+            const int defaultResolution = 256;
+            var textures = new GradientTextures
+            {
+                fireTexture = fireGradientTexOverride ?? CreateGradientTexture(fireGradient, fireIntensityCurve, defaultResolution),
+                waterTexture = waterGradientTexOverride ?? CreateGradientTexture(waterGradient, waterIntensityCurve, defaultResolution),
+                metalTexture = metalGradientTexOverride ?? CreateGradientTexture(metalGradient, metalIntensityCurve, defaultResolution),
+                electricityTexture = electricityGradientTexOverride ?? CreateGradientTexture(electricityGradient, electricityIntensityCurve, defaultResolution),
+                iceTexture = iceGradientTexOverride ?? CreateGradientTexture(iceGradient, iceIntensityCurve, defaultResolution),
+                plantTexture = plantGradientTexOverride ?? CreateGradientTexture(plantGradient, plantIntensityCurve, defaultResolution),
+                steamTexture = steamGradientTexOverride ?? CreateGradientTexture(steamGradient, steamIntensityCurve, defaultResolution),
+                dustTexture = dustGradientTexOverride ?? CreateGradientTexture(dustGradient, dustIntensityCurve, defaultResolution)
+            };
 
             material.SetTexture("_FireGradientTex", textures.fireTexture);
             material.SetTexture("_WaterGradientTex", textures.waterTexture);

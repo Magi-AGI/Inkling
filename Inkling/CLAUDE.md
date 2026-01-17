@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-**Inkling** is a Unity 6.0 (6000.2.0f1) project featuring real-time 2D fluid simulation with GPU compute shaders and ML-based stylization for mobile platforms. The project implements hierarchical simulation layers with a focus on performance-constrained environments.
+**Inkling** is a Unity 6.0 (6000.3.4f1) project featuring real-time 2D fluid simulation with GPU compute shaders and ML-based stylization for mobile platforms. The project implements hierarchical simulation layers with a focus on performance-constrained environments.
 
 **Technology Stack:**
-- Unity 6000.2.0f1
+- Unity 6000.3.4f1
 - High Definition Render Pipeline (HDRP) 17.2.0
 - Unity Burst + Mathematics for high-performance compute
 - New Input System 1.14.2
@@ -127,7 +127,7 @@ All mouse input must use `Mouse.current` API with null checks.
 
 1. **Open Unity Project:**
    - Open `Inkling/Inkling/` in Unity Hub (nested directory)
-   - Unity 6000.2.0f1 required
+   - Unity 6000.3.4f1 required
 
 2. **Scene Setup:**
    - Main scene: `Assets/_Project/Scenes/Main.unity`

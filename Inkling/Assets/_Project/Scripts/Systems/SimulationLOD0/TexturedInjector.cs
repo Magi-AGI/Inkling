@@ -13,13 +13,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private SimDriver simDriver;
         [SerializeField] private Texture2D injectionMask;
         [SerializeField] private int maskResolution = 64;
+        [Tooltip("Downsample mask to this resolution (square). Keeps injection lightweight and avoids huge masks.")]
+        [SerializeField] private int maskTargetResolution = 64;
 
         [Header("Appearance")]
         [SerializeField] private bool useTextureColors = true;  // Use texture's actual colors instead of override
         [SerializeField] private Color inkColorOverride = Color.cyan;  // Only used if useTextureColors = false
         [SerializeField] private float densityMultiplier = 1.0f;  // Subtle density for fast dissipation
         [Range(0, 1)] [SerializeField] private float alphaThreshold = 0.1f;
-        [Range(0, 1)] [SerializeField] private float blackLuminanceThreshold = 0.2f;
+        [Range(0, 1)] [SerializeField] private float blackLuminanceThreshold = 0.05f;
+        [SerializeField] private bool enableBlackMaskClearing = false; // If false, skip obstacle/black masking to avoid flicker
 
         [Header("Movement")]
         [SerializeField] private bool autonomous = true;
@@ -87,11 +90,47 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 Debug.Log($"[TexturedInjector] Texture '{injectionMask.name}' dimensions: {injectionMask.width}x{injectionMask.height}, " +
                          $"requesting {maskResolution}x{maskResolution}");
 
-                // Use the actual texture dimensions, not maskResolution
+                // Use the actual texture dimensions first
                 actualMaskWidth = injectionMask.width;
                 actualMaskHeight = injectionMask.height;
-
                 cachedMaskPixels = injectionMask.GetPixels(0, 0, actualMaskWidth, actualMaskHeight);
+
+                // Downsample to requested maskTargetResolution to avoid huge stamps (e.g., 512x512 sprites).
+                int targetRes = Mathf.Clamp(maskTargetResolution, 4, 256);
+                if (actualMaskWidth != targetRes || actualMaskHeight != targetRes)
+                {
+                    Color[] downsampled = new Color[targetRes * targetRes];
+                    for (int y = 0; y < targetRes; y++)
+                    {
+                        float v = (y + 0.5f) / targetRes;
+                        float srcY = v * (actualMaskHeight - 1);
+                        int y0 = Mathf.FloorToInt(srcY);
+                        int y1 = Mathf.Min(y0 + 1, actualMaskHeight - 1);
+                        float fy = srcY - y0;
+
+                        for (int x = 0; x < targetRes; x++)
+                        {
+                            float u = (x + 0.5f) / targetRes;
+                            float srcX = u * (actualMaskWidth - 1);
+                            int x0 = Mathf.FloorToInt(srcX);
+                            int x1 = Mathf.Min(x0 + 1, actualMaskWidth - 1);
+                            float fx = srcX - x0;
+
+                            Color c00 = cachedMaskPixels[y0 * actualMaskWidth + x0];
+                            Color c10 = cachedMaskPixels[y0 * actualMaskWidth + x1];
+                            Color c01 = cachedMaskPixels[y1 * actualMaskWidth + x0];
+                            Color c11 = cachedMaskPixels[y1 * actualMaskWidth + x1];
+
+                            Color c0 = Color.Lerp(c00, c10, fx);
+                            Color c1 = Color.Lerp(c01, c11, fx);
+                            downsampled[y * targetRes + x] = Color.Lerp(c0, c1, fy);
+                        }
+                    }
+
+                    cachedMaskPixels = downsampled;
+                    actualMaskWidth = targetRes;
+                    actualMaskHeight = targetRes;
+                }
 
                 // Update maskResolution to match actual texture (for display purposes)
                 maskResolution = Mathf.Min(actualMaskWidth, actualMaskHeight);
@@ -286,11 +325,20 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 // Apply density multiplier and color override if needed for colored pixels
                 if (useTextureColors)
                 {
-                    stampPixels[i] = maskColor * densityMultiplier;
+                    Color c = maskColor * densityMultiplier;
+                    c.r = Mathf.Min(c.r, 1f);
+                    c.g = Mathf.Min(c.g, 1f);
+                    c.b = Mathf.Min(c.b, 1f);
+                    stampPixels[i] = c;
                 }
                 else
                 {
-                    stampPixels[i] = inkColorOverride * maskColor.a * densityMultiplier;
+                    Color c = inkColorOverride * (maskColor.a * densityMultiplier);
+                    c.r = Mathf.Min(c.r, 1f);
+                    c.g = Mathf.Min(c.g, 1f);
+                    c.b = Mathf.Min(c.b, 1f);
+                    c.a = Mathf.Min(c.a, 1f);
+                    stampPixels[i] = c;
                 }
             }
 
@@ -310,13 +358,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // in the canonical particle state.
             simDriver.StampParticles(uvPosition, stampTexture);
 
-            // Use the original mask to clear density in black regions so black inks
-            // appear solid and do not advect/linger, and to update obstacle map.
-            simDriver.ClearDensityWithMask(uvPosition, injectionMask, blackLuminanceThreshold);
+            if (enableBlackMaskClearing)
+            {
+                // Use the original mask to clear density in black regions so black inks
+                // appear solid and do not advect/linger, and to update obstacle map.
+                simDriver.ClearDensityWithMask(uvPosition, injectionMask, blackLuminanceThreshold);
 
-            // Stamp black/body ink into the particle buffer so the gradient-based
-            // renderer can treat black as an overriding ink layer.
-            simDriver.StampBlackBody(uvPosition, injectionMask, alphaThreshold, blackLuminanceThreshold);
+                // Stamp black/body ink into the particle buffer so the gradient-based
+                // renderer can treat black as an overriding ink layer.
+                simDriver.StampBlackBody(uvPosition, injectionMask, alphaThreshold, blackLuminanceThreshold);
+            }
 
             // Inject velocity if moving
             if (addVelocityTrail)
