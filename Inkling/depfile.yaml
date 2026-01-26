@@ -3,14 +3,14 @@ version: 1.0
 
 project:
   name: Inkling
-  unityVersion: 6000.3.4f1
+  unityVersion: 6000.3.5f1
   targetPlatforms:
     - iOS
     - Android
     - StandaloneWindows64
 
 unity:
-  editor: 6000.3.4f1
+  editor: 6000.3.5f1
   rp: hdrp
   rp_version: 17.3.0
 
@@ -35,9 +35,9 @@ packages:
     path: ../../MagiUnityTools/MagiUnityTools/Assets/_Project/Scripts
     source: local
 
-  # Unity packages (versions matched to Unity 6000.3.4f1)
+  # Unity packages (versions matched to Unity 6000.3.5f1)
   - name: com.unity.inputsystem
-    version: 1.17.0
+    version: 1.18.0
     source: registry
 
   - name: com.unity.burst
@@ -45,7 +45,7 @@ packages:
     source: registry
 
   - name: com.unity.collections
-    version: 2.6.2
+    version: 2.6.4
     source: registry
 
   - name: com.unity.mathematics
@@ -54,6 +54,70 @@ packages:
 
   - name: com.unity.test-framework
     version: 1.6.0
+    source: registry
+
+  # Development tools feature set (VS Editor, Rider, Profile Analyzer, Code Coverage)
+  - name: com.unity.feature.development
+    version: 1.0.2
+    source: registry
+
+  # Additional direct dependencies
+  - name: com.unity.ext.nunit
+    version: 2.0.5
+    source: registry
+
+  - name: com.unity.nuget.mono-cecil
+    version: 1.11.6
+    source: registry
+
+  - name: com.unity.searcher
+    version: 4.9.4
+    source: registry
+
+  - name: com.unity.test-framework.performance
+    version: 3.2.0
+    source: registry
+
+  - name: com.unity.ugui
+    version: 2.0.0
+    source: registry
+
+  # Explicit tooling pins (ensure these stay even if lock is missing)
+  - name: com.unity.ide.visualstudio
+    version: 2.0.26
+    source: registry
+
+  - name: com.unity.ide.rider
+    version: 3.0.39
+    source: registry
+
+  - name: com.unity.performance.profile-analyzer
+    version: 1.2.4
+    source: registry
+
+  - name: com.unity.testtools.codecoverage
+    version: 1.2.7
+    source: registry
+
+  - name: com.unity.settings-manager
+    version: 2.1.1
+    source: registry
+
+  # Template packages present in the regenerated project (pin to avoid removal)
+  - name: com.unity.collab-proxy
+    version: 2.11.2
+    source: registry
+
+  - name: com.unity.multiplayer.center
+    version: 1.0.1
+    source: registry
+
+  - name: com.unity.timeline
+    version: 1.8.10
+    source: registry
+
+  - name: com.unity.visualscripting
+    version: 1.9.9
     source: registry
 
 policy:
