@@ -7,6 +7,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     /// Injects density using texture masks to create shaped patterns like creatures.
     /// Can be used for autonomous "inkling" creatures or player-controlled entities.
     /// </summary>
+    [DefaultExecutionOrder(-50)] // Run before SimDriver (+50) so stamps are queued before simulation
     public class TexturedInjector : MonoBehaviour
     {
         [Header("Injection Settings")]
@@ -23,6 +24,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Range(0, 1)] [SerializeField] private float alphaThreshold = 0.1f;
         [Range(0, 1)] [SerializeField] private float blackLuminanceThreshold = 0.05f;
         [SerializeField] private bool enableBlackMaskClearing = false; // If false, skip obstacle/black masking to avoid flicker
+        [Tooltip("Enable CPU-side particle stamping (GetData/SetData). Disabled by default because the GPU flush causes flickering on DX12.")]
+        [SerializeField] private bool useParticleStamping = false;
 
         [Header("Movement")]
         [SerializeField] private bool autonomous = true;
@@ -43,15 +46,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private Vector2 velocity = Vector2.zero;
         private float nextInjectionTime = 0f;
         private Vector2 previousPosition;
-        private Color[] cachedMaskPixels;
         private bool maskValid = false;
         private int actualMaskWidth = 0;   // Actual texture width
         private int actualMaskHeight = 0;  // Actual texture height
         private Texture2D stampTexture;
         private bool hasLoggedFirstInjection = false;
+        private bool useLinearColorSpace = false;
 
         private void Start()
         {
+            // Cache color space at runtime (cannot query in field initializer)
+            useLinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
+
             if (simDriver == null)
             {
                 Debug.LogError("[TexturedInjector] SimDriver reference is required. Please assign it in the Inspector.");
@@ -82,6 +88,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 maskValid = false;
                 return;
             }
+            if (injectionMask.width <= 0 || injectionMask.height <= 0)
+            {
+                Debug.LogWarning($"[TexturedInjector] Injection mask on {gameObject.name} has zero size; aborting.");
+                maskValid = false;
+                return;
+            }
 
             // Check if texture is readable
             try
@@ -90,84 +102,38 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 Debug.Log($"[TexturedInjector] Texture '{injectionMask.name}' dimensions: {injectionMask.width}x{injectionMask.height}, " +
                          $"requesting {maskResolution}x{maskResolution}");
 
-                // Use the actual texture dimensions first
-                actualMaskWidth = injectionMask.width;
-                actualMaskHeight = injectionMask.height;
-                cachedMaskPixels = injectionMask.GetPixels(0, 0, actualMaskWidth, actualMaskHeight);
+                // Build a cached stamp texture once; keep size controlled
+                actualMaskWidth = Mathf.Clamp(maskTargetResolution, 4, 256);
+                actualMaskHeight = actualMaskWidth;
+                maskResolution = actualMaskWidth;
 
-                // Downsample to requested maskTargetResolution to avoid huge stamps (e.g., 512x512 sprites).
-                int targetRes = Mathf.Clamp(maskTargetResolution, 4, 256);
-                if (actualMaskWidth != targetRes || actualMaskHeight != targetRes)
+                if (stampTexture != null)
                 {
-                    Color[] downsampled = new Color[targetRes * targetRes];
-                    for (int y = 0; y < targetRes; y++)
-                    {
-                        float v = (y + 0.5f) / targetRes;
-                        float srcY = v * (actualMaskHeight - 1);
-                        int y0 = Mathf.FloorToInt(srcY);
-                        int y1 = Mathf.Min(y0 + 1, actualMaskHeight - 1);
-                        float fy = srcY - y0;
-
-                        for (int x = 0; x < targetRes; x++)
-                        {
-                            float u = (x + 0.5f) / targetRes;
-                            float srcX = u * (actualMaskWidth - 1);
-                            int x0 = Mathf.FloorToInt(srcX);
-                            int x1 = Mathf.Min(x0 + 1, actualMaskWidth - 1);
-                            float fx = srcX - x0;
-
-                            Color c00 = cachedMaskPixels[y0 * actualMaskWidth + x0];
-                            Color c10 = cachedMaskPixels[y0 * actualMaskWidth + x1];
-                            Color c01 = cachedMaskPixels[y1 * actualMaskWidth + x0];
-                            Color c11 = cachedMaskPixels[y1 * actualMaskWidth + x1];
-
-                            Color c0 = Color.Lerp(c00, c10, fx);
-                            Color c1 = Color.Lerp(c01, c11, fx);
-                            downsampled[y * targetRes + x] = Color.Lerp(c0, c1, fy);
-                        }
-                    }
-
-                    cachedMaskPixels = downsampled;
-                    actualMaskWidth = targetRes;
-                    actualMaskHeight = targetRes;
+                    Destroy(stampTexture);
                 }
 
-                // Update maskResolution to match actual texture (for display purposes)
-                maskResolution = Mathf.Min(actualMaskWidth, actualMaskHeight);
+                stampTexture = new Texture2D(actualMaskWidth, actualMaskHeight, TextureFormat.RGBA32, false, /*linear*/ true);
+                stampTexture.filterMode = FilterMode.Point;
+                stampTexture.wrapMode = TextureWrapMode.Clamp;
+                stampTexture.anisoLevel = 0;
+                stampTexture.hideFlags = HideFlags.DontSave;
 
-                // Allocate or resize reusable stamp texture
-                if (stampTexture == null ||
-                    stampTexture.width != actualMaskWidth ||
-                    stampTexture.height != actualMaskHeight)
-                {
-                    if (stampTexture != null)
-                    {
-                        Destroy(stampTexture);
-                    }
+                // Runtime enforce sane sampling on the source mask (non-destructive; per-instance)
+                injectionMask.filterMode = FilterMode.Point;
+                injectionMask.wrapMode = TextureWrapMode.Clamp;
 
-                    stampTexture = new Texture2D(actualMaskWidth, actualMaskHeight, TextureFormat.RGBAHalf, false);
-                }
+                // Blit/downsample via Graphics to avoid CPU per-pixel cost and driver crashes
+                RenderTexture tmp = RenderTexture.GetTemporary(actualMaskWidth, actualMaskHeight, 0, RenderTextureFormat.ARGB32);
+                Graphics.Blit(injectionMask, tmp);
+                RenderTexture previous = RenderTexture.active;
+                RenderTexture.active = tmp;
+                stampTexture.ReadPixels(new Rect(0, 0, actualMaskWidth, actualMaskHeight), 0, 0);
+                stampTexture.Apply(false, false);
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(tmp);
 
                 maskValid = true;
                 Debug.Log($"[TexturedInjector] Mask '{injectionMask.name}' loaded successfully ({actualMaskWidth}x{actualMaskHeight})");
-                Debug.Log($"[TexturedInjector] Pixel data: {cachedMaskPixels.Length} pixels loaded");
-
-                // Sample a few pixels to verify data
-                if (cachedMaskPixels.Length > 0)
-                {
-                    int centerIdx = (actualMaskHeight / 2) * actualMaskWidth + (actualMaskWidth / 2);
-                    Color centerPixel = cachedMaskPixels[centerIdx];
-                    Debug.Log($"[TexturedInjector] Center pixel RGBA: ({centerPixel.r:F3}, {centerPixel.g:F3}, {centerPixel.b:F3}, {centerPixel.a:F3})");
-
-                    // Count non-transparent pixels
-                    int nonTransparent = 0;
-                    for (int i = 0; i < cachedMaskPixels.Length; i++)
-                    {
-                        if (cachedMaskPixels[i].a >= alphaThreshold)
-                            nonTransparent++;
-                    }
-                    Debug.Log($"[TexturedInjector] Pixels above threshold ({alphaThreshold}): {nonTransparent} / {cachedMaskPixels.Length}");
-                }
             }
             catch (UnityException e)
             {
@@ -296,54 +262,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 }
             }
 
-            // Create stamped texture with color overrides applied if needed (reusing the same Texture2D)
-            // Only non-black pixels are written here; black pixels are handled via ClearDensityWithMask
-            Color[] stampPixels = new Color[cachedMaskPixels.Length];
-
-            for (int i = 0; i < cachedMaskPixels.Length; i++)
-            {
-                Color maskColor = cachedMaskPixels[i];
-
-                // Skip transparent pixels
-                if (maskColor.a < alphaThreshold)
-                {
-                    stampPixels[i] = Color.clear;
-                    continue;
-                }
-
-                // Classify black vs colored using luminance
-                float luminance = 0.299f * maskColor.r + 0.587f * maskColor.g + 0.114f * maskColor.b;
-                bool isBlack = luminance < blackLuminanceThreshold;
-
-                if (isBlack)
-                {
-                    // Black pixels are not injected as density; they are used only for clearing
-                    stampPixels[i] = Color.clear;
-                    continue;
-                }
-
-                // Apply density multiplier and color override if needed for colored pixels
-                if (useTextureColors)
-                {
-                    Color c = maskColor * densityMultiplier;
-                    c.r = Mathf.Min(c.r, 1f);
-                    c.g = Mathf.Min(c.g, 1f);
-                    c.b = Mathf.Min(c.b, 1f);
-                    stampPixels[i] = c;
-                }
-                else
-                {
-                    Color c = inkColorOverride * (maskColor.a * densityMultiplier);
-                    c.r = Mathf.Min(c.r, 1f);
-                    c.g = Mathf.Min(c.g, 1f);
-                    c.b = Mathf.Min(c.b, 1f);
-                    c.a = Mathf.Min(c.a, 1f);
-                    stampPixels[i] = c;
-                }
-            }
-
-            stampTexture.SetPixels(stampPixels);
-            stampTexture.Apply();
+            // No CPU-side pixel rewrite; we use the source mask directly and let the shader handle overrides
 
             if (!hasLoggedFirstInjection)
             {
@@ -352,11 +271,21 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             // GPU stamp colored portions into the RT-based density field
-            simDriver.StampDensity(uvPosition, stampTexture);
+            simDriver.StampDensity(
+                uvPosition,
+                stampTexture,
+                densityMultiplier,
+                useTextureColors ? false : true,
+                inkColorOverride);
 
-            // Also stamp into iparticle buffer so multi-ink interactions are represented
-            // in the canonical particle state.
-            simDriver.StampParticles(uvPosition, stampTexture);
+            // CPU particle stamping (GetData/SetData) forces a full GPU flush that
+            // can interleave with the queued compute stamps and cause flickering on
+            // DX12.  Disabled by default; enable only when multi-ink particle state
+            // is required and the flicker trade-off is acceptable.
+            if (useParticleStamping)
+            {
+                simDriver.StampParticles(uvPosition, stampTexture);
+            }
 
             if (enableBlackMaskClearing)
             {
@@ -366,7 +295,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
                 // Stamp black/body ink into the particle buffer so the gradient-based
                 // renderer can treat black as an overriding ink layer.
-                simDriver.StampBlackBody(uvPosition, injectionMask, alphaThreshold, blackLuminanceThreshold);
+                if (useParticleStamping)
+                {
+                    simDriver.StampBlackBody(uvPosition, injectionMask, alphaThreshold, blackLuminanceThreshold);
+                }
             }
 
             // Inject velocity if moving

@@ -39,9 +39,13 @@ Shader "Inkling/InkGradientRenderer"
             "RenderPipeline"="UniversalPipeline"
         }
 
-        Blend SrcAlpha OneMinusSrcAlpha
+        // Blend Off: this shader is used exclusively via Graphics.Blit as a
+        // fullscreen post-process.  Every pixel must be fully overwritten;
+        // SrcAlpha blending would leak stale gradientRT content through
+        // density alpha < 1, causing per-frame flickering.
+        Blend Off
         ZWrite Off
-        Cull Back
+        Cull Off
 
         Pass
         {

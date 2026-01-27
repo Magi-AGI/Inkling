@@ -4,6 +4,9 @@ Shader "Hidden/Magi/StampDensity"
     {
         _MainTex ("Base Density", 2D) = "black" {}
         _StampTex ("Stamp Texture", 2D) = "white" {}
+        _DensityMultiplier ("Density Multiplier", Float) = 1.0
+        _UseColorOverride ("Use Color Override", Float) = 0.0
+        _ColorOverride ("Color Override", Color) = (1,1,1,1)
     }
 
     SubShader
@@ -28,6 +31,9 @@ Shader "Hidden/Magi/StampDensity"
             float _AlphaThreshold;
             float _StampMode;               // 0 = additive, 1 = clear density where black, 2 = write obstacles where black
             float _BlackLuminanceThreshold; // used when _StampMode != 0
+            float _DensityMultiplier;
+            float _UseColorOverride;
+            float4 _ColorOverride;
 
             struct appdata
             {
@@ -76,6 +82,18 @@ Shader "Hidden/Magi/StampDensity"
                 if (stamp.a < _AlphaThreshold)
                 {
                     return baseCol;
+                }
+
+                // Apply density multiplier / color override
+                if (_UseColorOverride > 0.5)
+                {
+                    stamp.rgb = _ColorOverride.rgb * stamp.a;
+                    stamp.a = _ColorOverride.a * stamp.a;
+                }
+                else
+                {
+                    stamp.rgb *= _DensityMultiplier;
+                    stamp.a   *= _DensityMultiplier;
                 }
 
                 // Mode 0: additive stamp into density (colored inks)

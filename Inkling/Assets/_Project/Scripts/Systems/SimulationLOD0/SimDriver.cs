@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -14,6 +15,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     /// Drives the fluid simulation compute shader with ping-pong buffers and proper kernel dispatch order.
     /// Manages RT allocation, kernel execution, and display output.
     /// </summary>
+    [DefaultExecutionOrder(50)] // Run after TexturedInjector (-50) so queued stamps are drained in SimulateFrame
     public class SimDriver : MonoBehaviour
     {
         [Header("Compute Shader")]
@@ -66,7 +68,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             Ice = 4,
             Plant = 5,
             Steam = 6,
-            Dust = 7
+            Dust = 7,
+            Test = 8
         }
 
         [Header("Display")]
@@ -78,11 +81,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private Magi.Inkling.Systems.Rendering.InkGradientPreset gradientPreset;
         [SerializeField] private Material gradientMaterial;
 
+        [Header("Diagnostics")]
+        [Tooltip("Fill displayRT with solid magenta every frame, bypassing all density/gradient rendering. If flickering persists, the issue is outside SimDriver.")]
+        [SerializeField] private bool debugSolidDisplay = false;
+
         [Header("Performance")]
         [SerializeField] private bool measurePerformance = true;
 
         [Header("Creature / Stamp Rendering")]
         [SerializeField] private Shader densityStampShader;
+        [Tooltip("Compute-shader stamp (preferred over Blit shader). Eliminates DX12 cross-queue barriers on density ping-pong buffers.")]
+        [SerializeField] private ComputeShader stampCompute;
 
         [Header("Particle Simulation")]
         [SerializeField] private bool useParticleSimulation = false;
@@ -105,6 +114,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private RenderTexture obstacles;
         private RenderTexture displayRT;
         private RenderTexture gradientRT;  // For gradient-rendered output
+        private RenderTexture densityStaging; // Non-UAV copy of density.Read for display Blits (DX12 barrier workaround)
         private RenderTexture creatureInkBuffer;  // Separate buffer for creature stamps (cleared each frame)
 
         // Particle-based density buffer (replaces RGBA texture with multi-channel iparticle)
@@ -138,10 +148,55 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private int kernelDissipateParticles;
         private int kernelAddParticlesGaussian;
 
+        // Stamp compute kernels (from StampDensityCompute.compute)
+        private int kernelStampDensity;
+        private int kernelClearBlackDensity;
+        private bool stampComputeReady;
+
         // Performance tracking
         private Stopwatch stopwatch = new Stopwatch();
         private float lastFrameMs;
         private float advectionMs, diffusionMs, pressureMs, projectionMs, vorticityMs;
+
+        // ── Pending GPU operations ──────────────────────────────────────────
+        // External callers (TexturedInjector, etc.) queue operations here.
+        // ProcessPendingOperations() drains them at the top of SimulateFrame
+        // so that ALL GPU work (stamps + advection + pressure) executes inside
+        // a single Update(), eliminating DX12 cross-queue synchronisation
+        // issues and keeping ping-pong Swap counts deterministic.
+
+        private struct PendingDensityStamp
+        {
+            public Vector2 uvPosition;
+            public Texture2D stamp;
+            public float multiplier;
+            public bool useColorOverride;
+            public Color overrideColor;
+        }
+
+        private struct PendingForceInjection
+        {
+            public Vector2 position;
+            public Vector2 force;
+        }
+
+        private struct PendingDensityInjection
+        {
+            public Vector2 position;
+            public Color color;
+        }
+
+        private struct PendingClearDensityMask
+        {
+            public Vector2 uvPosition;
+            public Texture2D mask;
+            public float blackLuminanceThreshold;
+        }
+
+        private readonly List<PendingDensityStamp> pendingDensityStamps = new List<PendingDensityStamp>();
+        private readonly List<PendingForceInjection> pendingForceInjections = new List<PendingForceInjection>();
+        private readonly List<PendingDensityInjection> pendingDensityInjections = new List<PendingDensityInjection>();
+        private readonly List<PendingClearDensityMask> pendingClearDensityMasks = new List<PendingClearDensityMask>();
 
         private void Start()
         {
@@ -168,7 +223,27 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             densityStampMaterial = new Material(shader);
         }
 
+        private void InitializeStampCompute()
+        {
+            if (stampCompute == null)
+            {
+                stampComputeReady = false;
+                return;
+            }
 
+            try
+            {
+                kernelStampDensity = stampCompute.FindKernel("StampDensity");
+                kernelClearBlackDensity = stampCompute.FindKernel("ClearBlackDensity");
+                stampComputeReady = true;
+                Debug.Log("[SimDriver] Stamp compute shader ready – density stamps will use compute pipeline.");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[SimDriver] Stamp compute init failed ({e.Message}). Falling back to Blit-based stamps.");
+                stampComputeReady = false;
+            }
+        }
 
         private void InitializeSimulation()
         {
@@ -220,6 +295,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             AllocateRenderTextures();
+            InitializeStampCompute();
 
             if (kernelsFound && fluidCompute != null)
             {
@@ -272,6 +348,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             displayRT.wrapMode = TextureWrapMode.Clamp;
             displayRT.name = "DisplayRT";
             displayRT.Create();
+
+            // Non-UAV staging RT for display reads.
+            // On DX12, density.Read is a UAV (enableRandomWrite) last written by a
+            // compute dispatch.  Graphics.Blit reads it as an SRV, but Unity's DX12
+            // backend may not insert the required UAV→SRV resource barrier.  Copying
+            // into this non-UAV staging RT first forces a clean state transition.
+            densityStaging = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGBHalf);
+            densityStaging.enableRandomWrite = false;
+            densityStaging.filterMode = FilterMode.Bilinear;
+            densityStaging.wrapMode = TextureWrapMode.Clamp;
+            densityStaging.name = "DensityStaging";
+            densityStaging.Create();
         }
 
         private RenderTexture CreateRT(RenderTextureFormat format, string name)
@@ -399,17 +487,236 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Run simulation pipeline
             SimulateFrame();
 
-            // Update display
-            UpdateDisplay();
-
             if (measurePerformance)
             {
                 lastFrameMs = (float)stopwatch.Elapsed.TotalMilliseconds;
             }
         }
 
+        private void LateUpdate()
+        {
+            // Display runs in LateUpdate so density.Read is guaranteed to reflect
+            // the final post-simulation state — all Update() calls (injection
+            // queuing, simulation, swaps) have completed by this point.
+            UpdateDisplay();
+
+            // ── Periodic density readback diagnostic ─────────────────────────
+            // Every 30 frames, read the center pixel of density.Read and log its
+            // RGBA + which physical RT is currently "Read".  If the logged values
+            // oscillate between two drastically different states, the density
+            // buffer itself is flickering.  If they are stable but the display
+            // still flickers, the issue is in the gradient / display path.
+            if (density != null && Time.frameCount % 30 == 0)
+            {
+                var rt = density.Read;
+                RenderTexture prev = RenderTexture.active;
+                RenderTexture.active = rt;
+                Texture2D probe = new Texture2D(1, 1, TextureFormat.RGBAHalf, false);
+                int cx = resolution / 2;
+                int cy = resolution / 2;
+                probe.ReadPixels(new Rect(cx, cy, 1, 1), 0, 0);
+                probe.Apply();
+                Color c = probe.GetPixel(0, 0);
+                Debug.Log($"[SimDriver DIAG] frame={Time.frameCount} density.Read ID={rt.GetInstanceID()} " +
+                          $"center=({c.r:F4},{c.g:F4},{c.b:F4},{c.a:F4})");
+                RenderTexture.active = prev;
+                Destroy(probe);
+            }
+        }
+
+        /// <summary>
+        /// Drains all pending GPU operations (density stamps, force injections, etc.)
+        /// that were queued by external callers since the last frame.  Runs at the
+        /// very start of SimulateFrame so every Blit / Dispatch / Swap happens inside
+        /// a single Update(), giving the DX12 backend a contiguous command stream
+        /// with correct resource barriers.
+        /// </summary>
+        private void ProcessPendingOperations()
+        {
+            int threadGroups = Mathf.CeilToInt(resolution / 8f);
+
+            // ── Density stamps ───────────────────────────────────────────────
+            // Prefer compute path to keep density on the compute queue (avoids
+            // DX12 graphics→compute barriers).  Falls back to Blit if the
+            // compute shader is not assigned.
+            if (pendingDensityStamps.Count > 0 && density != null)
+            {
+                if (stampComputeReady)
+                {
+                    foreach (var s in pendingDensityStamps)
+                    {
+                        if (s.stamp == null) continue;
+
+                        float stampWidthUV  = (float)s.stamp.width  / resolution;
+                        float stampHeightUV = (float)s.stamp.height / resolution;
+
+                        stampCompute.SetTexture(kernelStampDensity, "_DensityRead",  density.Read);
+                        stampCompute.SetTexture(kernelStampDensity, "_DensityWrite", density.Write);
+                        stampCompute.SetTexture(kernelStampDensity, "_StampTex",     s.stamp);
+                        stampCompute.SetVector("_StampCenter", new Vector4(s.uvPosition.x, s.uvPosition.y, 0f, 0f));
+                        stampCompute.SetVector("_StampSize",   new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                        stampCompute.SetFloat("_AlphaThreshold", 0.01f);
+                        stampCompute.SetFloat("_DensityMul",     s.multiplier);
+                        stampCompute.SetFloat("_UseOverride",    s.useColorOverride ? 1f : 0f);
+                        stampCompute.SetVector("_OverrideColor", (Vector4)s.overrideColor);
+                        stampCompute.SetVector("_Resolution",    new Vector2(resolution, resolution));
+
+                        stampCompute.Dispatch(kernelStampDensity, threadGroups, threadGroups, 1);
+                        density.Swap();
+                    }
+                }
+                else
+                {
+                    // Blit fallback (graphics queue – may flicker on DX12)
+                    EnsureStampMaterial();
+                    if (densityStampMaterial != null)
+                    {
+                        foreach (var s in pendingDensityStamps)
+                        {
+                            if (s.stamp == null) continue;
+
+                            float stampWidthUV  = (float)s.stamp.width  / resolution;
+                            float stampHeightUV = (float)s.stamp.height / resolution;
+
+                            densityStampMaterial.SetTexture("_StampTex", s.stamp);
+                            densityStampMaterial.SetVector("_StampCenterUV", new Vector4(s.uvPosition.x, s.uvPosition.y, 0f, 0f));
+                            densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                            densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
+                            densityStampMaterial.SetFloat("_StampMode", 0f);
+                            densityStampMaterial.SetFloat("_BlackLuminanceThreshold", 0.2f);
+                            densityStampMaterial.SetFloat("_DensityMultiplier", s.multiplier);
+                            densityStampMaterial.SetFloat("_UseColorOverride", s.useColorOverride ? 1f : 0f);
+                            densityStampMaterial.SetColor("_ColorOverride", s.overrideColor);
+
+                            Graphics.Blit(density.Read, density.Write, densityStampMaterial);
+                            density.Swap();
+                        }
+                    }
+                }
+                pendingDensityStamps.Clear();
+            }
+
+            // ── Clear-density masks ──────────────────────────────────────────
+            if (pendingClearDensityMasks.Count > 0 && density != null)
+            {
+                foreach (var c in pendingClearDensityMasks)
+                {
+                    if (c.mask == null) continue;
+
+                    float stampWidthUV  = (float)c.mask.width  / resolution;
+                    float stampHeightUV = (float)c.mask.height / resolution;
+
+                    // Density clear – compute path preferred
+                    if (stampComputeReady)
+                    {
+                        stampCompute.SetTexture(kernelClearBlackDensity, "_DensityRead",  density.Read);
+                        stampCompute.SetTexture(kernelClearBlackDensity, "_DensityWrite", density.Write);
+                        stampCompute.SetTexture(kernelClearBlackDensity, "_StampTex",     c.mask);
+                        stampCompute.SetVector("_StampCenter", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
+                        stampCompute.SetVector("_StampSize",   new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                        stampCompute.SetFloat("_AlphaThreshold", 0.01f);
+                        stampCompute.SetFloat("_BlackLumThreshold", c.blackLuminanceThreshold);
+                        stampCompute.SetVector("_Resolution", new Vector2(resolution, resolution));
+
+                        stampCompute.Dispatch(kernelClearBlackDensity, threadGroups, threadGroups, 1);
+                        density.Swap();
+                    }
+                    else
+                    {
+                        EnsureStampMaterial();
+                        if (densityStampMaterial != null)
+                        {
+                            densityStampMaterial.SetTexture("_StampTex", c.mask);
+                            densityStampMaterial.SetVector("_StampCenterUV", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
+                            densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                            densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
+                            densityStampMaterial.SetFloat("_StampMode", 1f);
+                            densityStampMaterial.SetFloat("_BlackLuminanceThreshold", c.blackLuminanceThreshold);
+
+                            Graphics.Blit(density.Read, density.Write, densityStampMaterial);
+                            density.Swap();
+                        }
+                    }
+
+                    // Obstacle map update (single RT, always Blit-based – not on density ping-pong)
+                    if (obstacles != null)
+                    {
+                        EnsureStampMaterial();
+                        if (densityStampMaterial != null)
+                        {
+                            RenderTexture tmpObs = RenderTexture.GetTemporary(
+                                obstacles.width, obstacles.height, 0, obstacles.format);
+                            Graphics.Blit(obstacles, tmpObs);
+
+                            densityStampMaterial.SetTexture("_MainTex", tmpObs);
+                            densityStampMaterial.SetTexture("_StampTex", c.mask);
+                            densityStampMaterial.SetVector("_StampCenterUV", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
+                            densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                            densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
+                            densityStampMaterial.SetFloat("_StampMode", 2f);
+                            densityStampMaterial.SetFloat("_BlackLuminanceThreshold", c.blackLuminanceThreshold);
+
+                            Graphics.Blit(tmpObs, obstacles, densityStampMaterial);
+                            RenderTexture.ReleaseTemporary(tmpObs);
+                        }
+                    }
+                }
+                pendingClearDensityMasks.Clear();
+            }
+
+            // ── Force injections (Compute-based) ────────────────────────────
+            if (pendingForceInjections.Count > 0 && fluidCompute != null)
+            {
+                foreach (var f in pendingForceInjections)
+                {
+                    Vector2 pixelPos = f.position * resolution;
+
+                    fluidCompute.SetVector("_ForcePosition", pixelPos);
+                    fluidCompute.SetVector("_ForceDirection", f.force.normalized);
+                    fluidCompute.SetFloat("_ForceRadius", forceRadius);
+                    fluidCompute.SetFloat("_ForceStrength", forceStrength * f.force.magnitude);
+                    fluidCompute.SetFloat("_DeltaTime", timestep);
+                    fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
+
+                    fluidCompute.SetTexture(kernelAddForce, "_VelocityRead", velocity.Read);
+                    fluidCompute.SetTexture(kernelAddForce, "_VelocityWrite", velocity.Write);
+                    fluidCompute.Dispatch(kernelAddForce, threadGroups, threadGroups, 1);
+                    velocity.Swap();
+                }
+                pendingForceInjections.Clear();
+            }
+
+            // ── Density injections (Compute-based) ──────────────────────────
+            if (pendingDensityInjections.Count > 0 && fluidCompute != null && density != null)
+            {
+                foreach (var d in pendingDensityInjections)
+                {
+                    float colorIntensity = Mathf.Max(d.color.r, Mathf.Max(d.color.g, d.color.b));
+                    float amount = colorIntensity * densityAmount;
+                    if (amount <= 0f) continue;
+
+                    Vector2 pixelPos = d.position * resolution;
+
+                    fluidCompute.SetVector("_ForcePosition", pixelPos);
+                    fluidCompute.SetFloat("_ForceRadius", forceRadius);
+                    fluidCompute.SetFloat("_DensityAmount", amount);
+                    fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
+
+                    fluidCompute.SetTexture(kernelAddDensity, "_DensityRead", density.Read);
+                    fluidCompute.SetTexture(kernelAddDensity, "_DensityWrite", density.Write);
+                    fluidCompute.Dispatch(kernelAddDensity, threadGroups, threadGroups, 1);
+                    density.Swap();
+                }
+                pendingDensityInjections.Clear();
+            }
+
+        }
+
         private void SimulateFrame()
         {
+            // Process queued stamps / injections from external callers first
+            ProcessPendingOperations();
+
             if (fluidCompute == null)
             {
                 // Test pattern mode - just cycle colors
@@ -441,7 +748,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // 1. Advection - Move quantities along velocity field
             if (sw != null) sw.Restart();
 
-            // Advect velocity
+            // Advect velocity (read from velocity.Read, write to velocity.Write)
             fluidCompute.SetTexture(kernelAdvection, "_VelocityRead", velocity.Read);
             fluidCompute.SetTexture(kernelAdvection, "_VelocityWrite", velocity.Write);
             fluidCompute.SetTexture(kernelAdvection, "_QuantityRead", velocity.Read);
@@ -454,7 +761,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (density != null)
             {
                 fluidCompute.SetTexture(kernelAdvection, "_VelocityRead", velocity.Read);
-                fluidCompute.SetTexture(kernelAdvection, "_VelocityWrite", velocity.Read);
+                // Bind _VelocityWrite to velocity.Write (not velocity.Read) to avoid
+                // DX12 UAV aliasing: same resource in two UAV slots causes resource
+                // barrier conflicts and GPU hangs (TDR). The Advection kernel does not
+                // write to _VelocityWrite, but DX12 still creates barriers for all
+                // declared RWTexture2D slots regardless of actual usage.
+                fluidCompute.SetTexture(kernelAdvection, "_VelocityWrite", velocity.Write);
                 fluidCompute.SetTexture(kernelAdvection, "_QuantityRead", density.Read);
                 fluidCompute.SetTexture(kernelAdvection, "_QuantityWrite", density.Write);
                 fluidCompute.SetFloat("_Dissipation", dissipation);
@@ -651,33 +963,24 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         }
 
         /// <summary>
-        /// Public API: Inject force at UV position (0-1 range)
+        /// Public API: Inject force at UV position (0-1 range).
+        /// The operation is queued and executed inside SimulateFrame.
         /// </summary>
         public void InjectForce(Vector2 position, Vector2 force)
         {
             if (fluidCompute == null) return;
 
-            int threadGroups = Mathf.CeilToInt(resolution / 8f);
-
-            // Convert UV position to pixel coordinates
-            Vector2 pixelPos = position * resolution;
-
-            fluidCompute.SetVector("_ForcePosition", pixelPos);
-            fluidCompute.SetVector("_ForceDirection", force.normalized);
-            fluidCompute.SetFloat("_ForceRadius", forceRadius);
-            fluidCompute.SetFloat("_ForceStrength", forceStrength * force.magnitude);
-            fluidCompute.SetFloat("_DeltaTime", timestep);
-            fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
-
-            fluidCompute.SetTexture(kernelAddForce, "_VelocityRead", velocity.Read);
-            fluidCompute.SetTexture(kernelAddForce, "_VelocityWrite", velocity.Write);
-            fluidCompute.Dispatch(kernelAddForce, threadGroups, threadGroups, 1);
-            velocity.Swap();
+            pendingForceInjections.Add(new PendingForceInjection
+            {
+                position = position,
+                force = force
+            });
         }
 
         /// <summary>
         /// Public API: Inject density at UV position (0-1 range) using the AddDensity kernel.
-        /// Uses the scalar densityAmount and mouse-ink color intensity to drive _DensityAmount.
+        /// The GPU dispatch is queued and executed inside SimulateFrame.
+        /// CPU-side particle injection runs immediately.
         /// </summary>
         public void InjectDensity(Vector2 position, Color color)
         {
@@ -686,8 +989,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 return;
             }
 
-            // Map color intensity to a scalar density amount.
-            // For now we use the max RGB channel scaled by densityAmount.
             float colorIntensity = Mathf.Max(color.r, Mathf.Max(color.g, color.b));
             float amount = colorIntensity * densityAmount;
             if (amount <= 0f)
@@ -695,23 +996,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 return;
             }
 
-            int threadGroups = Mathf.CeilToInt(resolution / 8f);
-
-            // Convert UV position to pixel coordinates
-            Vector2 pixelPos = position * resolution;
-
-            fluidCompute.SetVector("_ForcePosition", pixelPos);
-            fluidCompute.SetFloat("_ForceRadius", forceRadius);
-            fluidCompute.SetFloat("_DensityAmount", amount);
-            fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
-
-            // Bind density textures for AddDensity kernel
-            fluidCompute.SetTexture(kernelAddDensity, "_DensityRead", density.Read);
-            fluidCompute.SetTexture(kernelAddDensity, "_DensityWrite", density.Write);
-            fluidCompute.Dispatch(kernelAddDensity, threadGroups, threadGroups, 1);
-            density.Swap();
+            pendingDensityInjections.Add(new PendingDensityInjection
+            {
+                position = position,
+                color = color
+            });
 
             // Mirror this injection into the particle buffer so iparticle remains authoritative.
+            // This is CPU-only and safe to run immediately.
             InjectParticlesAtPoint(position, color);
         }
 
@@ -784,43 +1076,24 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         /// </summary>
         /// <param name="uvPosition">Center position in UV space (0-1)</param>
         /// <param name="stamp">Texture to stamp directly into density</param>
-        public void StampDensity(Vector2 uvPosition, Texture2D stamp)
+        /// <param name="densityMultiplier">Scalar multiplier applied to sampled color</param>
+        /// <param name="useColorOverride">If true, ignore stamp RGB and use overrideColor * alpha</param>
+        /// <param name="overrideColor">Color to use when useColorOverride is true</param>
+        public void StampDensity(Vector2 uvPosition, Texture2D stamp, float densityMultiplier, bool useColorOverride, Color overrideColor)
         {
             if (density == null || stamp == null)
             {
                 return;
             }
 
-            EnsureStampMaterial();
-            if (densityStampMaterial == null)
+            pendingDensityStamps.Add(new PendingDensityStamp
             {
-                return;
-            }
-
-            RenderTexture target = density.Read;
-            if (target == null)
-            {
-                return;
-            }
-
-            // Copy current density into a temporary RT, then stamp back into the main RT.
-            RenderTexture tmp = RenderTexture.GetTemporary(target.width, target.height, 0, target.format);
-            Graphics.Blit(target, tmp);
-
-            float stampWidthUV = (float)stamp.width / resolution;
-            float stampHeightUV = (float)stamp.height / resolution;
-
-            densityStampMaterial.SetTexture("_MainTex", tmp);
-            densityStampMaterial.SetTexture("_StampTex", stamp);
-            densityStampMaterial.SetVector("_StampCenterUV", new Vector4(uvPosition.x, uvPosition.y, 0f, 0f));
-            densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
-            densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
-            densityStampMaterial.SetFloat("_StampMode", 0f);
-            densityStampMaterial.SetFloat("_BlackLuminanceThreshold", 0.2f);
-
-            Graphics.Blit(tmp, target, densityStampMaterial);
-
-            RenderTexture.ReleaseTemporary(tmp);
+                uvPosition = uvPosition,
+                stamp = stamp,
+                multiplier = densityMultiplier,
+                useColorOverride = useColorOverride,
+                overrideColor = overrideColor
+            });
         }
 
         /// <summary>
@@ -898,54 +1171,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 return;
             }
 
-            EnsureStampMaterial();
-            if (densityStampMaterial == null)
+            pendingClearDensityMasks.Add(new PendingClearDensityMask
             {
-                return;
-            }
-
-            RenderTexture target = density.Read;
-            if (target == null)
-            {
-                return;
-            }
-
-            RenderTexture tmp = RenderTexture.GetTemporary(target.width, target.height, 0, target.format);
-            Graphics.Blit(target, tmp);
-
-            float stampWidthUV = (float)mask.width / resolution;
-            float stampHeightUV = (float)mask.height / resolution;
-
-            densityStampMaterial.SetTexture("_MainTex", tmp);
-            densityStampMaterial.SetTexture("_StampTex", mask);
-            densityStampMaterial.SetVector("_StampCenterUV", new Vector4(uvPosition.x, uvPosition.y, 0f, 0f));
-            densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
-            densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
-            densityStampMaterial.SetFloat("_StampMode", 1f);
-            densityStampMaterial.SetFloat("_BlackLuminanceThreshold", blackLuminanceThreshold);
-
-            Graphics.Blit(tmp, target, densityStampMaterial);
-
-            RenderTexture.ReleaseTemporary(tmp);
-
-            // Also update obstacle map so velocity is treated as colliding with these regions.
-            if (obstacles != null)
-            {
-                RenderTexture tmpObs = RenderTexture.GetTemporary(obstacles.width, obstacles.height, 0, obstacles.format);
-                Graphics.Blit(obstacles, tmpObs);
-
-                densityStampMaterial.SetTexture("_MainTex", tmpObs);
-                densityStampMaterial.SetTexture("_StampTex", mask);
-                densityStampMaterial.SetVector("_StampCenterUV", new Vector4(uvPosition.x, uvPosition.y, 0f, 0f));
-                densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
-                densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
-                densityStampMaterial.SetFloat("_StampMode", 2f); // mark obstacles where black
-                densityStampMaterial.SetFloat("_BlackLuminanceThreshold", blackLuminanceThreshold);
-
-                Graphics.Blit(tmpObs, obstacles, densityStampMaterial);
-
-                RenderTexture.ReleaseTemporary(tmpObs);
-            }
+                uvPosition = uvPosition,
+                mask = mask,
+                blackLuminanceThreshold = blackLuminanceThreshold
+            });
         }
 
         /// <summary>
@@ -1199,6 +1430,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void UpdateDisplay()
         {
+            // ── Diagnostic bypass: solid-color fill ──────────────────────────
+            // When enabled, fills displayRT with solid magenta and skips all
+            // density / gradient rendering.  If the display STILL flickers with
+            // this enabled, the issue is in HDRP / the mesh renderer, not here.
+            if (debugSolidDisplay)
+            {
+                if (displayRT != null)
+                {
+                    RenderTexture prev = RenderTexture.active;
+                    RenderTexture.active = displayRT;
+                    GL.Clear(true, true, new Color(1f, 0f, 1f, 1f)); // solid magenta
+                    RenderTexture.active = prev;
+                }
+                if (displayRenderer != null)
+                {
+                    displayRenderer.material.mainTexture = displayRT;
+                }
+                return;
+            }
+
             RenderTexture sourceTexture;
 
             if (useParticleRenderPass && particlesBuffer != null && particleToColorCompute != null)
@@ -1217,6 +1468,21 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 sourceTexture = (!useParticleDisplay && density != null)
                     ? density.Read
                     : ConvertParticlesToTexture();
+            }
+
+            // ── DX12 barrier workaround ──────────────────────────────────────
+            // density.Read (and velocity.Read) are UAV-enabled RTs last written
+            // by compute dispatches.  On DX12, Graphics.Blit may read them as
+            // SRVs without a proper UAV→SRV resource barrier, causing flickering.
+            // Copying into a non-UAV staging RT via CopyTexture forces the GPU to
+            // complete the compute writes and transition the resource state before
+            // the gradient shader reads it.
+            if (densityStaging != null && sourceTexture != null
+                && sourceTexture != displayRT
+                && sourceTexture.enableRandomWrite)
+            {
+                Graphics.CopyTexture(sourceTexture, densityStaging);
+                sourceTexture = densityStaging;
             }
 
             // COMPOSITE CREATURE INK FOR DISPLAY ONLY
@@ -1464,6 +1730,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
               if (obstacles) obstacles.Release();
               if (displayRT) displayRT.Release();
               if (gradientRT) gradientRT.Release();
+              if (densityStaging) densityStaging.Release();
               if (creatureInkBuffer) creatureInkBuffer.Release();
 
               // Clean up compute buffers
