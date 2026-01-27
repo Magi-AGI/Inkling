@@ -35,6 +35,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 #pragma warning restore 0414
         [SerializeField] private Vector2 movementBounds = new Vector2(0.9f, 0.9f); // UV bounds
 
+        [Header("Diagnostics")]
+        [Tooltip("Enable verbose periodic logging (status, null-check warnings, stamping info).")]
+        [SerializeField] private bool debugVerboseLogging = false;
+
         [Header("Behavior")]
         [SerializeField] private bool injectWhileMoving = true;
         [SerializeField] private float injectionInterval = 0.033f; // ~30Hz
@@ -147,7 +151,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private void Update()
         {
             // Debug status every 2 seconds
-            if (Time.frameCount % 120 == 0)
+            if (debugVerboseLogging && Time.frameCount % 120 == 0)
             {
                 Debug.Log($"[TexturedInjector] Status: simDriver={(simDriver != null ? "OK" : "NULL")}, " +
                          $"maskValid={maskValid}, autonomous={autonomous}, position={position}, " +
@@ -158,14 +162,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             if (simDriver == null)
             {
-                if (Time.frameCount % 120 == 0)
+                if (debugVerboseLogging && Time.frameCount % 120 == 0)
                     Debug.LogWarning("[TexturedInjector] SimDriver is null! Assign it in Inspector.");
                 return;
             }
 
             if (!maskValid)
             {
-                if (Time.frameCount % 120 == 0)
+                if (debugVerboseLogging && Time.frameCount % 120 == 0)
                     Debug.LogWarning("[TexturedInjector] Mask is not valid! Check texture Read/Write settings.");
                 return;
             }
@@ -242,7 +246,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             if (simDriver == null || !maskValid || injectionMask == null)
             {
-                if (Time.frameCount % 120 == 0)
+                if (debugVerboseLogging && Time.frameCount % 120 == 0)
                 {
                     Debug.LogWarning($"[TexturedInjector] InjectAtPosition aborted: simDriver={simDriver != null}, maskValid={maskValid}, mask={injectionMask != null}");
                 }
@@ -251,7 +255,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             if (stampTexture == null)
             {
-                if (Time.frameCount % 120 == 0)
+                if (debugVerboseLogging && Time.frameCount % 120 == 0)
                 {
                     Debug.LogWarning("[TexturedInjector] stampTexture was null during InjectAtPosition; re-validating mask.");
                 }
@@ -312,7 +316,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             // Debug log occasionally
-            if (Time.frameCount % 120 == 0)
+            if (debugVerboseLogging && Time.frameCount % 120 == 0)
             {
                 Debug.Log($"[TexturedInjector] Stamped {actualMaskWidth}x{actualMaskHeight} texture at UV {uvPosition:F3}, " +
                          $"black pixels->bb (black body, quick dissipation), colored pixels->f/w/i (persistent inks)");

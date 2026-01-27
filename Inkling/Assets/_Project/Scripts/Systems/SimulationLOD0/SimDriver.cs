@@ -40,14 +40,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Solver Settings")]
         [SerializeField] private int pressureIterations = 40;  // Increased for better convergence
         [SerializeField] private int diffusionIterations = 0;   // Disable diffusion for now (it slows things down)
-        [SerializeField] private bool useRedBlackSolver = true; // Use faster Red-Black Gauss-Seidel
+        [SerializeField] private bool useRedBlackSolver = false; // Red-Black Gauss-Seidel (faster convergence, enable via Inspector)
 
         [Header("Injection")]
         [SerializeField] private bool autoInject = false;  // Disable auto-inject by default
         [SerializeField] private float injectionForce = 100f;  // Direct velocity multiplier
-#pragma warning disable 0414 // Field assigned but never used - reserved for future use
         [SerializeField] private float densityAmount = 10.0f;    // Scalar density factor for mouse/texture injection
-#pragma warning restore 0414
         [SerializeField] private float forceRadius = 40f;       // Larger injection area
         [SerializeField] private float forceStrength = 50f;     // Force gets multiplied by velocity magnitude
         [SerializeField] private Color injectionColor = Color.white;
@@ -84,6 +82,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Diagnostics")]
         [Tooltip("Fill displayRT with solid magenta every frame, bypassing all density/gradient rendering. If flickering persists, the issue is outside SimDriver.")]
         [SerializeField] private bool debugSolidDisplay = false;
+        [Tooltip("Every 30 frames, read back the center pixel of density.Read and log RGBA values. Useful for diagnosing ping-pong buffer flickering.")]
+        [SerializeField] private bool debugDensityReadback = false;
+        [Tooltip("Enable verbose periodic logging (injection params, gradient pass info, particle skip warnings).")]
+        [SerializeField] private bool debugVerboseLogging = false;
 
         [Header("Performance")]
         [SerializeField] private bool measurePerformance = true;
@@ -114,7 +116,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private RenderTexture obstacles;
         private RenderTexture displayRT;
         private RenderTexture gradientRT;  // For gradient-rendered output
-        private RenderTexture densityStaging; // Non-UAV copy of density.Read for display Blits (DX12 barrier workaround)
         private RenderTexture creatureInkBuffer;  // Separate buffer for creature stamps (cleared each frame)
 
         // Particle-based density buffer (replaces RGBA texture with multi-channel iparticle)
@@ -349,17 +350,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             displayRT.name = "DisplayRT";
             displayRT.Create();
 
-            // Non-UAV staging RT for display reads.
-            // On DX12, density.Read is a UAV (enableRandomWrite) last written by a
-            // compute dispatch.  Graphics.Blit reads it as an SRV, but Unity's DX12
-            // backend may not insert the required UAV→SRV resource barrier.  Copying
-            // into this non-UAV staging RT first forces a clean state transition.
-            densityStaging = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGBHalf);
-            densityStaging.enableRandomWrite = false;
-            densityStaging.filterMode = FilterMode.Bilinear;
-            densityStaging.wrapMode = TextureWrapMode.Clamp;
-            densityStaging.name = "DensityStaging";
-            densityStaging.Create();
         }
 
         private RenderTexture CreateRT(RenderTextureFormat format, string name)
@@ -506,7 +496,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // oscillate between two drastically different states, the density
             // buffer itself is flickering.  If they are stable but the display
             // still flickers, the issue is in the gradient / display path.
-            if (density != null && Time.frameCount % 30 == 0)
+            if (debugDensityReadback && density != null && Time.frameCount % 30 == 0)
             {
                 var rt = density.Read;
                 RenderTexture prev = RenderTexture.active;
@@ -780,7 +770,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 if (resolution > maxParticleSimResolution)
                 {
                     // Skip particle simulation at very high resolutions as a safety measure
-                    if (Time.frameCount % 600 == 0)
+                    if (debugVerboseLogging && Time.frameCount % 600 == 0)
                     {
                         Debug.LogWarning($"[SimDriver] Particle simulation skipped (resolution {resolution} > maxParticleSimResolution {maxParticleSimResolution}).");
                     }
@@ -857,10 +847,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // pressure.Clear(Color.clear);
 
             // Choose pressure solver based on settings
-            // TEMPORARILY DISABLE Red-Black solver due to in-place write issues
-            // Use standard Jacobi instead
-            bool useJacobi = true;  // Force Jacobi for now
-            if (!useJacobi && useRedBlackSolver && kernelPressureRedBlack != 0)
+            if (useRedBlackSolver && kernelPressureRedBlack != 0)
             {
                 // Red-Black Gauss-Seidel (faster convergence)
                 for (int i = 0; i < pressureIterations; i++)
@@ -943,7 +930,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ) * injectionForce;
 
             // Debug to verify injection position
-            if (mouseDelta.magnitude > 0.1f || Mouse.current.leftButton.wasPressedThisFrame)
+            if (debugVerboseLogging && (mouseDelta.magnitude > 0.1f || Mouse.current.leftButton.wasPressedThisFrame))
             {
                 Vector2 pixelPos = uv * resolution;
                 float expectedVelAfterForce = velocity.magnitude * forceStrength * timestep;
@@ -956,7 +943,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             InjectDensity(uv, inkColor);
 
             // Debug: Log the parameters being set
-            if (Mouse.current.leftButton.wasPressedThisFrame)
+            if (debugVerboseLogging && Mouse.current.leftButton.wasPressedThisFrame)
             {
                 Debug.Log($"[SimDriver] Simulation params - Resolution: {resolution}, Timestep: {timestep}, Viscosity: {viscosity}, Vorticity: {vorticity}, VelDissipation: {velocityDissipation}, PressureIterations: {pressureIterations}");
             }
@@ -1192,7 +1179,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             if (particlesBuffer == null)
             {
-                if (Time.frameCount % 120 == 0)
+                if (debugVerboseLogging && Time.frameCount % 120 == 0)
                 {
                     Debug.LogWarning("[SimDriver] StampBlackBody aborted: particlesBuffer is null.");
                 }
@@ -1201,7 +1188,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             if (mask == null)
             {
-                if (Time.frameCount % 120 == 0)
+                if (debugVerboseLogging && Time.frameCount % 120 == 0)
                 {
                     Debug.LogWarning("[SimDriver] StampBlackBody aborted: mask is null.");
                 }
@@ -1470,20 +1457,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     : ConvertParticlesToTexture();
             }
 
-            // ── DX12 barrier workaround ──────────────────────────────────────
-            // density.Read (and velocity.Read) are UAV-enabled RTs last written
-            // by compute dispatches.  On DX12, Graphics.Blit may read them as
-            // SRVs without a proper UAV→SRV resource barrier, causing flickering.
-            // Copying into a non-UAV staging RT via CopyTexture forces the GPU to
-            // complete the compute writes and transition the resource state before
-            // the gradient shader reads it.
-            if (densityStaging != null && sourceTexture != null
-                && sourceTexture != displayRT
-                && sourceTexture.enableRandomWrite)
-            {
-                Graphics.CopyTexture(sourceTexture, densityStaging);
-                sourceTexture = densityStaging;
-            }
+            // NOTE: A densityStaging RT workaround was previously used here to
+            // force a UAV→SRV barrier on DX12.  The actual flickering root cause
+            // was Blend SrcAlpha in the gradient shader, not a missing barrier.
+            // The staging copy has been removed.  If UAV barrier issues resurface,
+            // re-introduce a non-UAV staging RT with Graphics.CopyTexture here.
 
             // COMPOSITE CREATURE INK FOR DISPLAY ONLY
             // Creature buffer is NOT added to particles (doesn't persist in simulation)
@@ -1561,7 +1539,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 }
 
                 // Debug: log gradient usage and debug keyword occasionally
-                if (Time.frameCount % 120 == 0)
+                if (debugVerboseLogging && Time.frameCount % 120 == 0)
                 {
                     bool showChannelsKeyword = gradientMaterial.IsKeywordEnabled("_SHOWCHANNELS_ON");
                     Debug.Log($"[SimDriver] Gradient pass active. useGradientRendering={useGradientRendering}, showChannelsKeyword={showChannelsKeyword}, hasParticles={(particlesBuffer != null)}, particleResolution={resolution}, showChannelsProp={showChannels}");
@@ -1730,7 +1708,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
               if (obstacles) obstacles.Release();
               if (displayRT) displayRT.Release();
               if (gradientRT) gradientRT.Release();
-              if (densityStaging) densityStaging.Release();
               if (creatureInkBuffer) creatureInkBuffer.Release();
 
               // Clean up compute buffers
