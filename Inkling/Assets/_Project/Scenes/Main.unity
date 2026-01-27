@@ -478,7 +478,7 @@ MonoBehaviour:
   injectionMask: {fileID: 2800000, guid: 5c6ec9fc2fc640f42bec7f06aa71891a, type: 3}
   maskResolution: 64
   maskTargetResolution: 64
-  useTextureColors: 0
+  useTextureColors: 1
   inkColorOverride: {r: 1, g: 0.35, b: 0.05, a: 1}
   densityMultiplier: 5
   alphaThreshold: 0.1
