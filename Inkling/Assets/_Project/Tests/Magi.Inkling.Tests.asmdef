@@ -1,0 +1,20 @@
+{
+  "name": "Magi.Inkling.Tests",
+  "rootNamespace": "Magi.Inkling.Tests",
+  "references": [
+    "Magi.Inkling"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
+
