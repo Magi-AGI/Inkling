@@ -123,6 +123,12 @@
 **/*.VC.db
 **/*.DotSettings.user
 
+# Unity auto-recovery scenes
+**/[Aa]ssets/_Recovery/
+
+# Claude Code local settings
+.claude/
+
 # Root OS/IDE ignores
 .idea/
 .vscode/
