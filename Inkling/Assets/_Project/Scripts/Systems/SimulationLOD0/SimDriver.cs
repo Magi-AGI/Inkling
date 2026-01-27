@@ -48,7 +48,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float densityAmount = 10.0f;    // Scalar density factor for mouse/texture injection
         [SerializeField] private float forceRadius = 40f;       // Larger injection area
         [SerializeField] private float forceStrength = 50f;     // Force gets multiplied by velocity magnitude
-        [SerializeField] private Color injectionColor = Color.white;
 
         [Header("Ink Type Selection")]
         [SerializeField] private InkType currentInkType = InkType.Fire;
@@ -79,14 +78,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private Magi.Inkling.Systems.Rendering.InkGradientPreset gradientPreset;
         [SerializeField] private Material gradientMaterial;
 
-        [Header("Diagnostics")]
-        [Tooltip("Fill displayRT with solid magenta every frame, bypassing all density/gradient rendering. If flickering persists, the issue is outside SimDriver.")]
-        [SerializeField] private bool debugSolidDisplay = false;
-        [Tooltip("Every 30 frames, read back the center pixel of density.Read and log RGBA values. Useful for diagnosing ping-pong buffer flickering.")]
-        [SerializeField] private bool debugDensityReadback = false;
-        [Tooltip("Enable verbose periodic logging (injection params, gradient pass info, particle skip warnings).")]
-        [SerializeField] private bool debugVerboseLogging = false;
-
         [Header("Performance")]
         [SerializeField] private bool measurePerformance = true;
 
@@ -103,9 +94,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool useParticleDissipation = true;
         [Tooltip("Safety cap: particle kernels are skipped when resolution exceeds this value.")]
         [SerializeField] private int maxParticleSimResolution = 512;
-
-        // Debug flags
-        private bool hasLoggedBlackBodyStamp = false;
 
         // Render textures (using PingPongRenderTexture from MagiUnityTools)
         private PingPongRenderTexture velocity;
@@ -489,29 +477,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // the final post-simulation state — all Update() calls (injection
             // queuing, simulation, swaps) have completed by this point.
             UpdateDisplay();
-
-            // ── Periodic density readback diagnostic ─────────────────────────
-            // Every 30 frames, read the center pixel of density.Read and log its
-            // RGBA + which physical RT is currently "Read".  If the logged values
-            // oscillate between two drastically different states, the density
-            // buffer itself is flickering.  If they are stable but the display
-            // still flickers, the issue is in the gradient / display path.
-            if (debugDensityReadback && density != null && Time.frameCount % 30 == 0)
-            {
-                var rt = density.Read;
-                RenderTexture prev = RenderTexture.active;
-                RenderTexture.active = rt;
-                Texture2D probe = new Texture2D(1, 1, TextureFormat.RGBAHalf, false);
-                int cx = resolution / 2;
-                int cy = resolution / 2;
-                probe.ReadPixels(new Rect(cx, cy, 1, 1), 0, 0);
-                probe.Apply();
-                Color c = probe.GetPixel(0, 0);
-                Debug.Log($"[SimDriver DIAG] frame={Time.frameCount} density.Read ID={rt.GetInstanceID()} " +
-                          $"center=({c.r:F4},{c.g:F4},{c.b:F4},{c.a:F4})");
-                RenderTexture.active = prev;
-                Destroy(probe);
-            }
         }
 
         /// <summary>
@@ -769,11 +734,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 if (resolution > maxParticleSimResolution)
                 {
-                    // Skip particle simulation at very high resolutions as a safety measure
-                    if (debugVerboseLogging && Time.frameCount % 600 == 0)
-                    {
-                        Debug.LogWarning($"[SimDriver] Particle simulation skipped (resolution {resolution} > maxParticleSimResolution {maxParticleSimResolution}).");
-                    }
+                    // Particle simulation skipped at this resolution
                 }
                 else
                 {
@@ -929,24 +890,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 mouseDelta.y
             ) * injectionForce;
 
-            // Debug to verify injection position
-            if (debugVerboseLogging && (mouseDelta.magnitude > 0.1f || Mouse.current.leftButton.wasPressedThisFrame))
-            {
-                Vector2 pixelPos = uv * resolution;
-                float expectedVelAfterForce = velocity.magnitude * forceStrength * timestep;
-                Debug.Log($"[SimDriver] Injecting at UV: {uv} (pixel: {pixelPos}), Mouse Delta: {mouseDelta}, Velocity (pixels/frame): {velocity} (mag: {velocity.magnitude}), Expected velocity after force injection: {expectedVelAfterForce} pixels, ForceStrength: {forceStrength}, InjectionForce: {injectionForce}");
-            }
-
             // Inject force and density with ink type color
             InjectForce(uv, velocity);
             Color inkColor = GetInkTypeColor(currentInkType);
             InjectDensity(uv, inkColor);
-
-            // Debug: Log the parameters being set
-            if (debugVerboseLogging && Mouse.current.leftButton.wasPressedThisFrame)
-            {
-                Debug.Log($"[SimDriver] Simulation params - Resolution: {resolution}, Timestep: {timestep}, Viscosity: {viscosity}, Vorticity: {vorticity}, VelDissipation: {velocityDissipation}, PressureIterations: {pressureIterations}");
-            }
         }
 
         /// <summary>
@@ -1177,23 +1124,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         /// <param name="blackLuminanceThreshold">Luminance threshold for "black" classification</param>
         public void StampBlackBody(Vector2 uvPosition, Texture2D mask, float alphaThreshold, float blackLuminanceThreshold)
         {
-            if (particlesBuffer == null)
-            {
-                if (debugVerboseLogging && Time.frameCount % 120 == 0)
-                {
-                    Debug.LogWarning("[SimDriver] StampBlackBody aborted: particlesBuffer is null.");
-                }
-                return;
-            }
-
-            if (mask == null)
-            {
-                if (debugVerboseLogging && Time.frameCount % 120 == 0)
-                {
-                    Debug.LogWarning("[SimDriver] StampBlackBody aborted: mask is null.");
-                }
-                return;
-            }
+            if (particlesBuffer == null || mask == null) return;
 
             int maskWidth = mask.width;
             int maskHeight = mask.height;
@@ -1209,9 +1140,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             // Read from first buffer; write back to all to keep them in sync
             particlesBuffer[0].GetData(particles);
-
-            int blackPixelCount = 0;
-            float maxBlackAlpha = 0f;
 
             for (int y = 0; y < maskHeight; y++)
             {
@@ -1238,28 +1166,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     float current = (float)particles[targetIdx].blackBody;
                     float updated = Mathf.Clamp01(current + maskColor.a);
                     particles[targetIdx].blackBody = (half)updated;
-
-                    blackPixelCount++;
-                    if (maskColor.a > maxBlackAlpha)
-                    {
-                        maxBlackAlpha = maskColor.a;
-                    }
                 }
             }
 
             for (int i = 0; i < particlesBuffer.Length; i++)
             {
                 particlesBuffer[i].SetData(particles);
-            }
-
-            // Debug log the first time we stamp black body ink,
-            // so we can verify the CPU path is actually finding black pixels.
-            if (!hasLoggedBlackBodyStamp)
-            {
-                int sampleIdx = Mathf.Clamp(centerY * resolution + centerX, 0, particleCount - 1);
-                float sampleBlack = (float)particles[sampleIdx].blackBody;
-                Debug.Log($"[SimDriver] StampBlackBody FIRST HIT at UV {uvPosition:F3}: blackPixels={blackPixelCount}, maxAlpha={maxBlackAlpha:F3}, sampleCenterBlack={sampleBlack:F3}");
-                hasLoggedBlackBodyStamp = true;
             }
         }
 
@@ -1417,26 +1329,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void UpdateDisplay()
         {
-            // ── Diagnostic bypass: solid-color fill ──────────────────────────
-            // When enabled, fills displayRT with solid magenta and skips all
-            // density / gradient rendering.  If the display STILL flickers with
-            // this enabled, the issue is in HDRP / the mesh renderer, not here.
-            if (debugSolidDisplay)
-            {
-                if (displayRT != null)
-                {
-                    RenderTexture prev = RenderTexture.active;
-                    RenderTexture.active = displayRT;
-                    GL.Clear(true, true, new Color(1f, 0f, 1f, 1f)); // solid magenta
-                    RenderTexture.active = prev;
-                }
-                if (displayRenderer != null)
-                {
-                    displayRenderer.material.mainTexture = displayRT;
-                }
-                return;
-            }
-
             RenderTexture sourceTexture;
 
             if (useParticleRenderPass && particlesBuffer != null && particleToColorCompute != null)
@@ -1457,11 +1349,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     : ConvertParticlesToTexture();
             }
 
-            // NOTE: A densityStaging RT workaround was previously used here to
-            // force a UAV→SRV barrier on DX12.  The actual flickering root cause
-            // was Blend SrcAlpha in the gradient shader, not a missing barrier.
-            // The staging copy has been removed.  If UAV barrier issues resurface,
-            // re-introduce a non-UAV staging RT with Graphics.CopyTexture here.
+            // Staging RT workaround removed; flickering was caused by Blend SrcAlpha in gradient shader.
 
             // COMPOSITE CREATURE INK FOR DISPLAY ONLY
             // Creature buffer is NOT added to particles (doesn't persist in simulation)
@@ -1536,13 +1424,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 else
                 {
                     gradientMaterial.DisableKeyword("_SHOWCHANNELS_ON");
-                }
-
-                // Debug: log gradient usage and debug keyword occasionally
-                if (debugVerboseLogging && Time.frameCount % 120 == 0)
-                {
-                    bool showChannelsKeyword = gradientMaterial.IsKeywordEnabled("_SHOWCHANNELS_ON");
-                    Debug.Log($"[SimDriver] Gradient pass active. useGradientRendering={useGradientRendering}, showChannelsKeyword={showChannelsKeyword}, hasParticles={(particlesBuffer != null)}, particleResolution={resolution}, showChannelsProp={showChannels}");
                 }
 
                 // Provide particle buffer and resolution for direct gradient sampling
@@ -1670,8 +1551,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     return Color.white;
             }
         }
-
-        // SwapBuffers method removed - using PingPongBuffer.Swap() instead
 
         public RenderTexture GetDensityTexture()
         {
