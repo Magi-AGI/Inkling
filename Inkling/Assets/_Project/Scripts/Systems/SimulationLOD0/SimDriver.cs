@@ -40,7 +40,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Solver Settings")]
         [SerializeField] private int pressureIterations = 40;  // Increased for better convergence
         [SerializeField] private int diffusionIterations = 0;   // Disable diffusion for now (it slows things down)
-        [SerializeField] private bool useRedBlackSolver = false; // Red-Black Gauss-Seidel (faster convergence, enable via Inspector)
+        [SerializeField] private bool useRedBlackSolver = false; // Red-Black Gauss-Seidel (faster convergence). Falls back to Jacobi if PressureRedBlack kernel is missing.
 
         [Header("Injection")]
         [SerializeField] private bool autoInject = false;  // Disable auto-inject by default
@@ -83,7 +83,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Creature / Stamp Rendering")]
         [SerializeField] private Shader densityStampShader;
-        [Tooltip("Compute-shader stamp (preferred over Blit shader). Eliminates DX12 cross-queue barriers on density ping-pong buffers.")]
+        [Tooltip("Compute-shader stamp (preferred over Blit shader). Eliminates DX12 cross-queue barriers on density ping-pong buffers. If unassigned, stamps fall back to Graphics.Blit via densityStampShader.")]
         [SerializeField] private ComputeShader stampCompute;
 
         [Header("Particle Simulation")]
@@ -114,6 +114,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // Materials
         private Material densityStampMaterial;
         [Header("Particle Rendering")]
+        [Tooltip("Compute shader that converts iparticle buffer to ARGB display texture. If unassigned, useParticleRenderPass has no effect and display falls through to density RT or CPU particle conversion.")]
         [SerializeField] private ComputeShader particleToColorCompute;
         [SerializeField] private bool useParticleRenderPass = false;
 
@@ -481,11 +482,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         /// <summary>
         /// Drains all pending GPU operations (density stamps, force injections, etc.)
-        /// that were queued by external callers since the last frame.  Runs at the
-        /// very start of SimulateFrame so every Blit / Dispatch / Swap happens inside
-        /// a single Update(), giving the DX12 backend a contiguous command stream
-        /// with correct resource barriers.
+        /// that were queued by external callers since the last frame.
         /// </summary>
+        /// <remarks>
+        /// <b>Execution-order contract:</b>
+        /// TexturedInjector (order −50) queues stamps/forces into the pending lists
+        /// during its Update(). SimDriver (order +50) calls SimulateFrame() → here,
+        /// which drains every queue in a single Update(). This guarantees all GPU
+        /// work (Dispatch / Blit / Swap) runs inside one contiguous command stream,
+        /// giving the DX12 backend correct resource barriers.
+        ///
+        /// <b>Ping-pong invariant:</b>
+        /// Each queue section reads from <c>.Read</c>, writes to <c>.Write</c>, then
+        /// calls <c>.Swap()</c> per operation. After this method returns, <c>.Read</c>
+        /// always holds the latest state for the simulation kernels that follow.
+        ///
+        /// <b>Dual path (compute / Blit):</b>
+        /// Density stamps prefer the compute path (<c>stampCompute</c>) to stay on
+        /// the compute queue. If the compute shader is unassigned, falls back to
+        /// Graphics.Blit (graphics queue — may flicker on DX12).
+        /// </remarks>
         private void ProcessPendingOperations()
         {
             int threadGroups = Mathf.CeilToInt(resolution / 8f);
