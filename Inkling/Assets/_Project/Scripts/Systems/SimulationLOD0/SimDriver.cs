@@ -663,14 +663,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 foreach (var d in pendingDensityInjections)
                 {
                     float colorIntensity = Mathf.Max(d.color.r, Mathf.Max(d.color.g, d.color.b));
-                    float amount = colorIntensity * densityAmount;
-                    if (amount <= 0f) continue;
+                    if (colorIntensity <= 0f) continue;
 
                     Vector2 pixelPos = d.position * resolution;
 
                     fluidCompute.SetVector("_ForcePosition", pixelPos);
                     fluidCompute.SetFloat("_ForceRadius", forceRadius);
-                    fluidCompute.SetFloat("_DensityAmount", amount);
+                    fluidCompute.SetFloat("_DensityAmount", densityAmount);
+                    fluidCompute.SetVector("_DensityColor", (Vector4)d.color);
                     fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
 
                     fluidCompute.SetTexture(kernelAddDensity, "_DensityRead", density.Read);
@@ -940,11 +940,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             float colorIntensity = Mathf.Max(color.r, Mathf.Max(color.g, color.b));
-            float amount = colorIntensity * densityAmount;
-            if (amount <= 0f)
-            {
-                return;
-            }
+            if (colorIntensity <= 0f || densityAmount <= 0f) return;
 
             pendingDensityInjections.Add(new PendingDensityInjection
             {
