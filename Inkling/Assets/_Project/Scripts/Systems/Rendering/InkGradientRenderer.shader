@@ -56,9 +56,23 @@ Shader "Inkling/InkGradientRenderer"
             #pragma fragment frag
             #pragma multi_compile_instancing
             #pragma shader_feature _SHOWCHANNELS_ON
+            #pragma multi_compile _ _PARTICLEBUFFER_ON
             #pragma multi_compile _DEBUGMODE_COMBINED _DEBUGMODE_FIRE _DEBUGMODE_WATER _DEBUGMODE_METAL _DEBUGMODE_ELECTRIC
 
             #include "UnityCG.cginc"
+
+            #ifdef _PARTICLEBUFFER_ON
+            // Channel textures written by ParticleChannelSplat.compute.
+            // Avoids reading StructuredBuffer<iparticle> in a fragment shader
+            // where CGPROGRAM promotes half → float, causing a stride mismatch
+            // (28 bytes in C# vs 56 bytes expected by the shader).
+            //   _Channels0: fire, water, plantSeeded, plantGrown
+            //   _Channels1: steam, glitter, blackBody, ice
+            //   _Channels2: electricitySeeded, electricityGrown, 0, 0
+            sampler2D _Channels0;
+            sampler2D _Channels1;
+            sampler2D _Channels2;
+            #endif
 
             struct Attributes
             {
@@ -148,34 +162,74 @@ Shader "Inkling/InkGradientRenderer"
 
             float4 frag(Varyings input) : SV_Target
             {
-                // Sample the simulation/stylized texture
-                // Expecting RGBA where RGB contains ink type concentrations or colors
+                float4 finalColor = float4(0, 0, 0, 0);
+
+            #ifdef _PARTICLEBUFFER_ON
+                // ── Particle-authoritative path ─────────────────────────────
+                // Read channel textures (written by ParticleChannelSplat.compute)
+                float4 ch0 = tex2D(_Channels0, input.uv); // fire, water, plantSeeded, plantGrown
+                float4 ch1 = tex2D(_Channels1, input.uv); // steam, glitter, blackBody, ice
+                float4 ch2 = tex2D(_Channels2, input.uv); // electricitySeeded, electricityGrown, 0, 0
+
+                #ifdef _SHOWCHANNELS_ON
+                    return float4(ch0.r, ch0.g, ch1.a, 1.0); // fire, water, ice
+                #endif
+
+                // Per-channel gradient lookups, weighted by channel intensity.
+                // Weighting is essential: gradient textures may return non-zero at
+                // intensity=0 (especially unassigned textures defaulting to white),
+                // so zero-intensity channels must contribute zero color.
+                float fireI   = saturate(ch0.r);
+                float waterI  = saturate(ch0.g);
+                float plantSI = saturate(ch0.b);
+                float plantGI = saturate(ch0.a);
+                float steamI  = saturate(ch1.r);
+                float dustI   = saturate(ch1.g);
+                float iceI    = saturate(ch1.a);
+                float elecI   = saturate(max(ch2.r, ch2.g));
+
+                float totalInk = fireI + waterI + plantSI + plantGI
+                    + steamI + dustI + elecI + iceI + 0.001;
+
+                finalColor =
+                    ( SampleGradient(_FireGradientTex,        fireI)   * fireI
+                    + SampleGradient(_WaterGradientTex,       waterI)  * waterI
+                    + SampleGradient(_PlantGradientTex,       plantSI) * plantSI
+                    + SampleGradient(_MetalGradientTex,       plantGI) * plantGI
+                    + SampleGradient(_SteamGradientTex,       steamI)  * steamI
+                    + SampleGradient(_DustGradientTex,        dustI)   * dustI
+                    + SampleGradient(_ElectricityGradientTex, elecI)   * elecI
+                    + SampleGradient(_IceGradientTex,         iceI)    * iceI
+                    ) / totalInk;
+
+                // BlackBody darkening (subtractive — no gradient lookup)
+                finalColor.rgb *= (1.0 - saturate(ch1.b));
+
+                // Alpha from total ink presence
+                finalColor.a = saturate(fireI + waterI + plantSI + plantGI
+                    + steamI + dustI + saturate(ch1.b) + iceI
+                    + elecI);
+
+                // Gradient intensity: lerp between raw particle RGB and gradient output
+                float4 rawColor = float4(ch0.r, ch0.g, ch1.a, finalColor.a); // fire, water, ice
+                finalColor = lerp(rawColor, finalColor, _GradientIntensity);
+
+            #else
+                // ── Density RT fallback path ────────────────────────────────
                 float4 simData = tex2D(_MainTex, input.uv);
 
                 #ifdef _SHOWCHANNELS_ON
-                    // Debug: Show raw channels
                     return simData;
                 #endif
 
-                // For this example, let's assume the simulation data encodes:
-                // R channel: Fire/Heat concentration
-                // G channel: Water/Fluid concentration
-                // B channel: Metal/Electric concentration
-                // A channel: Overall density/alpha
-
-                float4 finalColor = float4(0, 0, 0, 0);
-
-                // Remap values
                 float fireIntensity = RemapValue(simData.r, _ValueRemap.xy, _ValueRemap.zw);
                 float waterIntensity = RemapValue(simData.g, _ValueRemap.xy, _ValueRemap.zw);
                 float metalIntensity = RemapValue(simData.b, _ValueRemap.xy, _ValueRemap.zw);
 
-                // Sample gradients based on concentrations
                 float4 fireColor = SampleGradient(_FireGradientTex, fireIntensity, 0.5);
                 float4 waterColor = SampleGradient(_WaterGradientTex, waterIntensity, 0.5);
                 float4 metalColor = SampleGradient(_MetalGradientTex, metalIntensity, 0.5);
 
-                // Combine colors based on concentrations
                 #if _DEBUGMODE_FIRE
                     finalColor = fireColor * simData.r;
                 #elif _DEBUGMODE_WATER
@@ -186,31 +240,23 @@ Shader "Inkling/InkGradientRenderer"
                     float4 electricColor = SampleGradient(_ElectricityGradientTex, metalIntensity, sin(_Time.y * 10));
                     finalColor = electricColor * simData.b;
                 #else
-                    // Combined mode - blend all active ink types
                     float totalConcentration = simData.r + simData.g + simData.b + 0.001;
-
                     finalColor = (fireColor * simData.r +
                                  waterColor * simData.g +
                                  metalColor * simData.b) / totalConcentration;
-
-                    // Preserve alpha from simulation
                     finalColor.a = simData.a;
                 #endif
 
-                // Apply gradient intensity
                 finalColor = lerp(simData, finalColor, _GradientIntensity);
 
-                // Boost saturation
-                finalColor.rgb = BoostSaturation(finalColor.rgb, _SaturationBoost);
-
-                // Add edge glow for emphasis
+                // Edge glow (density RT path only — particle path skips this)
                 float edge = CalculateEdgeGlow(input.uv);
                 finalColor.rgb += finalColor.rgb * edge * _EdgeGlow;
+            #endif
 
-                // Apply emission
+                // Common post-processing
+                finalColor.rgb = BoostSaturation(finalColor.rgb, _SaturationBoost);
                 finalColor.rgb *= _EmissionStrength;
-
-                // Alpha cutoff for cleaner edges
                 finalColor.a = smoothstep(_AlphaCutoff, _AlphaCutoff + 0.05, finalColor.a);
 
                 return finalColor;

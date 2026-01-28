@@ -1,0 +1,39 @@
+// Compute-to-texture intermediate for particle-authoritative rendering.
+// Reads iparticle StructuredBuffer (half fields, stride 28) and writes
+// all 10 ink channels into 3 RGBA float render textures.
+//
+// This avoids a stride mismatch: CGPROGRAM fragment shaders on desktop
+// promote half → float, expecting stride 56 for iparticle. Compute
+// shaders read the half layout correctly, so we splat here and let the
+// fragment shader sample standard float textures.
+
+#pragma kernel ChannelSplat
+
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+StructuredBuffer<iparticle> _ParticlesRead;
+
+// Channel packing:
+//   _Channels0: fire, water, plantSeeded, plantGrown
+//   _Channels1: steam, glitter, blackBody, ice
+//   _Channels2: electricitySeeded, electricityGrown, 0, 0
+RWTexture2D<float4> _Channels0;
+RWTexture2D<float4> _Channels1;
+RWTexture2D<float4> _Channels2;
+
+int _Resolution;
+
+[numthreads(8, 8, 1)]
+void ChannelSplat(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Resolution || (int)id.y >= _Resolution)
+        return;
+
+    uint idx = id.y * (uint)_Resolution + id.x;
+    iparticle p = _ParticlesRead[idx];
+
+    _Channels0[int2(id.xy)] = float4((float)p.fire, (float)p.water, (float)p.plantSeeded, (float)p.plantGrown);
+    _Channels1[int2(id.xy)] = float4((float)p.steam, (float)p.glitter, (float)p.blackBody, (float)p.ice);
+    _Channels2[int2(id.xy)] = float4((float)p.electricitySeeded, (float)p.electricityGrown, 0, 0);
+}

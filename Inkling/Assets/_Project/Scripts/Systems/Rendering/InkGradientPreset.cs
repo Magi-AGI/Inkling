@@ -85,37 +85,56 @@ namespace Magi.Inkling.Systems.Rendering
             return textures;
         }
 
+        // Cached gradient textures — regenerated only when preset changes.
+        // Prevents per-frame Texture2D allocation that caused textures to become
+        // unreferenced and null when read back from the material.
+        [NonSerialized] private GradientTextures cachedTextures;
+
         /// <summary>
-        /// Apply preset to material
+        /// Apply preset to material.  Gradient textures are cached and only
+        /// regenerated when the preset is modified (via OnValidate).
         /// </summary>
         public void ApplyToMaterial(Material material)
         {
             if (material == null) return;
 
-            const int defaultResolution = 256;
-            var textures = new GradientTextures
+            // Generate gradient textures once and cache them
+            if (cachedTextures == null)
             {
-                fireTexture = fireGradientTexOverride ?? CreateGradientTexture(fireGradient, fireIntensityCurve, defaultResolution),
-                waterTexture = waterGradientTexOverride ?? CreateGradientTexture(waterGradient, waterIntensityCurve, defaultResolution),
-                metalTexture = metalGradientTexOverride ?? CreateGradientTexture(metalGradient, metalIntensityCurve, defaultResolution),
-                electricityTexture = electricityGradientTexOverride ?? CreateGradientTexture(electricityGradient, electricityIntensityCurve, defaultResolution),
-                iceTexture = iceGradientTexOverride ?? CreateGradientTexture(iceGradient, iceIntensityCurve, defaultResolution),
-                plantTexture = plantGradientTexOverride ?? CreateGradientTexture(plantGradient, plantIntensityCurve, defaultResolution),
-                steamTexture = steamGradientTexOverride ?? CreateGradientTexture(steamGradient, steamIntensityCurve, defaultResolution),
-                dustTexture = dustGradientTexOverride ?? CreateGradientTexture(dustGradient, dustIntensityCurve, defaultResolution)
-            };
+                const int defaultResolution = 256;
+                cachedTextures = new GradientTextures
+                {
+                    fireTexture = fireGradientTexOverride != null ? fireGradientTexOverride : CreateGradientTexture(fireGradient, fireIntensityCurve, defaultResolution),
+                    waterTexture = waterGradientTexOverride != null ? waterGradientTexOverride : CreateGradientTexture(waterGradient, waterIntensityCurve, defaultResolution),
+                    metalTexture = metalGradientTexOverride != null ? metalGradientTexOverride : CreateGradientTexture(metalGradient, metalIntensityCurve, defaultResolution),
+                    electricityTexture = electricityGradientTexOverride != null ? electricityGradientTexOverride : CreateGradientTexture(electricityGradient, electricityIntensityCurve, defaultResolution),
+                    iceTexture = iceGradientTexOverride != null ? iceGradientTexOverride : CreateGradientTexture(iceGradient, iceIntensityCurve, defaultResolution),
+                    plantTexture = plantGradientTexOverride != null ? plantGradientTexOverride : CreateGradientTexture(plantGradient, plantIntensityCurve, defaultResolution),
+                    steamTexture = steamGradientTexOverride != null ? steamGradientTexOverride : CreateGradientTexture(steamGradient, steamIntensityCurve, defaultResolution),
+                    dustTexture = dustGradientTexOverride != null ? dustGradientTexOverride : CreateGradientTexture(dustGradient, dustIntensityCurve, defaultResolution)
+                };
+            }
 
-            material.SetTexture("_FireGradientTex", textures.fireTexture);
-            material.SetTexture("_WaterGradientTex", textures.waterTexture);
-            material.SetTexture("_MetalGradientTex", textures.metalTexture);
-            material.SetTexture("_ElectricityGradientTex", textures.electricityTexture);
-            material.SetTexture("_IceGradientTex", textures.iceTexture);
-            material.SetTexture("_PlantGradientTex", textures.plantTexture);
-            material.SetTexture("_SteamGradientTex", textures.steamTexture);
-            material.SetTexture("_DustGradientTex", textures.dustTexture);
+            material.SetTexture("_FireGradientTex", cachedTextures.fireTexture);
+            material.SetTexture("_WaterGradientTex", cachedTextures.waterTexture);
+            material.SetTexture("_MetalGradientTex", cachedTextures.metalTexture);
+            material.SetTexture("_ElectricityGradientTex", cachedTextures.electricityTexture);
+            material.SetTexture("_IceGradientTex", cachedTextures.iceTexture);
+            material.SetTexture("_PlantGradientTex", cachedTextures.plantTexture);
+            material.SetTexture("_SteamGradientTex", cachedTextures.steamTexture);
+            material.SetTexture("_DustGradientTex", cachedTextures.dustTexture);
 
             material.SetFloat("_SaturationBoost", globalSaturation);
             material.SetFloat("_EdgeGlow", edgeGlowStrength);
+        }
+
+        private void OnValidate()
+        {
+            // Invalidate cache so textures are regenerated on next ApplyToMaterial.
+            // Do NOT call Dispose() here — the cache may hold override textures
+            // (persistent assets) that must not be destroyed.  Generated textures
+            // are small (256×4 RGBA32) and will be collected on domain reload.
+            cachedTextures = null;
         }
 
         private static Texture2D CreateGradientTexture(Gradient gradient, AnimationCurve curve, int width)

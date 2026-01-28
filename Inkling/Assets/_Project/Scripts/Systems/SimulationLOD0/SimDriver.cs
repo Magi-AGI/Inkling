@@ -85,11 +85,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private Shader densityStampShader;
         [Tooltip("Compute-shader stamp (preferred over Blit shader). Eliminates DX12 cross-queue barriers on density ping-pong buffers. If unassigned, stamps fall back to Graphics.Blit via densityStampShader.")]
         [SerializeField] private ComputeShader stampCompute;
+        [Tooltip("Compute-shader stamp for particle buffer. If unassigned, particle stamps fall back to CPU path.")]
+        [SerializeField] private ComputeShader stampParticlesCompute;
 
         [Header("Particle Simulation")]
-        [SerializeField] private bool useParticleSimulation = false;
+        [SerializeField] private bool useParticleSimulation = true;
         [Tooltip("When enabled (with useParticleSimulation), runs AdvectParticles each frame.")]
-        [SerializeField] private bool useParticleAdvection = false;
+        [SerializeField] private bool useParticleAdvection = true;
         [Tooltip("When enabled (with useParticleSimulation), runs DissipateParticles each frame.")]
         [SerializeField] private bool useParticleDissipation = true;
         [Tooltip("Safety cap: particle kernels are skipped when resolution exceeds this value.")]
@@ -106,16 +108,47 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private RenderTexture gradientRT;  // For gradient-rendered output
         private RenderTexture creatureInkBuffer;  // Separate buffer for creature stamps (cleared each frame)
 
+        // Channel textures for particle-authoritative gradient rendering.
+        // ParticleChannelSplat.compute writes these; InkGradientRenderer reads them.
+        private RenderTexture channelRT0;  // fire, water, plantSeeded, plantGrown
+        private RenderTexture channelRT1;  // steam, glitter, blackBody, ice
+        private RenderTexture channelRT2;  // electricitySeeded, electricityGrown, 0, 0
+
         // Particle-based density buffer (replaces RGBA texture with multi-channel iparticle)
         private ComputeBuffer[] particlesBuffer;  // Ping-pong buffer for iparticle structs
         private int particleReadIndex = 0;
         private int particleWriteIndex = 1;
+
+        // GPU stride management.  DX11's FXC compiler promotes half→float in
+        // StructuredBuffers, doubling the expected stride from 28 to 56.  We
+        // detect this at runtime and create the buffer at the GPU-expected stride.
+        // CPU↔GPU transfers marshal through iparticle_gpu (float fields) when
+        // promoted, preserving the half-precision domain model (iparticle).
+        private bool gpuPromotesHalf;
+        private int gpuParticleStride;
+
+        /// <summary>
+        /// Float-field mirror of iparticle for GPU buffer marshaling on platforms
+        /// where half is promoted to float in StructuredBuffers (DX11/FXC).
+        /// Field order must exactly match iparticle.cs.
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        private struct iparticle_gpu
+        {
+            public float fire, water, plantSeeded, plantGrown;
+            public float steam, glitter, blackBody;
+            public float electricitySeeded, electricityGrown;
+            public float ice;
+            public float red, green, blue, alpha;
+        }
 
         // Materials
         private Material densityStampMaterial;
         [Header("Particle Rendering")]
         [Tooltip("Compute shader that converts iparticle buffer to ARGB display texture. If unassigned, useParticleRenderPass has no effect and display falls through to density RT or CPU particle conversion.")]
         [SerializeField] private ComputeShader particleToColorCompute;
+        [Tooltip("Compute shader that splats iparticle channels into 3 RGBA render textures for gradient rendering. Required for particle-authoritative gradient path (avoids half/float stride mismatch in fragment shaders).")]
+        [SerializeField] private ComputeShader particleChannelSplatCompute;
         [SerializeField] private bool useParticleRenderPass = false;
 
         // Kernel indices
@@ -142,6 +175,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private int kernelStampDensity;
         private int kernelClearBlackDensity;
         private bool stampComputeReady;
+
+        // Stamp particles compute kernel (from StampParticlesCompute.compute)
+        private int kernelStampParticles;
+        private bool stampParticlesComputeReady;
+
+        // Channel splat compute kernel (from ParticleChannelSplat.compute)
+        private int kernelChannelSplat;
+        private bool channelSplatReady;
+        private bool loggedDisplayDiagnostic;
 
         // Performance tracking
         private Stopwatch stopwatch = new Stopwatch();
@@ -218,20 +260,59 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (stampCompute == null)
             {
                 stampComputeReady = false;
-                return;
+            }
+            else
+            {
+                try
+                {
+                    kernelStampDensity = stampCompute.FindKernel("StampDensity");
+                    kernelClearBlackDensity = stampCompute.FindKernel("ClearBlackDensity");
+                    stampComputeReady = true;
+                    Debug.Log("[SimDriver] Stamp compute shader ready – density stamps will use compute pipeline.");
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"[SimDriver] Stamp compute init failed ({e.Message}). Falling back to Blit-based stamps.");
+                    stampComputeReady = false;
+                }
             }
 
-            try
+            if (stampParticlesCompute == null)
             {
-                kernelStampDensity = stampCompute.FindKernel("StampDensity");
-                kernelClearBlackDensity = stampCompute.FindKernel("ClearBlackDensity");
-                stampComputeReady = true;
-                Debug.Log("[SimDriver] Stamp compute shader ready – density stamps will use compute pipeline.");
+                stampParticlesComputeReady = false;
             }
-            catch (System.Exception e)
+            else
             {
-                Debug.LogWarning($"[SimDriver] Stamp compute init failed ({e.Message}). Falling back to Blit-based stamps.");
-                stampComputeReady = false;
+                try
+                {
+                    kernelStampParticles = stampParticlesCompute.FindKernel("StampParticles");
+                    stampParticlesComputeReady = true;
+                    Debug.Log("[SimDriver] Stamp particles compute shader ready – particle stamps will use GPU pipeline.");
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"[SimDriver] Stamp particles compute init failed ({e.Message}). Falling back to CPU particle stamps.");
+                    stampParticlesComputeReady = false;
+                }
+            }
+
+            if (particleChannelSplatCompute == null)
+            {
+                channelSplatReady = false;
+            }
+            else
+            {
+                try
+                {
+                    kernelChannelSplat = particleChannelSplatCompute.FindKernel("ChannelSplat");
+                    channelSplatReady = true;
+                    Debug.Log("[SimDriver] Channel splat compute shader ready – gradient rendering will use particle channel textures.");
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"[SimDriver] Channel splat compute init failed ({e.Message}). Gradient rendering will fall back to density RT.");
+                    channelSplatReady = false;
+                }
             }
         }
 
@@ -321,15 +402,41 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             creatureInkBuffer = CreateRT(RenderTextureFormat.ARGBHalf, "CreatureInk");
 
             // Particle buffer (replaces density RenderTexture)
+            // Most desktop HLSL compilers promote half→float in StructuredBuffer
+            // layouts, expecting stride 56 (14 fields × 4 bytes) instead of C#'s
+            // stride 28 (14 fields × 2 bytes).  This includes:
+            //   DX11 (FXC always promotes), DX12 (DXC promotes without
+            //   -enable-16bit-types, which Unity does not enable by default),
+            //   OpenGL (no native half), Vulkan desktop (SPIR-V typically promotes).
+            // Native half in StructuredBuffers is only reliable on mobile GPUs
+            // (Metal on Apple Silicon, GLES on Mali/Adreno with explicit support).
             int particleCount = resolution * resolution;
-            int stride = Marshal.SizeOf<iparticle>();
+            int halfStride = Marshal.SizeOf<iparticle>();
+            int floatStride = Marshal.SizeOf<iparticle_gpu>();
+            var gfxAPI = SystemInfo.graphicsDeviceType;
+            gpuPromotesHalf = gfxAPI == GraphicsDeviceType.Direct3D11
+                || gfxAPI == GraphicsDeviceType.Direct3D12
+                || gfxAPI == GraphicsDeviceType.OpenGLCore
+                || gfxAPI == GraphicsDeviceType.OpenGLES3
+                || gfxAPI == GraphicsDeviceType.Vulkan;
+            gpuParticleStride = gpuPromotesHalf ? floatStride : halfStride;
+
             particlesBuffer = new ComputeBuffer[2];
             for (int i = 0; i < 2; i++)
             {
-                  particlesBuffer[i] = new ComputeBuffer(particleCount, stride, ComputeBufferType.Default);
+                  particlesBuffer[i] = new ComputeBuffer(particleCount, gpuParticleStride, ComputeBufferType.Default);
             }
 
-            Debug.Log($"[SimDriver] Allocated particle buffer: {particleCount} particles, stride {stride} bytes");
+            Debug.Log($"[SimDriver] Allocated particle buffer: {particleCount} particles, " +
+                $"stride {gpuParticleStride} bytes ({(gpuPromotesHalf ? "float-promoted" : "native half")}), " +
+                $"API={SystemInfo.graphicsDeviceType}");
+
+            // Channel textures for particle-authoritative gradient rendering
+            // ARGBFloat avoids packing artifacts on DX12 when compute writes
+            // (UAV) are immediately sampled (SRV) by the gradient fragment shader.
+            channelRT0 = CreateRT(RenderTextureFormat.ARGBFloat, "Channels0_fire_water_plant");
+            channelRT1 = CreateRT(RenderTextureFormat.ARGBFloat, "Channels1_steam_glitter_bb_ice");
+            channelRT2 = CreateRT(RenderTextureFormat.ARGBFloat, "Channels2_electricity");
 
             // Display output (used as UAV by particle render pass)
             displayRT = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32);
@@ -398,12 +505,20 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fluidCompute.SetTexture(kernelClear, "_DivergenceWrite", divergence);
             fluidCompute.SetTexture(kernelClear, "_VorticityMag", vorticityTex);
 
-            // Clear particle buffer with zero data
+            // Clear particle buffer with zero data (stride-aware)
             int particleCount = resolution * resolution;
-            iparticle[] zeroParticles = new iparticle[particleCount];
-            // Array is already zero-initialized in C#
-            particlesBuffer[particleReadIndex].SetData(zeroParticles);
-            particlesBuffer[particleWriteIndex].SetData(zeroParticles);
+            if (gpuPromotesHalf)
+            {
+                var zero = new iparticle_gpu[particleCount];
+                particlesBuffer[particleReadIndex].SetData(zero);
+                particlesBuffer[particleWriteIndex].SetData(zero);
+            }
+            else
+            {
+                var zero = new iparticle[particleCount];
+                particlesBuffer[particleReadIndex].SetData(zero);
+                particlesBuffer[particleWriteIndex].SetData(zero);
+            }
 
             fluidCompute.Dispatch(kernelClear, threadGroups, threadGroups, 1);
         }
@@ -564,6 +679,31 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                         }
                     }
                 }
+                // ── GPU particle stamps (mirror density stamps into particle buffer) ─
+                if (stampParticlesComputeReady && particlesBuffer != null)
+                {
+                    foreach (var s in pendingDensityStamps)
+                    {
+                        if (s.stamp == null) continue;
+
+                        float stampWidthUV  = (float)s.stamp.width  / resolution;
+                        float stampHeightUV = (float)s.stamp.height / resolution;
+
+                        stampParticlesCompute.SetBuffer(kernelStampParticles, "_ParticlesRW",
+                            particlesBuffer[particleReadIndex]);
+                        stampParticlesCompute.SetTexture(kernelStampParticles, "_StampTex", s.stamp);
+                        stampParticlesCompute.SetVector("_StampCenter", new Vector4(s.uvPosition.x, s.uvPosition.y, 0f, 0f));
+                        stampParticlesCompute.SetVector("_StampSize",   new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                        stampParticlesCompute.SetFloat("_AlphaThreshold", 0.01f);
+                        stampParticlesCompute.SetFloat("_DensityMul",     s.multiplier);
+                        stampParticlesCompute.SetFloat("_UseOverride",    s.useColorOverride ? 1f : 0f);
+                        stampParticlesCompute.SetVector("_OverrideColor", (Vector4)s.overrideColor);
+                        stampParticlesCompute.SetVector("_Resolution",    new Vector2(resolution, resolution));
+
+                        stampParticlesCompute.Dispatch(kernelStampParticles, threadGroups, threadGroups, 1);
+                    }
+                }
+
                 pendingDensityStamps.Clear();
             }
 
@@ -677,6 +817,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     fluidCompute.SetTexture(kernelAddDensity, "_DensityWrite", density.Write);
                     fluidCompute.Dispatch(kernelAddDensity, threadGroups, threadGroups, 1);
                     density.Swap();
+
+                    // Mirror into particle buffer via GPU (same ForceParams already set)
+                    if (useParticleSimulation && particlesBuffer != null && kernelAddParticlesGaussian != 0)
+                    {
+                        fluidCompute.SetBuffer(kernelAddParticlesGaussian, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                        fluidCompute.SetBuffer(kernelAddParticlesGaussian, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
+                        fluidCompute.Dispatch(kernelAddParticlesGaussian, threadGroups, threadGroups, 1);
+                        SwapParticleBuffers();
+                    }
                 }
                 pendingDensityInjections.Clear();
             }
@@ -877,6 +1026,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             if (sw != null) projectionMs = (float)sw.Elapsed.TotalMilliseconds;
+
+            // 7. Splat particle channels for display (compute → textures)
+            if (useParticleSimulation && channelSplatReady && particlesBuffer != null
+                && channelRT0 != null && channelRT1 != null && channelRT2 != null)
+            {
+                particleChannelSplatCompute.SetInt("_Resolution", resolution);
+                particleChannelSplatCompute.SetBuffer(kernelChannelSplat, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                particleChannelSplatCompute.SetTexture(kernelChannelSplat, "_Channels0", channelRT0);
+                particleChannelSplatCompute.SetTexture(kernelChannelSplat, "_Channels1", channelRT1);
+                particleChannelSplatCompute.SetTexture(kernelChannelSplat, "_Channels2", channelRT2);
+                int splatGroups = Mathf.CeilToInt(resolution / 8f);
+                particleChannelSplatCompute.Dispatch(kernelChannelSplat, splatGroups, splatGroups, 1);
+
+                // Force UAV → SRV transition before the fragment shader samples the channel textures.
+                Graphics.SetRenderTarget(null);
+            }
         }
 
         private void InjectAtMousePosition()
@@ -948,9 +1113,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 color = color
             });
 
-            // Mirror this injection into the particle buffer so iparticle remains authoritative.
-            // This is CPU-only and safe to run immediately.
-            InjectParticlesAtPoint(position, color);
+            // Mirror this injection into the particle buffer.
+            // GPU path (AddParticlesGaussian) is dispatched in ProcessPendingOperations
+            // when particle sim is enabled. Fall back to CPU when unavailable.
+            if (!useParticleSimulation || particlesBuffer == null || kernelAddParticlesGaussian == 0)
+            {
+                InjectParticlesAtPoint(position, color);
+            }
         }
 
         /// <summary>
@@ -959,23 +1128,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         /// </summary>
         private void InjectParticlesAtPoint(Vector2 position, Color color)
         {
-            if (particlesBuffer == null)
-            {
-                return;
-            }
+            if (particlesBuffer == null) return;
 
             int radiusPixels = Mathf.RoundToInt(forceRadius);
-            if (radiusPixels <= 0)
-            {
-                return;
-            }
+            if (radiusPixels <= 0) return;
 
             int centerX = Mathf.RoundToInt(position.x * resolution);
             int centerY = Mathf.RoundToInt(position.y * resolution);
 
             int particleCount = resolution * resolution;
-            iparticle[] particles = new iparticle[particleCount];
-            particlesBuffer[0].GetData(particles);
 
             float rMul = color.r * densityAmount;
             float gMul = color.g * densityAmount;
@@ -985,33 +1146,45 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             int maxX = Mathf.Min(resolution - 1, centerX + radiusPixels);
             int minY = Mathf.Max(0, centerY - radiusPixels);
             int maxY = Mathf.Min(resolution - 1, centerY + radiusPixels);
-
             float radiusSqr = radiusPixels * radiusPixels;
 
-            for (int y = minY; y <= maxY; y++)
+            if (gpuPromotesHalf)
             {
-                int dy = y - centerY;
-                for (int x = minX; x <= maxX; x++)
+                var particles = new iparticle_gpu[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int y = minY; y <= maxY; y++)
                 {
-                    int dx = x - centerX;
-                    if (dx * dx + dy * dy > radiusSqr)
+                    int dy = y - centerY;
+                    for (int x = minX; x <= maxX; x++)
                     {
-                        continue;
+                        int dx = x - centerX;
+                        if (dx * dx + dy * dy > radiusSqr) continue;
+                        int idx = y * resolution + x;
+                        particles[idx].fire  += rMul;
+                        particles[idx].water += gMul;
+                        particles[idx].ice   += bMul;
                     }
-
-                    int idx = y * resolution + x;
-
-                    // Add ink proportionally; this mirrors the RT-based injection in a simple way.
-                    particles[idx].fire += (half)rMul;
-                    particles[idx].water += (half)gMul;
-                    particles[idx].ice  += (half)bMul;
                 }
+                particlesBuffer[particleReadIndex].SetData(particles);
             }
-
-            // Keep both ping-pong buffers in sync while particle kernels are disabled.
-            for (int i = 0; i < particlesBuffer.Length; i++)
+            else
             {
-                particlesBuffer[i].SetData(particles);
+                var particles = new iparticle[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int y = minY; y <= maxY; y++)
+                {
+                    int dy = y - centerY;
+                    for (int x = minX; x <= maxX; x++)
+                    {
+                        int dx = x - centerX;
+                        if (dx * dx + dy * dy > radiusSqr) continue;
+                        int idx = y * resolution + x;
+                        particles[idx].fire  += (half)rMul;
+                        particles[idx].water += (half)gMul;
+                        particles[idx].ice   += (half)bMul;
+                    }
+                }
+                particlesBuffer[particleReadIndex].SetData(particles);
             }
         }
 
@@ -1061,40 +1234,44 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             int startY = centerY - stampHeight / 2;
 
             int particleCount = resolution * resolution;
-            iparticle[] particles = new iparticle[particleCount];
 
-            // Read from first buffer; we will write back to all buffers to keep them in sync.
-            particlesBuffer[0].GetData(particles);
-
-            for (int y = 0; y < stampHeight; y++)
+            if (gpuPromotesHalf)
             {
-                for (int x = 0; x < stampWidth; x++)
-                {
-                    int targetX = startX + x;
-                    int targetY = startY + y;
-
-                    if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution)
-                        continue;
-
-                    Color stampColor = stampPixels[y * stampWidth + x];
-                    if (stampColor.a < 0.01f)
-                        continue;
-
-                    int targetIdx = targetY * resolution + targetX;
-
-                    // Map RGB channels into iparticle ink channels.
-                    // Assumes stampColor already includes any density multiplier.
-                    particles[targetIdx].fire += (half)(stampColor.r * stampColor.a);
-                    particles[targetIdx].water += (half)(stampColor.g * stampColor.a);
-                    particles[targetIdx].ice  += (half)(stampColor.b * stampColor.a);
-                }
+                var particles = new iparticle_gpu[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int y = 0; y < stampHeight; y++)
+                    for (int x = 0; x < stampWidth; x++)
+                    {
+                        int targetX = startX + x;
+                        int targetY = startY + y;
+                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
+                        Color c = stampPixels[y * stampWidth + x];
+                        if (c.a < 0.01f) continue;
+                        int idx = targetY * resolution + targetX;
+                        particles[idx].fire  += c.r * c.a;
+                        particles[idx].water += c.g * c.a;
+                        particles[idx].ice   += c.b * c.a;
+                    }
+                particlesBuffer[particleReadIndex].SetData(particles);
             }
-
-            // Write back to all ping-pong buffers to keep them identical until
-            // particle kernels are re-enabled.
-            for (int i = 0; i < particlesBuffer.Length; i++)
+            else
             {
-                particlesBuffer[i].SetData(particles);
+                var particles = new iparticle[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int y = 0; y < stampHeight; y++)
+                    for (int x = 0; x < stampWidth; x++)
+                    {
+                        int targetX = startX + x;
+                        int targetY = startY + y;
+                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
+                        Color c = stampPixels[y * stampWidth + x];
+                        if (c.a < 0.01f) continue;
+                        int idx = targetY * resolution + targetX;
+                        particles[idx].fire  += (half)(c.r * c.a);
+                        particles[idx].water += (half)(c.g * c.a);
+                        particles[idx].ice   += (half)(c.b * c.a);
+                    }
+                particlesBuffer[particleReadIndex].SetData(particles);
             }
         }
 
@@ -1148,42 +1325,44 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             int startY = centerY - maskHeight / 2;
 
             int particleCount = resolution * resolution;
-            iparticle[] particles = new iparticle[particleCount];
 
-            // Read from first buffer; write back to all to keep them in sync
-            particlesBuffer[0].GetData(particles);
-
-            for (int y = 0; y < maskHeight; y++)
+            if (gpuPromotesHalf)
             {
-                for (int x = 0; x < maskWidth; x++)
-                {
-                    int targetX = startX + x;
-                    int targetY = startY + y;
-
-                    if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution)
-                        continue;
-
-                    Color maskColor = maskPixels[y * maskWidth + x];
-                    if (maskColor.a < alphaThreshold)
-                        continue;
-
-                    float luminance = 0.299f * maskColor.r + 0.587f * maskColor.g + 0.114f * maskColor.b;
-                    bool isBlack = luminance < blackLuminanceThreshold;
-                    if (!isBlack)
-                        continue;
-
-                    int targetIdx = targetY * resolution + targetX;
-
-                    // Mark black body presence; clamp to 1.0
-                    float current = (float)particles[targetIdx].blackBody;
-                    float updated = Mathf.Clamp01(current + maskColor.a);
-                    particles[targetIdx].blackBody = (half)updated;
-                }
+                var particles = new iparticle_gpu[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int y = 0; y < maskHeight; y++)
+                    for (int x = 0; x < maskWidth; x++)
+                    {
+                        int targetX = startX + x;
+                        int targetY = startY + y;
+                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
+                        Color mc = maskPixels[y * maskWidth + x];
+                        if (mc.a < alphaThreshold) continue;
+                        float luminance = 0.299f * mc.r + 0.587f * mc.g + 0.114f * mc.b;
+                        if (luminance >= blackLuminanceThreshold) continue;
+                        int idx = targetY * resolution + targetX;
+                        particles[idx].blackBody = Mathf.Clamp01(particles[idx].blackBody + mc.a);
+                    }
+                particlesBuffer[particleReadIndex].SetData(particles);
             }
-
-            for (int i = 0; i < particlesBuffer.Length; i++)
+            else
             {
-                particlesBuffer[i].SetData(particles);
+                var particles = new iparticle[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int y = 0; y < maskHeight; y++)
+                    for (int x = 0; x < maskWidth; x++)
+                    {
+                        int targetX = startX + x;
+                        int targetY = startY + y;
+                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
+                        Color mc = maskPixels[y * maskWidth + x];
+                        if (mc.a < alphaThreshold) continue;
+                        float luminance = 0.299f * mc.r + 0.587f * mc.g + 0.114f * mc.b;
+                        if (luminance >= blackLuminanceThreshold) continue;
+                        int idx = targetY * resolution + targetX;
+                        particles[idx].blackBody = (half)Mathf.Clamp01((float)particles[idx].blackBody + mc.a);
+                    }
+                particlesBuffer[particleReadIndex].SetData(particles);
             }
         }
 
@@ -1217,47 +1396,54 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             // Read current particles to clear at obstacle positions
             int particleCount = resolution * resolution;
-            iparticle[] particles = new iparticle[particleCount];
-            particlesBuffer[particleReadIndex].GetData(particles);
-
             bool particlesModified = false;
 
-            // Stamp obstacles and clear particles
-            for (int y = 0; y < stampHeight; y++)
+            // Stamp obstacles and clear particles (stride-aware)
+            if (gpuPromotesHalf)
             {
-                for (int x = 0; x < stampWidth; x++)
-                {
-                    int targetX = startX + x;
-                    int targetY = startY + y;
-
-                    if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution)
-                        continue;
-
-                    Color stampColor = stampPixels[y * stampWidth + x];
-                    if (stampColor.a < 0.01f)
-                        continue;
-
-                    int targetIdx = targetY * resolution + targetX;
-
-                    // Mark as obstacle (1.0 = solid obstacle)
-                    obstaclePixels[targetIdx] = new Color(1f, 0, 0, 0);  // R channel = obstacle
-
-                    // Clear all ink channels at obstacle positions (displaces existing inks)
-                    particles[targetIdx] = new iparticle();  // Zero all channels
-                    particlesModified = true;
-                }
+                var particles = new iparticle_gpu[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int y = 0; y < stampHeight; y++)
+                    for (int x = 0; x < stampWidth; x++)
+                    {
+                        int targetX = startX + x;
+                        int targetY = startY + y;
+                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
+                        Color sc = stampPixels[y * stampWidth + x];
+                        if (sc.a < 0.01f) continue;
+                        int idx = targetY * resolution + targetX;
+                        obstaclePixels[idx] = new Color(1f, 0, 0, 0);
+                        particles[idx] = new iparticle_gpu();
+                        particlesModified = true;
+                    }
+                if (particlesModified)
+                    particlesBuffer[particleWriteIndex].SetData(particles);
+            }
+            else
+            {
+                var particles = new iparticle[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int y = 0; y < stampHeight; y++)
+                    for (int x = 0; x < stampWidth; x++)
+                    {
+                        int targetX = startX + x;
+                        int targetY = startY + y;
+                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
+                        Color sc = stampPixels[y * stampWidth + x];
+                        if (sc.a < 0.01f) continue;
+                        int idx = targetY * resolution + targetX;
+                        obstaclePixels[idx] = new Color(1f, 0, 0, 0);
+                        particles[idx] = new iparticle();
+                        particlesModified = true;
+                    }
+                if (particlesModified)
+                    particlesBuffer[particleWriteIndex].SetData(particles);
             }
 
             // Write back obstacles
             tempObstacles.SetPixels(obstaclePixels);
             tempObstacles.Apply();
             Graphics.Blit(tempObstacles, obstacles);
-
-            // Write back particles if modified
-              if (particlesModified)
-              {
-                  particlesBuffer[particleWriteIndex].SetData(particles);
-              }
 
             Destroy(tempObstacles);
         }
@@ -1407,6 +1593,36 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 Destroy(composite);
             }
 
+            // One-time diagnostic for rendering path
+            if (!loggedDisplayDiagnostic)
+            {
+                loggedDisplayDiagnostic = true;
+                bool canSplat = useParticleSimulation && channelSplatReady && particlesBuffer != null
+                    && channelRT0 != null && channelRT1 != null && channelRT2 != null;
+                Debug.Log($"[SimDriver Display] gradient={useGradientRendering}, " +
+                    $"channelSplat={channelSplatReady}, canSplat={canSplat}, " +
+                    $"source={sourceTexture?.name ?? "null"}");
+
+                // Verify gradient textures after ApplyToMaterial
+                if (gradientPreset != null && gradientMaterial != null)
+                {
+                    gradientPreset.ApplyToMaterial(gradientMaterial);
+                    string[] texNames = { "_FireGradientTex", "_WaterGradientTex", "_IceGradientTex" };
+                    foreach (var tname in texNames)
+                    {
+                        var tex = gradientMaterial.GetTexture(tname);
+                        Debug.Log($"[SimDriver Gradient] {tname}: {(tex != null ? $"{tex.width}x{tex.height}" : "NULL")}");
+                    }
+
+                    float ac = gradientMaterial.HasProperty("_AlphaCutoff") ? gradientMaterial.GetFloat("_AlphaCutoff") : -1f;
+                    if (ac > 0.1f)
+                    {
+                        Debug.LogWarning($"[SimDriver] _AlphaCutoff={ac} is high — most ink detail will be clipped. " +
+                            "Set to 0.01 in the gradient material Inspector for best results.");
+                    }
+                }
+            }
+
             // Apply gradient rendering if enabled
             if (useGradientRendering && gradientMaterial != null && gradientPreset != null && !displayVelocity)
             {
@@ -1438,11 +1654,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     gradientMaterial.DisableKeyword("_SHOWCHANNELS_ON");
                 }
 
-                // Provide particle buffer and resolution for direct gradient sampling
-                if (particlesBuffer != null)
+                // Enable particle-authoritative rendering when channel splat textures are available.
+                if (useParticleSimulation && channelSplatReady && channelRT0 != null && channelRT1 != null && channelRT2 != null)
                 {
-                    gradientMaterial.SetBuffer("_ParticlesRead", particlesBuffer[particleReadIndex]);
-                    gradientMaterial.SetInt("_ParticleResolution", resolution);
+                    gradientMaterial.EnableKeyword("_PARTICLEBUFFER_ON");
+                    gradientMaterial.SetTexture("_Channels0", channelRT0);
+                    gradientMaterial.SetTexture("_Channels1", channelRT1);
+                    gradientMaterial.SetTexture("_Channels2", channelRT2);
+                }
+                else
+                {
+                    gradientMaterial.DisableKeyword("_PARTICLEBUFFER_ON");
                 }
 
                 // Blit through gradient material
@@ -1487,42 +1709,35 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             if (particlesBuffer == null || !useParticleDisplay) return null;
 
-            // Create temporary RT
             RenderTexture tempRT = RenderTexture.GetTemporary(resolution, resolution, 0, RenderTextureFormat.ARGBHalf);
-
-            // Read particles
             int particleCount = resolution * resolution;
-            iparticle[] particles = new iparticle[particleCount];
-            particlesBuffer[particleReadIndex].GetData(particles);
-
-            // Convert to colors
             Color[] colors = new Color[particleCount];
-            for (int i = 0; i < particleCount; i++)
+
+            if (gpuPromotesHalf)
             {
-                iparticle p = particles[i];
-
-                // Base color from RGB ink channels
-                float r = p.fire;  // Fire -> red
-                float g = p.water;  // Water -> green
-                float b = p.ice;  // Ice -> blue
-
-                // Black body ink darkens the pixel (subtractive)
-                // When blackBody is present, reduce RGB proportionally
-                if (p.blackBody > 0)
+                var particles = new iparticle_gpu[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int i = 0; i < particleCount; i++)
                 {
-                    float darken = 1.0f - Mathf.Clamp01(p.blackBody);
-                    r *= darken;
-                    g *= darken;
-                    b *= darken;
+                    var p = particles[i];
+                    float r = p.fire, g = p.water, b = p.ice;
+                    if (p.blackBody > 0) { float d = 1f - Mathf.Clamp01(p.blackBody); r *= d; g *= d; b *= d; }
+                    colors[i] = new Color(r, g, b, Mathf.Max(p.fire, Mathf.Max(p.water, Mathf.Max(p.ice, p.blackBody))));
                 }
-
-                // Alpha is max of all channels
-                float a = Mathf.Max(p.fire, p.water, p.ice, p.blackBody);
-
-                colors[i] = new Color(r, g, b, a);
+            }
+            else
+            {
+                var particles = new iparticle[particleCount];
+                particlesBuffer[particleReadIndex].GetData(particles);
+                for (int i = 0; i < particleCount; i++)
+                {
+                    var p = particles[i];
+                    float r = p.fire, g = p.water, b = p.ice;
+                    if (p.blackBody > 0) { float d = 1f - Mathf.Clamp01(p.blackBody); r *= d; g *= d; b *= d; }
+                    colors[i] = new Color(r, g, b, Mathf.Max(p.fire, p.water, p.ice, p.blackBody));
+                }
             }
 
-            // Upload to texture
             Texture2D temp = new Texture2D(resolution, resolution, TextureFormat.RGBAHalf, false);
             temp.SetPixels(colors);
             temp.Apply();
@@ -1599,6 +1814,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
               if (obstacles) obstacles.Release();
               if (displayRT) displayRT.Release();
               if (gradientRT) gradientRT.Release();
+              if (channelRT0) channelRT0.Release();
+              if (channelRT1) channelRT1.Release();
+              if (channelRT2) channelRT2.Release();
               if (creatureInkBuffer) creatureInkBuffer.Release();
 
               // Clean up compute buffers

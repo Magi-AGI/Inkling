@@ -1,0 +1,54 @@
+// GPU particle stamping for TexturedInjector.
+// Mirrors StampDensityCompute.compute but writes into
+// RWStructuredBuffer<iparticle> instead of density RenderTextures.
+// Stamps occur before AdvectParticles in ProcessPendingOperations,
+// so sequential dispatch ordering provides an implicit barrier.
+
+#pragma kernel StampParticles
+
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+RWStructuredBuffer<iparticle> _ParticlesRW;
+Texture2D<float4>   _StampTex;
+SamplerState         sampler_StampTex;
+
+float2 _StampCenter;       // UV centre (0-1)
+float2 _StampSize;         // UV extent (stampWidth/resolution, stampHeight/resolution)
+float  _AlphaThreshold;
+float  _DensityMul;
+float  _UseOverride;
+float4 _OverrideColor;
+float2 _Resolution;
+
+[numthreads(8, 8, 1)]
+void StampParticles(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution.x || id.y >= (uint)_Resolution.y)
+        return;
+
+    float2 uv = (float2(id.xy) + 0.5) / _Resolution;
+    float2 rel = (uv - _StampCenter) / _StampSize + 0.5;
+
+    // Outside stamp region — skip
+    if (rel.x < 0.0 || rel.x > 1.0 || rel.y < 0.0 || rel.y > 1.0)
+        return;
+
+    float4 stamp = _StampTex.SampleLevel(sampler_StampTex, rel, 0);
+    if (stamp.a < _AlphaThreshold)
+        return;
+
+    float4 color;
+    if (_UseOverride > 0.5)
+        color = float4(_OverrideColor.rgb * stamp.a, stamp.a);
+    else
+        color = stamp * _DensityMul;
+
+    // Map stamp RGB -> iparticle channels (R->fire, G->water, B->ice)
+    uint idx = id.y * (uint)_Resolution.x + id.x;
+    iparticle p = _ParticlesRW[idx];
+    p.fire  += (ifloat)color.r;
+    p.water += (ifloat)color.g;
+    p.ice   += (ifloat)color.b;
+    _ParticlesRW[idx] = p;
+}
