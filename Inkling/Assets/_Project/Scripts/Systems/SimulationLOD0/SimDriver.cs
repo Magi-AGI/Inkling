@@ -103,6 +103,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Safety cap: particle kernels are skipped when resolution exceeds this value.")]
         [SerializeField] private int maxParticleSimResolution = 512;
 
+        [Header("Ink Interactions")]
+        [Tooltip("Compute shader for cellular automata ink reactions.")]
+        [SerializeField] private ComputeShader inkInteractionsCompute;
+        [Tooltip("When enabled (with useParticleSimulation), runs ink interactions each frame.")]
+        [SerializeField] private bool useInkInteractions = true;
+        [Tooltip("Debug mode: bypasses matrix math with simple hardcoded plant→fire conversion.")]
+        [SerializeField] private bool inkInteractionsDebugMode = false;
+        [Tooltip("Affinity groups defining which inks interact and how. Each group processes 4 inks.")]
+        [SerializeField] private AffinityGroup[] affinityGroups;
+
         // Render textures (using PingPongRenderTexture from MagiUnityTools)
         private PingPongRenderTexture velocity;
         private PingPongRenderTexture pressure;
@@ -186,6 +196,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private int kernelDissipateParticles;
         private int kernelAddParticlesGaussian;
 
+        // Ink interactions kernel (from InkInteractions.compute)
+        private int kernelInkInteractions;
+        private bool inkInteractionsReady;
+
         // Stamp compute kernels (from StampDensityCompute.compute)
         private int kernelStampDensity;
         private int kernelClearBlackDensity;
@@ -231,6 +245,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             public Vector2 position;
             public Color color;
+            public int inkTypeIndex;  // Maps to InkTypeId for particle injection routing
         }
 
         private struct PendingClearDensityMask
@@ -327,6 +342,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 {
                     Debug.LogWarning($"[SimDriver] Channel splat compute init failed ({e.Message}). Gradient rendering will fall back to density RT.");
                     channelSplatReady = false;
+                }
+            }
+
+            // Ink interactions compute shader
+            if (inkInteractionsCompute == null)
+            {
+                inkInteractionsReady = false;
+            }
+            else
+            {
+                try
+                {
+                    kernelInkInteractions = inkInteractionsCompute.FindKernel("InkInteractions");
+                    inkInteractionsReady = true;
+                    Debug.Log("[SimDriver] Ink interactions compute shader ready – cellular automata reactions enabled.");
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"[SimDriver] Ink interactions compute init failed ({e.Message}). Ink reactions disabled.");
+                    inkInteractionsReady = false;
                 }
             }
         }
@@ -468,9 +503,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 : Mathf.Min(resolution, Mathf.Max(Screen.width, Screen.height));
 
             // Downsampled SRV copies at display resolution for 1:1 sampling.
-            channelRT0Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels0_fire_water_plant_down");
-            channelRT1Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels1_steam_glitter_bb_ice_down");
-            channelRT2Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels2_electricity_down");
+            // Only allocate when display < sim; otherwise mipped copies are sufficient.
+            if (effectiveDisplayRes < resolution)
+            {
+                channelRT0Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels0_fire_water_plant_down");
+                channelRT1Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels1_steam_glitter_bb_ice_down");
+                channelRT2Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels2_electricity_down");
+            }
 
             displayRT = new RenderTexture(effectiveDisplayRes, effectiveDisplayRes, 0, RenderTextureFormat.ARGBHalf);
             displayRT.filterMode = FilterMode.Bilinear;
@@ -655,17 +694,30 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             // User input injection - use new Input System
-            // Only inject if mouse is actually moving OR button was just pressed
-            bool shouldInject = false;
-            if (Mouse.current != null && Mouse.current.leftButton.isPressed)
+            // Left mouse: inject current ink type
+            // Right mouse: inject water (for quick fire+water testing)
+            bool shouldInjectLeft = false;
+            bool shouldInjectRight = false;
+            if (Mouse.current != null)
             {
                 Vector2 mouseDelta = Mouse.current.delta.ReadValue();
-                shouldInject = mouseDelta.magnitude > 0.01f || Mouse.current.leftButton.wasPressedThisFrame;
+                bool isMoving = mouseDelta.magnitude > 0.01f;
+
+                if (Mouse.current.leftButton.isPressed)
+                    shouldInjectLeft = isMoving || Mouse.current.leftButton.wasPressedThisFrame;
+
+                if (Mouse.current.rightButton.isPressed)
+                    shouldInjectRight = isMoving || Mouse.current.rightButton.wasPressedThisFrame;
             }
 
-            if (shouldInject || autoInject)
+            if (shouldInjectLeft || autoInject)
             {
                 InjectAtMousePosition();
+            }
+
+            if (shouldInjectRight)
+            {
+                InjectAtMousePosition(InkType.Water);
             }
 
             // Run simulation pipeline
@@ -911,6 +963,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     // Mirror into particle buffer via GPU (same ForceParams already set)
                     if (useParticleSimulation && particlesBuffer != null && kernelAddParticlesGaussian != 0)
                     {
+                        fluidCompute.SetInt("_InkTypeIndex", d.inkTypeIndex);
                         fluidCompute.SetBuffer(kernelAddParticlesGaussian, "_ParticlesRead", particlesBuffer[particleReadIndex]);
                         fluidCompute.SetBuffer(kernelAddParticlesGaussian, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
                         fluidCompute.Dispatch(kernelAddParticlesGaussian, threadGroups, threadGroups, 1);
@@ -1000,6 +1053,51 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                         fluidCompute.SetTexture(kernelAdvectParticles, "_VelocityRead", velocity.Read);
                         fluidCompute.Dispatch(kernelAdvectParticles, threadGroups, threadGroups, 1);
                         SwapParticleBuffers();
+                    }
+
+                    // Ink interactions (cellular automata reactions)
+                    // Runs after advection, before dissipation.
+                    // Uses same timestep as fluid sim for consistency/determinism.
+                    // Each group dispatches separately; buffer swaps between groups.
+                    if (useInkInteractions && inkInteractionsReady && affinityGroups != null)
+                    {
+                        inkInteractionsCompute.SetInt("_Resolution", resolution);
+                        inkInteractionsCompute.SetFloat("_DeltaTime", timestep);
+                        inkInteractionsCompute.SetInt("_DebugMode", inkInteractionsDebugMode ? 1 : 0);
+
+                        foreach (var group in affinityGroups)
+                        {
+                            if (group == null) continue;
+
+                            // Upload affinity group data
+                            int[] indices = group.GetInkIndices();
+                            inkInteractionsCompute.SetInts("_InkIndices", indices);
+                            inkInteractionsCompute.SetMatrix("_ReactionMatrix", group.reactionMatrix);
+                            Vector3 weights = group.GetWeights();
+                            inkInteractionsCompute.SetFloats("_Weights", weights.x, weights.y, weights.z);
+                            inkInteractionsCompute.SetFloat("_RateMultiplier", group.reactionRateMultiplier);
+
+                            // Debug: log dispatch info once
+                            if (Time.frameCount == 10)
+                            {
+                                var m = group.reactionMatrix;
+                                Debug.Log($"[InkInteractions] Group '{group.groupName}' dispatch:\n" +
+                                    $"  Indices: [{indices[0]}, {indices[1]}, {indices[2]}, {indices[3]}]\n" +
+                                    $"  Matrix row0: [{m.m00:F2}, {m.m01:F2}, {m.m02:F2}, {m.m03:F2}]\n" +
+                                    $"  Matrix row1: [{m.m10:F2}, {m.m11:F2}, {m.m12:F2}, {m.m13:F2}]\n" +
+                                    $"  Matrix row2: [{m.m20:F2}, {m.m21:F2}, {m.m22:F2}, {m.m23:F2}]\n" +
+                                    $"  Matrix row3: [{m.m30:F2}, {m.m31:F2}, {m.m32:F2}, {m.m33:F2}]\n" +
+                                    $"  Weights: [{weights.x}, {weights.y}, {weights.z}]\n" +
+                                    $"  RateMultiplier: {group.reactionRateMultiplier}\n" +
+                                    $"  Resolution: {resolution}, DeltaTime: {timestep}");
+                            }
+
+                            // Dispatch
+                            inkInteractionsCompute.SetBuffer(kernelInkInteractions, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                            inkInteractionsCompute.SetBuffer(kernelInkInteractions, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
+                            inkInteractionsCompute.Dispatch(kernelInkInteractions, threadGroups, threadGroups, 1);
+                            SwapParticleBuffers();
+                        }
                     }
 
                     if (useParticleDissipation && kernelDissipateParticles != 0)
@@ -1151,7 +1249,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
         }
 
-        private void InjectAtMousePosition()
+        private void InjectAtMousePosition(InkType? overrideInkType = null)
         {
             if (Mouse.current == null) return;
 
@@ -1180,8 +1278,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             // Inject force and density with ink type color
             InjectForce(uv, velocity);
-            Color inkColor = GetInkTypeColor(currentInkType);
-            InjectDensity(uv, inkColor);
+            InkType inkType = overrideInkType ?? currentInkType;
+            Color inkColor = GetInkTypeColor(inkType);
+            InjectDensity(uv, inkColor, inkType);
         }
 
         /// <summary>
@@ -1204,7 +1303,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         /// The GPU dispatch is queued and executed inside SimulateFrame.
         /// CPU-side particle injection runs immediately.
         /// </summary>
-        public void InjectDensity(Vector2 position, Color color)
+        public void InjectDensity(Vector2 position, Color color, InkType inkType = InkType.Fire)
         {
             if (fluidCompute == null || density == null)
             {
@@ -1217,7 +1316,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             pendingDensityInjections.Add(new PendingDensityInjection
             {
                 position = position,
-                color = color
+                color = color,
+                inkTypeIndex = GetParticleFieldIndex(inkType)
             });
 
             // Mirror this injection into the particle buffer.
@@ -1764,12 +1864,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 }
 
                 // Enable particle-authoritative rendering when channel splat textures are available.
+                // Prefer downsampled copies (display resolution, 1:1 sampling) to avoid heavy
+                // minification of 4K→1080 in the fragment shader. Fall back to mipped copies
+                // (sim resolution with mipmaps) or raw UAV textures as last resort.
                 if (useParticleSimulation && channelSplatReady && channelRT0 != null && channelRT1 != null && channelRT2 != null)
                 {
                     gradientMaterial.EnableKeyword("_PARTICLEBUFFER_ON");
-                    gradientMaterial.SetTexture("_Channels0", channelRT0);
-                    gradientMaterial.SetTexture("_Channels1", channelRT1);
-                    gradientMaterial.SetTexture("_Channels2", channelRT2);
+
+                    var ch0 = channelRT0Down ?? channelRT0Mipped ?? channelRT0;
+                    var ch1 = channelRT1Down ?? channelRT1Mipped ?? channelRT1;
+                    var ch2 = channelRT2Down ?? channelRT2Mipped ?? channelRT2;
+                    gradientMaterial.SetTexture("_Channels0", ch0);
+                    gradientMaterial.SetTexture("_Channels1", ch1);
+                    gradientMaterial.SetTexture("_Channels2", ch2);
                 }
                 else
                 {
@@ -1889,6 +1996,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     return new Color(0.7f, 0.6f, 0.5f, 0.8f);  // Brown-ish
                 default:
                     return Color.white;
+            }
+        }
+
+        /// <summary>
+        /// Maps SimDriver.InkType to iparticle field index (InkTypeId values).
+        /// This routes particle injection to the correct field in the structured buffer.
+        /// </summary>
+        private int GetParticleFieldIndex(InkType type)
+        {
+            switch (type)
+            {
+                case InkType.Fire:        return 0;  // iparticle.fire
+                case InkType.Water:       return 1;  // iparticle.water
+                case InkType.Plant:       return 2;  // iparticle.plantSeeded
+                case InkType.Metal:       return 6;  // iparticle.blackBody (repurposed)
+                case InkType.Steam:       return 4;  // iparticle.steam
+                case InkType.Dust:        return 5;  // iparticle.glitter
+                case InkType.Electricity: return 7;  // iparticle.electricitySeeded
+                case InkType.Ice:         return 9;  // iparticle.ice
+                default:                  return 0;  // Fire fallback
             }
         }
 

@@ -1,0 +1,187 @@
+// InkInteractions.compute
+// Matrix-kernel cellular automata for ink reactions.
+// Runs after advection, before display.
+//
+// Determinism: Always sample neighbors from Read buffer; apply deltas once
+// to Write at the end. Avoids race conditions.
+
+#pragma kernel InkInteractions
+
+// Include iparticle struct definition (X-macro file)
+#define ifloat float
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+// Ink type indices come from _InkIndices at runtime (set by AffinityGroup).
+// No HLSL defines needed - C# InkTypeId enum is the source of truth.
+
+// Buffers
+StructuredBuffer<iparticle> _ParticlesRead;
+RWStructuredBuffer<iparticle> _ParticlesWrite;
+
+// Simulation parameters
+int _Resolution;
+float _DeltaTime;
+int _DebugMode;  // 0=normal, 1=test mode (boost fire when plant present)
+
+// Affinity group data (MVP: single group, hardcoded thermal)
+// Future: StructuredBuffer<GPUAffinityGroup> _AffinityGroups; int _NumGroups;
+int4 _InkIndices;       // Which iparticle fields map to slots 0-3
+float4x4 _ReactionMatrix;
+float3 _Weights;        // self, cardinal, diagonal
+float _RateMultiplier;  // Global multiplier for reaction rates (default ~10 for visible effects)
+
+// Helper: Extract ink value by field index (0-9)
+float GetInkByIndex(iparticle p, int idx)
+{
+    switch (idx)
+    {
+        case 0: return p.fire;
+        case 1: return p.water;
+        case 2: return p.plantSeeded;
+        case 3: return p.plantGrown;
+        case 4: return p.steam;
+        case 5: return p.glitter;
+        case 6: return p.blackBody;
+        case 7: return p.electricitySeeded;
+        case 8: return p.electricityGrown;
+        case 9: return p.ice;
+        default: return 0;
+    }
+}
+
+// Helper: Set ink value by field index (0-9)
+void SetInkByIndex(inout iparticle p, int idx, float value)
+{
+    switch (idx)
+    {
+        case 0: p.fire = value; break;
+        case 1: p.water = value; break;
+        case 2: p.plantSeeded = value; break;
+        case 3: p.plantGrown = value; break;
+        case 4: p.steam = value; break;
+        case 5: p.glitter = value; break;
+        case 6: p.blackBody = value; break;
+        case 7: p.electricitySeeded = value; break;
+        case 8: p.electricityGrown = value; break;
+        case 9: p.ice = value; break;
+    }
+}
+
+// Helper: Extract 4 inks for this group
+float4 ExtractGroupInks(iparticle p, int4 indices)
+{
+    return float4(
+        GetInkByIndex(p, indices.x),
+        GetInkByIndex(p, indices.y),
+        GetInkByIndex(p, indices.z),
+        GetInkByIndex(p, indices.w)
+    );
+}
+
+// Helper: Sample particle at position (clamped to bounds)
+iparticle SampleParticle(int2 pos)
+{
+    pos = clamp(pos, int2(0, 0), int2(_Resolution - 1, _Resolution - 1));
+    return _ParticlesRead[pos.y * _Resolution + pos.x];
+}
+
+// Helper: Clamp deltas per-channel so we don't consume more than available
+// Returns clamped delta (not a global scale - each channel is clamped independently)
+float4 ClampConsumption(float4 rawDelta, float4 available)
+{
+    float4 result = rawDelta;
+
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        // If delta is negative (consuming), clamp to available amount
+        if (rawDelta[i] < 0)
+        {
+            result[i] = max(rawDelta[i], -available[i]);
+        }
+    }
+
+    return result;
+}
+
+[numthreads(8, 8, 1)]
+void InkInteractions(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution || id.y >= (uint)_Resolution)
+        return;
+
+    uint idx = id.y * _Resolution + id.x;
+    int2 pos = int2(id.xy);
+
+    // Read current particle (from Read buffer)
+    iparticle p = _ParticlesRead[idx];
+
+    // Debug mode: simple hardcoded test to verify shader is running
+    if (_DebugMode == 1)
+    {
+        // If plant > 0.1, convert some to fire (very obvious effect)
+        if (p.plantSeeded > 0.1)
+        {
+            p.fire = saturate(p.fire + 0.1);
+            p.plantSeeded = saturate(p.plantSeeded - 0.05);
+        }
+        _ParticlesWrite[idx] = p;
+        return;
+    }
+
+    // Sample self
+    float4 selfInks = ExtractGroupInks(p, _InkIndices);
+
+    // Sample cardinal neighbors (up, down, left, right)
+    float4 cardinalSum = float4(0, 0, 0, 0);
+    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(0, 1)), _InkIndices);
+    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(0, -1)), _InkIndices);
+    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(1, 0)), _InkIndices);
+    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(-1, 0)), _InkIndices);
+
+    // Sample diagonal neighbors (corners)
+    float4 diagonalSum = float4(0, 0, 0, 0);
+    diagonalSum += ExtractGroupInks(SampleParticle(pos + int2(1, 1)), _InkIndices);
+    diagonalSum += ExtractGroupInks(SampleParticle(pos + int2(1, -1)), _InkIndices);
+    diagonalSum += ExtractGroupInks(SampleParticle(pos + int2(-1, 1)), _InkIndices);
+    diagonalSum += ExtractGroupInks(SampleParticle(pos + int2(-1, -1)), _InkIndices);
+
+    // Weighted adjacency
+    float4 adjacency = selfInks * _Weights.x
+                     + cardinalSum * _Weights.y
+                     + diagonalSum * _Weights.z;
+
+    // Reaction (matrix multiply, scaled by dt and rate multiplier)
+    float4 rawDelta = mul(_ReactionMatrix, adjacency) * _DeltaTime * _RateMultiplier;
+
+    // Per-channel conservation: clamp each channel's consumption to available amount
+    // This prevents consuming ink that doesn't exist, without killing other reactions
+    float4 delta = ClampConsumption(rawDelta, selfInks);
+
+    // Gate production: ink can only INCREASE if it exists in self OR nearby (spreading model)
+    // This allows fire to spread into adjacent plant cells, but prevents spontaneous creation
+    const float PRODUCTION_THRESHOLD = 0.0001;  // Very low - only blocks truly empty regions
+    [unroll]
+    for (int j = 0; j < 4; j++)
+    {
+        if (delta[j] > 0 && selfInks[j] < PRODUCTION_THRESHOLD && adjacency[j] < PRODUCTION_THRESHOLD)
+        {
+            delta[j] = 0;  // Can't create ink where none exists nearby
+        }
+    }
+
+    // Apply deltas back to particle
+    iparticle result = p;
+
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        int fieldIdx = _InkIndices[i];
+        float currentVal = GetInkByIndex(result, fieldIdx);
+        float newVal = max(0.0, currentVal + delta[i]);  // Clamp to non-negative
+        SetInkByIndex(result, fieldIdx, newVal);
+    }
+
+    // Write to output buffer
+    _ParticlesWrite[idx] = result;
+}
