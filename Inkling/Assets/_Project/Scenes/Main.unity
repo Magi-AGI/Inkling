@@ -1308,14 +1308,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.SimDriver
   fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
-  resolution: 512
+  resolution: 1080
   viscosity: 0.0001
   vorticity: 5
   dissipation: 0.999
   velocityDissipation: 0.99
   timestep: 0.016
-  pressureIterations: 40
-  diffusionIterations: 0
+  pressureIterations: 20
+  diffusionIterations: 10
   useRedBlackSolver: 1
   autoInject: 0
   injectionForce: 100
@@ -1331,13 +1331,16 @@ MonoBehaviour:
   gradientPreset: {fileID: 11400000, guid: 82755fa6fa9f7a84d8c1df4c8cb7e343, type: 2}
   gradientMaterial: {fileID: 2100000, guid: 8fb7b721f0d7666468899181f1032e28, type: 2}
   measurePerformance: 1
+  displayResolution: 0
   densityStampShader: {fileID: 4800000, guid: 8a8122c28f2b84949a817112ae252002, type: 3}
   stampCompute: {fileID: 7200000, guid: 8655b9b38e3613f42828276a2b65ae0a, type: 3}
+  stampParticlesCompute: {fileID: 7200000, guid: ddd01a05f12b2bf46895c3592405baf8, type: 3}
   useParticleSimulation: 1
-  useParticleAdvection: 0
+  useParticleAdvection: 1
   useParticleDissipation: 1
-  maxParticleSimResolution: 512
+  maxParticleSimResolution: 1080
   particleToColorCompute: {fileID: 7200000, guid: 0334aaf5539bd7649886292613ec7ad8, type: 3}
+  particleChannelSplatCompute: {fileID: 7200000, guid: 2e75d1648379b174584d6d1a1c20b62c, type: 3}
   useParticleRenderPass: 0
 --- !u!1 &1314578116
 GameObject:

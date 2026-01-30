@@ -166,7 +166,10 @@ Shader "Inkling/InkGradientRenderer"
 
             #ifdef _PARTICLEBUFFER_ON
                 // ── Particle-authoritative path ─────────────────────────────
-                // Read channel textures (written by ParticleChannelSplat.compute)
+                // Sample channel textures written by ParticleChannelSplat.compute.
+                // Anti-aliasing is handled by channel RT mipmaps: the gradient shader
+                // runs at display resolution, and tex2D auto-selects the right mip
+                // for hardware-filtered minification of sim-resolution data.
                 float4 ch0 = tex2D(_Channels0, input.uv); // fire, water, plantSeeded, plantGrown
                 float4 ch1 = tex2D(_Channels1, input.uv); // steam, glitter, blackBody, ice
                 float4 ch2 = tex2D(_Channels2, input.uv); // electricitySeeded, electricityGrown, 0, 0

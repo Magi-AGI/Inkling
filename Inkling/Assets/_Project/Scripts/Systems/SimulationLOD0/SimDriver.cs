@@ -81,6 +81,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Performance")]
         [SerializeField] private bool measurePerformance = true;
 
+        [Header("Display Resolution")]
+        [Tooltip("Resolution for gradient and display render targets. 0 = auto (match screen height). " +
+            "Decouples display from simulation: the gradient shader runs at this resolution, " +
+            "sampling sim-resolution channel textures with hardware minification.")]
+        [SerializeField] private int displayResolution = 0;
+
         [Header("Creature / Stamp Rendering")]
         [SerializeField] private Shader densityStampShader;
         [Tooltip("Compute-shader stamp (preferred over Blit shader). Eliminates DX12 cross-queue barriers on density ping-pong buffers. If unassigned, stamps fall back to Graphics.Blit via densityStampShader.")]
@@ -106,6 +112,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private RenderTexture obstacles;
         private RenderTexture displayRT;
         private RenderTexture gradientRT;  // For gradient-rendered output
+        private int effectiveDisplayRes;   // Resolved from displayResolution (0 = auto)
         private RenderTexture creatureInkBuffer;  // Separate buffer for creature stamps (cleared each frame)
 
         // Channel textures for particle-authoritative gradient rendering.
@@ -113,6 +120,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private RenderTexture channelRT0;  // fire, water, plantSeeded, plantGrown
         private RenderTexture channelRT1;  // steam, glitter, blackBody, ice
         private RenderTexture channelRT2;  // electricitySeeded, electricityGrown, 0, 0
+        // Mipped copies (non-UAV) for safe minification sampling in the gradient shader.
+        private RenderTexture channelRT0Mipped;
+        private RenderTexture channelRT1Mipped;
+        private RenderTexture channelRT2Mipped;
+        // Downsampled copies at display resolution for 1:1 sampling in the gradient shader.
+        private RenderTexture channelRT0Down;
+        private RenderTexture channelRT1Down;
+        private RenderTexture channelRT2Down;
 
         // Particle-based density buffer (replaces RGBA texture with multi-channel iparticle)
         private ComputeBuffer[] particlesBuffer;  // Ping-pong buffer for iparticle structs
@@ -431,20 +446,41 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 $"stride {gpuParticleStride} bytes ({(gpuPromotesHalf ? "float-promoted" : "native half")}), " +
                 $"API={SystemInfo.graphicsDeviceType}");
 
-            // Channel textures for particle-authoritative gradient rendering
+            // Channel textures for particle-authoritative gradient rendering.
             // ARGBFloat avoids packing artifacts on DX12 when compute writes
             // (UAV) are immediately sampled (SRV) by the gradient fragment shader.
-            channelRT0 = CreateRT(RenderTextureFormat.ARGBFloat, "Channels0_fire_water_plant");
-            channelRT1 = CreateRT(RenderTextureFormat.ARGBFloat, "Channels1_steam_glitter_bb_ice");
-            channelRT2 = CreateRT(RenderTextureFormat.ARGBFloat, "Channels2_electricity");
+            // Mipmaps enable proper hardware minification when the gradient shader
+            // runs at display resolution (lower than sim resolution).
+            channelRT0 = CreateChannelRT(RenderTextureFormat.ARGBFloat, "Channels0_fire_water_plant");
+            channelRT1 = CreateChannelRT(RenderTextureFormat.ARGBFloat, "Channels1_steam_glitter_bb_ice");
+            channelRT2 = CreateChannelRT(RenderTextureFormat.ARGBFloat, "Channels2_electricity");
+            channelRT0Mipped = CreateChannelMippedRT(RenderTextureFormat.ARGBFloat, "Channels0_fire_water_plant_mipped");
+            channelRT1Mipped = CreateChannelMippedRT(RenderTextureFormat.ARGBFloat, "Channels1_steam_glitter_bb_ice_mipped");
+            channelRT2Mipped = CreateChannelMippedRT(RenderTextureFormat.ARGBFloat, "Channels2_electricity_mipped");
 
-            // Display output (used as UAV by particle render pass)
-            displayRT = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGB32);
-            displayRT.enableRandomWrite = true;
+            // Decouple display resolution from sim resolution.
+            // The gradient shader runs at display resolution, sampling sim-resolution
+            // channel textures — hardware bilinear + mipmaps handle the minification.
+            // No enableRandomWrite: autoGenerateMips works correctly, and we avoid
+            // the silent mipmap failure that caused blockiness at sim resolution.
+            effectiveDisplayRes = displayResolution > 0
+                ? displayResolution
+                : Mathf.Min(resolution, Mathf.Max(Screen.width, Screen.height));
+
+            // Downsampled SRV copies at display resolution for 1:1 sampling.
+            channelRT0Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels0_fire_water_plant_down");
+            channelRT1Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels1_steam_glitter_bb_ice_down");
+            channelRT2Down = CreateChannelDownRT(RenderTextureFormat.ARGBFloat, "Channels2_electricity_down");
+
+            displayRT = new RenderTexture(effectiveDisplayRes, effectiveDisplayRes, 0, RenderTextureFormat.ARGBHalf);
             displayRT.filterMode = FilterMode.Bilinear;
             displayRT.wrapMode = TextureWrapMode.Clamp;
             displayRT.name = "DisplayRT";
             displayRT.Create();
+
+            Debug.Log($"[SimDriver] Display resolution: {effectiveDisplayRes}x{effectiveDisplayRes} " +
+                $"(sim={resolution}, screen={Screen.width}x{Screen.height}, " +
+                $"configured={displayResolution})");
 
         }
 
@@ -452,6 +488,60 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             var rt = new RenderTexture(resolution, resolution, 0, format);
             rt.enableRandomWrite = true;
+            rt.filterMode = FilterMode.Bilinear;
+            rt.wrapMode = TextureWrapMode.Clamp;
+            rt.name = name;
+            rt.Create();
+            return rt;
+        }
+
+        /// <summary>
+        /// Create a channel RT at sim resolution with mipmaps for minification.
+        /// enableRandomWrite is required for compute splat writes;
+        /// autoGenerateMips is false (manual GenerateMips after compute dispatch).
+        /// Trilinear filtering lets tex2D auto-select the right mip when the
+        /// gradient shader runs at a lower display resolution.
+        /// </summary>
+        private RenderTexture CreateChannelRT(RenderTextureFormat format, string name)
+        {
+            var rt = new RenderTexture(resolution, resolution, 0, format);
+            rt.enableRandomWrite = true;   // compute writes
+            rt.useMipMap = false;          // mipmap generation on UAV RTs is unreliable
+            rt.autoGenerateMips = false;
+            rt.filterMode = FilterMode.Trilinear;
+            rt.wrapMode = TextureWrapMode.Clamp;
+            rt.name = name;
+            rt.Create();
+            return rt;
+        }
+
+        /// <summary>
+        /// Create a non-UAV, mipmapped copy for gradient sampling.
+        /// Mips are auto-generated by Blit from the UAV source each frame.
+        /// </summary>
+        private RenderTexture CreateChannelMippedRT(RenderTextureFormat format, string name)
+        {
+            var rt = new RenderTexture(resolution, resolution, 0, format);
+            rt.enableRandomWrite = false;  // SRV only
+            rt.useMipMap = true;
+            rt.autoGenerateMips = true;
+            rt.filterMode = FilterMode.Trilinear;
+            rt.wrapMode = TextureWrapMode.Clamp;
+            rt.name = name;
+            rt.Create();
+            return rt;
+        }
+
+        /// <summary>
+        /// Create a downsampled SRV texture at display resolution (no UAV, no mips).
+        /// Gradient samples these at 1:1 to avoid heavy minification of the 4K channel data.
+        /// </summary>
+        private RenderTexture CreateChannelDownRT(RenderTextureFormat format, string name)
+        {
+            var rt = new RenderTexture(effectiveDisplayRes, effectiveDisplayRes, 0, format);
+            rt.enableRandomWrite = false;
+            rt.useMipMap = false;
+            rt.autoGenerateMips = false;
             rt.filterMode = FilterMode.Bilinear;
             rt.wrapMode = TextureWrapMode.Clamp;
             rt.name = name;
@@ -1039,7 +1129,24 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 int splatGroups = Mathf.CeilToInt(resolution / 8f);
                 particleChannelSplatCompute.Dispatch(kernelChannelSplat, splatGroups, splatGroups, 1);
 
-                // Force UAV → SRV transition before the fragment shader samples the channel textures.
+                // Copy into SRV-only, mipmapped textures so the gradient shader can minify safely.
+                if (channelRT0Mipped != null && channelRT1Mipped != null && channelRT2Mipped != null)
+                {
+                    Graphics.Blit(channelRT0, channelRT0Mipped);
+                    Graphics.Blit(channelRT1, channelRT1Mipped);
+                    Graphics.Blit(channelRT2, channelRT2Mipped);
+                }
+
+                // Downsample to display resolution for 1:1 sampling (avoids large minification ratios).
+                if (effectiveDisplayRes < resolution &&
+                    channelRT0Down != null && channelRT1Down != null && channelRT2Down != null)
+                {
+                    Graphics.Blit(channelRT0Mipped ?? channelRT0, channelRT0Down);
+                    Graphics.Blit(channelRT1Mipped ?? channelRT1, channelRT1Down);
+                    Graphics.Blit(channelRT2Mipped ?? channelRT2, channelRT2Down);
+                }
+
+                // Force UAV -> SRV transition before the fragment shader samples the channel textures.
                 Graphics.SetRenderTarget(null);
             }
         }
@@ -1626,11 +1733,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Apply gradient rendering if enabled
             if (useGradientRendering && gradientMaterial != null && gradientPreset != null && !displayVelocity)
             {
-                // Ensure gradient RT exists
-                if (gradientRT == null || gradientRT.width != resolution)
+                // Ensure gradient RT exists at display resolution (not sim resolution).
+                // The gradient shader runs here, sampling sim-resolution channel textures
+                // with hardware minification via mipmaps — this is where the downscale happens.
+                if (gradientRT == null || gradientRT.width != effectiveDisplayRes)
                 {
                     if (gradientRT != null) gradientRT.Release();
-                    gradientRT = new RenderTexture(resolution, resolution, 0, RenderTextureFormat.ARGBHalf);
+                    gradientRT = new RenderTexture(effectiveDisplayRes, effectiveDisplayRes, 0, RenderTextureFormat.ARGBHalf);
                     gradientRT.enableRandomWrite = false;
                     gradientRT.filterMode = FilterMode.Bilinear;
                     gradientRT.Create();
@@ -1676,6 +1785,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 // Direct blit without gradient
                 Graphics.Blit(sourceTexture, displayRT);
             }
+
+            // displayRT is allocated at screen resolution (effectiveDisplayRes) without
+            // enableRandomWrite or mipmaps — no GenerateMips needed. The minification
+            // happens in the gradient shader via mipmapped channel textures.
 
             // Cleanup temporary RT
             if (compositeRT != null)
@@ -1817,6 +1930,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
               if (channelRT0) channelRT0.Release();
               if (channelRT1) channelRT1.Release();
               if (channelRT2) channelRT2.Release();
+              if (channelRT0Mipped) channelRT0Mipped.Release();
+              if (channelRT1Mipped) channelRT1Mipped.Release();
+              if (channelRT2Mipped) channelRT2Mipped.Release();
+              if (channelRT0Down) channelRT0Down.Release();
+              if (channelRT1Down) channelRT1Down.Release();
+              if (channelRT2Down) channelRT2Down.Release();
               if (creatureInkBuffer) creatureInkBuffer.Release();
 
               // Clean up compute buffers
@@ -1840,6 +1959,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             if (particlesBuffer == null || particleToColorCompute == null || displayRT == null)
             {
+                return;
+            }
+
+            // This compute path writes at sim resolution directly into the output texture.
+            // Since displayRT is now at effectiveDisplayRes (screen-sized), the dispatch
+            // and _Resolution must match the output texture, not the sim grid.
+            // For now this path only works when displayRes == simRes.
+            if (effectiveDisplayRes != resolution)
+            {
+                Debug.LogWarning("[SimDriver] RenderParticlesToDisplay skipped: " +
+                    $"displayRes ({effectiveDisplayRes}) != simRes ({resolution}). " +
+                    "Use gradient rendering path instead.");
                 return;
             }
 
