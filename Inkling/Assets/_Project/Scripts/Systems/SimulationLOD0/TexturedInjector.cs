@@ -227,6 +227,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 if (stampTexture == null) return;
             }
 
+            // Overlap culling: skip if the mask quad does not intersect the sim plane.
+            if (!OverlapsSim(uvPosition))
+            {
+                return;
+            }
+
             // No CPU-side pixel rewrite; we use the source mask directly and let the shader handle overrides
 
             if (!hasLoggedFirstInjection)
@@ -276,6 +282,21 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 }
             }
 
+        }
+
+        /// <summary>
+        /// Returns true if the mask quad (centered at uvPosition, size = maskSize) overlaps the simulation rect [0,1]x[0,1].
+        /// Prevents dispatch when the mask is completely off the sim plane.
+        /// </summary>
+        private bool OverlapsSim(Vector2 uvPosition)
+        {
+            Vector2 half = maskSize * 0.5f;
+            float minX = uvPosition.x - half.x;
+            float maxX = uvPosition.x + half.x;
+            float minY = uvPosition.y - half.y;
+            float maxY = uvPosition.y + half.y;
+
+            return !(maxX < 0f || minX > 1f || maxY < 0f || minY > 1f);
         }
 
         /// <summary>
