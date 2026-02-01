@@ -469,15 +469,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Native half in StructuredBuffers is only reliable on mobile GPUs
             // (Metal on Apple Silicon, GLES on Mali/Adreno with explicit support).
             int particleCount = resolution * resolution;
-            int halfStride = Marshal.SizeOf<iparticle>();
-            int floatStride = Marshal.SizeOf<iparticle_gpu>();
-            var gfxAPI = SystemInfo.graphicsDeviceType;
-            gpuPromotesHalf = gfxAPI == GraphicsDeviceType.Direct3D11
-                || gfxAPI == GraphicsDeviceType.Direct3D12
-                || gfxAPI == GraphicsDeviceType.OpenGLCore
-                || gfxAPI == GraphicsDeviceType.OpenGLES3
-                || gfxAPI == GraphicsDeviceType.Vulkan;
-            gpuParticleStride = gpuPromotesHalf ? floatStride : halfStride;
+            // Force float stride (all-float iparticle) for all platforms to avoid half/float promotion mismatch
+            gpuPromotesHalf = true;
+            gpuParticleStride = Marshal.SizeOf<iparticle>(); // 56 bytes
 
             particlesBuffer = new ComputeBuffer[2];
             for (int i = 0; i < 2; i++)
@@ -486,7 +480,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             Debug.Log($"[SimDriver] Allocated particle buffer: {particleCount} particles, " +
-                $"stride {gpuParticleStride} bytes ({(gpuPromotesHalf ? "float-promoted" : "native half")}), " +
+                $"stride {gpuParticleStride} bytes (float stride), " +
                 $"API={SystemInfo.graphicsDeviceType}");
 
             // Channel textures for particle-authoritative gradient rendering.
