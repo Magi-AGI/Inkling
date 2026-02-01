@@ -15,3 +15,7 @@ MonoBehaviour:
   inkType: 4
   displayName: Steam
   debugColor: {r: 0.49019608, g: 0.49019608, b: 0.49019608, a: 1}
+  dissipation: 0.999
+  viscosity: 0.02
+  vorticity: 1.5
+  interactionThreshold: 0.2

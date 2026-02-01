@@ -15,3 +15,7 @@ MonoBehaviour:
   inkType: 2
   displayName: PlantSeeded
   debugColor: {r: 0, g: 1, b: 0, a: 1}
+  dissipation: 0.997
+  viscosity: 0.15
+  vorticity: 0
+  interactionThreshold: 0.2

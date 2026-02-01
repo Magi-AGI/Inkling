@@ -260,7 +260,8 @@ Shader "Inkling/InkGradientRenderer"
                 // Common post-processing
                 finalColor.rgb = BoostSaturation(finalColor.rgb, _SaturationBoost);
                 finalColor.rgb *= _EmissionStrength;
-                finalColor.a = smoothstep(_AlphaCutoff, _AlphaCutoff + 0.05, finalColor.a);
+                // Force opaque alpha; background is provided by RT clear (black)
+                finalColor.a = 1.0;
 
                 return finalColor;
             }

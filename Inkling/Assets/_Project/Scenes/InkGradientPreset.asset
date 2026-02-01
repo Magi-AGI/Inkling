@@ -22,7 +22,7 @@ MonoBehaviour:
   dustGradientTexOverride: {fileID: 0}
   fireGradient:
     serializedVersion: 2
-    key0: {r: 0.49019608, g: 0.49019608, b: 0.49019608, a: 0}
+    key0: {r: 0, g: 0, b: 0, a: 0}
     key1: {r: 0.5, g: 0, b: 0, a: 0}
     key2: {r: 1, g: 0.3, b: 0, a: 1}
     key3: {r: 1, g: 0.8, b: 0, a: 1}
@@ -39,7 +39,7 @@ MonoBehaviour:
     ctime6: 0
     ctime7: 0
     atime0: 0
-    atime1: 12722
+    atime1: 13107
     atime2: 32768
     atime3: 58982
     atime4: 65535

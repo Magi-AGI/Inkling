@@ -21,6 +21,32 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Debug visualization color")]
         public Color debugColor = Color.white;
 
+        [Header("Simulation Properties")]
+        [Tooltip("How fast this ink fades (0.9=fast, 0.999=slow, 1.0=never)")]
+        [Range(0f, 1f)]
+        public float dissipation = 0.995f;
+
+        [Tooltip("How much this ink spreads/diffuses (0=none, 1=max spread). Higher values make ink bleed into neighbors.")]
+        [Range(0f, 1f)]
+        public float viscosity = 0.1f;
+
+        [Tooltip("How much this ink contributes to swirl/vortex effects (0=none, 1=max swirl). Fire might swirl more, water less.")]
+        [Range(0f, 2f)]
+        public float vorticity = 1.0f;
+
+        [Tooltip("Minimum concentration before this ink participates in reactions (0=always react, 0.1=needs 10% presence).")]
+        [Range(0f, 1f)]
+        public float interactionThreshold = 0.01f;
+
+        [Header("Advection / Pressure")]
+        [Tooltip("How strongly this ink is advected by velocity (0=static, 1=full advection).")]
+        [Range(0f, 5f)]
+        public float advectionWeight = 1.0f;
+
+        [Tooltip("Reserved: how strongly this ink contributes to pressure/divergence (0=none, 1=full).")]
+        [Range(0f, 5f)]
+        public float pressureWeight = 1.0f;
+
         /// <summary>
         /// Returns the particle field index for GPU upload.
         /// </summary>

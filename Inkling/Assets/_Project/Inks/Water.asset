@@ -15,3 +15,7 @@ MonoBehaviour:
   inkType: 1
   displayName: Water
   debugColor: {r: 0, g: 0, b: 1, a: 1}
+  dissipation: 0.998
+  viscosity: 0.2
+  vorticity: 0.8
+  interactionThreshold: 0.2

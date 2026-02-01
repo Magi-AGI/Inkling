@@ -100,6 +100,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool useParticleAdvection = true;
         [Tooltip("When enabled (with useParticleSimulation), runs DissipateParticles each frame.")]
         [SerializeField] private bool useParticleDissipation = true;
+        [Tooltip("When enabled (with useParticleSimulation), runs DiffuseParticles each frame for per-ink viscosity/spreading.")]
+        [SerializeField] private bool useParticleDiffusion = true;
         [Tooltip("Safety cap: particle kernels are skipped when resolution exceeds this value.")]
         [SerializeField] private int maxParticleSimResolution = 512;
 
@@ -112,6 +114,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool inkInteractionsDebugMode = false;
         [Tooltip("Affinity groups defining which inks interact and how. Each group processes 4 inks.")]
         [SerializeField] private AffinityGroup[] affinityGroups;
+
+        [Header("Ink Properties")]
+        [Tooltip("Ink type definitions with per-ink properties. Index must match InkTypeId enum.")]
+        [SerializeField] private InkTypeDef[] inkDefinitions = new InkTypeDef[10];
 
         // Render textures (using PingPongRenderTexture from MagiUnityTools)
         private PingPongRenderTexture velocity;
@@ -194,6 +200,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // Particle-based kernels
         private int kernelAdvectParticles;
         private int kernelDissipateParticles;
+        private int kernelDiffuseParticles;
         private int kernelAddParticlesGaussian;
 
         // Ink interactions kernel (from InkInteractions.compute)
@@ -400,6 +407,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     // Particle kernels (new)
                     kernelAdvectParticles = fluidCompute.FindKernel("AdvectParticles");
                     kernelDissipateParticles = fluidCompute.FindKernel("DissipateParticles");
+                    kernelDiffuseParticles = fluidCompute.FindKernel("DiffuseParticles");
                     kernelAddParticlesGaussian = fluidCompute.FindKernel("AddParticlesGaussian");
                 }
                 catch
@@ -610,18 +618,115 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fluidCompute.SetFloat("_ForceStrength", 0f);
             fluidCompute.SetFloat("_DensityAmount", 0f);
 
-            // Per-channel dissipation rates
-            fluidCompute.SetFloat("_DissipationFire", 0.995f);
-            fluidCompute.SetFloat("_DissipationWater", 0.998f);
-            fluidCompute.SetFloat("_DissipationPlant", 0.997f);
-            fluidCompute.SetFloat("_DissipationSteam", 0.990f);
-            fluidCompute.SetFloat("_DissipationGlitter", 0.999f);
-            fluidCompute.SetFloat("_DissipationBlackBody", 0.5f);  // Black body dissipates VERY quickly
-            fluidCompute.SetFloat("_DissipationElectricity", 0.985f);
-            fluidCompute.SetFloat("_DissipationIce", 0.996f);
+            // Per-ink dissipation rates (from InkTypeDef assets or defaults)
+            fluidCompute.SetFloat("_DissipationFire", GetInkDissipation(InkTypeId.Fire, 0.995f));
+            fluidCompute.SetFloat("_DissipationWater", GetInkDissipation(InkTypeId.Water, 0.998f));
+            fluidCompute.SetFloat("_DissipationPlantSeeded", GetInkDissipation(InkTypeId.PlantSeeded, 0.997f));
+            fluidCompute.SetFloat("_DissipationPlantGrown", GetInkDissipation(InkTypeId.PlantGrown, 0.997f));
+            fluidCompute.SetFloat("_DissipationSteam", GetInkDissipation(InkTypeId.Steam, 0.990f));
+            fluidCompute.SetFloat("_DissipationGlitter", GetInkDissipation(InkTypeId.Glitter, 0.999f));
+            fluidCompute.SetFloat("_DissipationBlackBody", GetInkDissipation(InkTypeId.BlackBody, 0.5f));
+            fluidCompute.SetFloat("_DissipationElectricitySeeded", GetInkDissipation(InkTypeId.ElectricitySeeded, 0.985f));
+            fluidCompute.SetFloat("_DissipationElectricityGrown", GetInkDissipation(InkTypeId.ElectricityGrown, 0.985f));
+            fluidCompute.SetFloat("_DissipationIce", GetInkDissipation(InkTypeId.Ice, 0.996f));
+
+            // Per-ink viscosity (spreading/diffusion)
+            fluidCompute.SetFloat("_ViscosityFire", GetInkViscosity(InkTypeId.Fire, 0.05f));
+            fluidCompute.SetFloat("_ViscosityWater", GetInkViscosity(InkTypeId.Water, 0.2f));
+            fluidCompute.SetFloat("_ViscosityPlantSeeded", GetInkViscosity(InkTypeId.PlantSeeded, 0.0f));
+            fluidCompute.SetFloat("_ViscosityPlantGrown", GetInkViscosity(InkTypeId.PlantGrown, 0.0f));
+            fluidCompute.SetFloat("_ViscositySteam", GetInkViscosity(InkTypeId.Steam, 0.15f));
+            fluidCompute.SetFloat("_ViscosityGlitter", GetInkViscosity(InkTypeId.Glitter, 0.02f));
+            fluidCompute.SetFloat("_ViscosityBlackBody", GetInkViscosity(InkTypeId.BlackBody, 0.1f));
+            fluidCompute.SetFloat("_ViscosityElectricitySeeded", GetInkViscosity(InkTypeId.ElectricitySeeded, 0.0f));
+            fluidCompute.SetFloat("_ViscosityElectricityGrown", GetInkViscosity(InkTypeId.ElectricityGrown, 0.0f));
+            fluidCompute.SetFloat("_ViscosityIce", GetInkViscosity(InkTypeId.Ice, 0.0f));
+
+            // Per-ink vorticity contribution (swirl effects)
+            fluidCompute.SetFloat("_VorticityFire", GetInkVorticity(InkTypeId.Fire, 1.5f));
+            fluidCompute.SetFloat("_VorticityWater", GetInkVorticity(InkTypeId.Water, 0.8f));
+            fluidCompute.SetFloat("_VorticityPlantSeeded", GetInkVorticity(InkTypeId.PlantSeeded, 0.0f));
+            fluidCompute.SetFloat("_VorticityPlantGrown", GetInkVorticity(InkTypeId.PlantGrown, 0.0f));
+            fluidCompute.SetFloat("_VorticitySteam", GetInkVorticity(InkTypeId.Steam, 1.2f));
+            fluidCompute.SetFloat("_VorticityGlitter", GetInkVorticity(InkTypeId.Glitter, 0.5f));
+            fluidCompute.SetFloat("_VorticityBlackBody", GetInkVorticity(InkTypeId.BlackBody, 0.3f));
+            fluidCompute.SetFloat("_VorticityElectricitySeeded", GetInkVorticity(InkTypeId.ElectricitySeeded, 0.0f));
+            fluidCompute.SetFloat("_VorticityElectricityGrown", GetInkVorticity(InkTypeId.ElectricityGrown, 0.0f));
+            fluidCompute.SetFloat("_VorticityIce", GetInkVorticity(InkTypeId.Ice, 0.2f));
+
+            // Per-ink advection weights
+            fluidCompute.SetFloat("_AdvectionFire", GetInkAdvection(InkTypeId.Fire, 1.0f));
+            fluidCompute.SetFloat("_AdvectionWater", GetInkAdvection(InkTypeId.Water, 1.0f));
+            fluidCompute.SetFloat("_AdvectionPlantSeeded", GetInkAdvection(InkTypeId.PlantSeeded, 1.0f));
+            fluidCompute.SetFloat("_AdvectionPlantGrown", GetInkAdvection(InkTypeId.PlantGrown, 1.0f));
+            fluidCompute.SetFloat("_AdvectionSteam", GetInkAdvection(InkTypeId.Steam, 1.0f));
+            fluidCompute.SetFloat("_AdvectionGlitter", GetInkAdvection(InkTypeId.Glitter, 1.0f));
+            fluidCompute.SetFloat("_AdvectionBlackBody", GetInkAdvection(InkTypeId.BlackBody, 1.0f));
+            fluidCompute.SetFloat("_AdvectionElectricitySeeded", GetInkAdvection(InkTypeId.ElectricitySeeded, 1.0f));
+            fluidCompute.SetFloat("_AdvectionElectricityGrown", GetInkAdvection(InkTypeId.ElectricityGrown, 1.0f));
+            fluidCompute.SetFloat("_AdvectionIce", GetInkAdvection(InkTypeId.Ice, 1.0f));
+
+            // Per-ink pressure weights (reserved for future use)
+            fluidCompute.SetFloat("_PressureFire", GetInkPressureWeight(InkTypeId.Fire, 1.0f));
+            fluidCompute.SetFloat("_PressureWater", GetInkPressureWeight(InkTypeId.Water, 1.0f));
+            fluidCompute.SetFloat("_PressurePlantSeeded", GetInkPressureWeight(InkTypeId.PlantSeeded, 1.0f));
+            fluidCompute.SetFloat("_PressurePlantGrown", GetInkPressureWeight(InkTypeId.PlantGrown, 1.0f));
+            fluidCompute.SetFloat("_PressureSteam", GetInkPressureWeight(InkTypeId.Steam, 1.0f));
+            fluidCompute.SetFloat("_PressureGlitter", GetInkPressureWeight(InkTypeId.Glitter, 1.0f));
+            fluidCompute.SetFloat("_PressureBlackBody", GetInkPressureWeight(InkTypeId.BlackBody, 1.0f));
+            fluidCompute.SetFloat("_PressureElectricitySeeded", GetInkPressureWeight(InkTypeId.ElectricitySeeded, 1.0f));
+            fluidCompute.SetFloat("_PressureElectricityGrown", GetInkPressureWeight(InkTypeId.ElectricityGrown, 1.0f));
+            fluidCompute.SetFloat("_PressureIce", GetInkPressureWeight(InkTypeId.Ice, 1.0f));
 
             // Additional useful parameters
             fluidCompute.SetVector("_TexelSize", new Vector4(1f / resolution, 1f / resolution, resolution, resolution));
+        }
+
+        private float GetInkDissipation(InkTypeId type, float defaultValue)
+        {
+            int idx = (int)type;
+            if (inkDefinitions != null && idx < inkDefinitions.Length && inkDefinitions[idx] != null)
+                return inkDefinitions[idx].dissipation;
+            return defaultValue;
+        }
+
+        private float GetInkViscosity(InkTypeId type, float defaultValue)
+        {
+            int idx = (int)type;
+            if (inkDefinitions != null && idx < inkDefinitions.Length && inkDefinitions[idx] != null)
+                return inkDefinitions[idx].viscosity;
+            return defaultValue;
+        }
+
+        private float GetInkVorticity(InkTypeId type, float defaultValue)
+        {
+            int idx = (int)type;
+            if (inkDefinitions != null && idx < inkDefinitions.Length && inkDefinitions[idx] != null)
+                return inkDefinitions[idx].vorticity;
+            return defaultValue;
+        }
+
+        private float GetInkAdvection(InkTypeId type, float defaultValue)
+        {
+            int idx = (int)type;
+            if (inkDefinitions != null && idx < inkDefinitions.Length && inkDefinitions[idx] != null)
+                return inkDefinitions[idx].advectionWeight;
+            return defaultValue;
+        }
+
+        private float GetInkPressureWeight(InkTypeId type, float defaultValue)
+        {
+            int idx = (int)type;
+            if (inkDefinitions != null && idx < inkDefinitions.Length && inkDefinitions[idx] != null)
+                return inkDefinitions[idx].pressureWeight;
+            return defaultValue;
+        }
+        private float GetInkInteractionThreshold(InkTypeId type, float defaultValue)
+        {
+            int idx = (int)type;
+            if (inkDefinitions != null && idx < inkDefinitions.Length && inkDefinitions[idx] != null)
+                return inkDefinitions[idx].interactionThreshold;
+            return defaultValue;
         }
 
         private void ClearBuffers()
@@ -1072,21 +1177,32 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                             // Upload affinity group data
                             int[] indices = group.GetInkIndices();
                             inkInteractionsCompute.SetInts("_InkIndices", indices);
-                            inkInteractionsCompute.SetMatrix("_ReactionMatrix", group.reactionMatrix);
+                            inkInteractionsCompute.SetMatrix("_ProductMatrix", group.productMatrix);
+                            inkInteractionsCompute.SetVector("_ProductCol4", group.productCol4);
+                            inkInteractionsCompute.SetVector("_ProductCol5", group.productCol5);
                             Vector3 weights = group.GetWeights();
                             inkInteractionsCompute.SetFloats("_Weights", weights.x, weights.y, weights.z);
                             inkInteractionsCompute.SetFloat("_RateMultiplier", group.reactionRateMultiplier);
 
+                            // Per-ink interaction thresholds (matching the 4 inks in this group)
+                            Vector4 thresholds = new Vector4(
+                                GetInkInteractionThreshold((InkTypeId)indices[0], 0.01f),
+                                GetInkInteractionThreshold((InkTypeId)indices[1], 0.01f),
+                                GetInkInteractionThreshold((InkTypeId)indices[2], 0.01f),
+                                GetInkInteractionThreshold((InkTypeId)indices[3], 0.01f)
+                            );
+                            inkInteractionsCompute.SetVector("_InteractionThresholds", thresholds);
+
                             // Debug: log dispatch info once
                             if (Time.frameCount == 10)
                             {
-                                var m = group.reactionMatrix;
+                                var pm = group.productMatrix;
                                 Debug.Log($"[InkInteractions] Group '{group.groupName}' dispatch:\n" +
                                     $"  Indices: [{indices[0]}, {indices[1]}, {indices[2]}, {indices[3]}]\n" +
-                                    $"  Matrix row0: [{m.m00:F2}, {m.m01:F2}, {m.m02:F2}, {m.m03:F2}]\n" +
-                                    $"  Matrix row1: [{m.m10:F2}, {m.m11:F2}, {m.m12:F2}, {m.m13:F2}]\n" +
-                                    $"  Matrix row2: [{m.m20:F2}, {m.m21:F2}, {m.m22:F2}, {m.m23:F2}]\n" +
-                                    $"  Matrix row3: [{m.m30:F2}, {m.m31:F2}, {m.m32:F2}, {m.m33:F2}]\n" +
+                                    $"  ProductMatrix row0: [{pm.m00:F2}, {pm.m01:F2}, {pm.m02:F2}, {pm.m03:F2}]\n" +
+                                    $"  ProductMatrix row1: [{pm.m10:F2}, {pm.m11:F2}, {pm.m12:F2}, {pm.m13:F2}]\n" +
+                                    $"  ProductMatrix row2: [{pm.m20:F2}, {pm.m21:F2}, {pm.m22:F2}, {pm.m23:F2}]\n" +
+                                    $"  ProductMatrix row3: [{pm.m30:F2}, {pm.m31:F2}, {pm.m32:F2}, {pm.m33:F2}]\n" +
                                     $"  Weights: [{weights.x}, {weights.y}, {weights.z}]\n" +
                                     $"  RateMultiplier: {group.reactionRateMultiplier}\n" +
                                     $"  Resolution: {resolution}, DeltaTime: {timestep}");
@@ -1105,6 +1221,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                         fluidCompute.SetBuffer(kernelDissipateParticles, "_ParticlesRead", particlesBuffer[particleReadIndex]);
                         fluidCompute.SetBuffer(kernelDissipateParticles, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
                         fluidCompute.Dispatch(kernelDissipateParticles, threadGroups, threadGroups, 1);
+                        SwapParticleBuffers();
+                    }
+
+                    if (useParticleDiffusion && kernelDiffuseParticles != 0)
+                    {
+                        fluidCompute.SetBuffer(kernelDiffuseParticles, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                        fluidCompute.SetBuffer(kernelDiffuseParticles, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
+                        fluidCompute.Dispatch(kernelDiffuseParticles, threadGroups, threadGroups, 1);
                         SwapParticleBuffers();
                     }
                 }
@@ -1138,10 +1262,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 fluidCompute.SetTexture(kernelVorticity, "_VorticityMag", vorticityTex);
                 fluidCompute.Dispatch(kernelVorticity, threadGroups, threadGroups, 1);
 
-                // Apply vorticity confinement
+                // Apply vorticity confinement (with per-ink vorticity weights)
                 fluidCompute.SetTexture(kernelVorticityConfinement, "_VelocityRead", velocity.Read);
                 fluidCompute.SetTexture(kernelVorticityConfinement, "_VelocityWrite", velocity.Write);
                 fluidCompute.SetTexture(kernelVorticityConfinement, "_VorticityMag", vorticityTex);
+                // Bind particle buffer for per-ink vorticity sampling
+                if (useParticleSimulation && particlesBuffer != null && particlesBuffer[particleReadIndex] != null)
+                {
+                    fluidCompute.SetBuffer(kernelVorticityConfinement, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                }
                 fluidCompute.Dispatch(kernelVorticityConfinement, threadGroups, threadGroups, 1);
                 velocity.Swap();
 
@@ -1154,6 +1283,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Calculate divergence
             fluidCompute.SetTexture(kernelDivergence, "_VelocityRead", velocity.Read);
             fluidCompute.SetTexture(kernelDivergence, "_DivergenceWrite", divergence);
+            if (useParticleSimulation && particlesBuffer != null && particlesBuffer[particleReadIndex] != null)
+            {
+                fluidCompute.SetBuffer(kernelDivergence, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+            }
             fluidCompute.Dispatch(kernelDivergence, threadGroups, threadGroups, 1);
 
             // DON'T clear pressure - let it persist for better convergence
@@ -1830,6 +1963,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 }
             }
 
+            // Clear to opaque black every frame before rendering
+            RenderTexture.active = displayRT;
+            GL.Clear(true, true, Color.black);
+            RenderTexture.active = null;
+
             // Apply gradient rendering if enabled
             if (useGradientRendering && gradientMaterial != null && gradientPreset != null && !displayVelocity)
             {
@@ -1883,6 +2021,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     gradientMaterial.DisableKeyword("_PARTICLEBUFFER_ON");
                 }
 
+                // Clear gradientRT to black to avoid residuals
+                RenderTexture.active = gradientRT;
+                GL.Clear(true, true, Color.black);
+                RenderTexture.active = null;
+
                 // Blit through gradient material
                 Graphics.Blit(sourceTexture, gradientRT, gradientMaterial);
                 Graphics.Blit(gradientRT, displayRT);
@@ -1890,6 +2033,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             else
             {
                 // Direct blit without gradient
+                // Clear to black background before blitting
+                RenderTexture.active = displayRT;
+                GL.Clear(true, true, Color.black);
+                RenderTexture.active = null;
                 Graphics.Blit(sourceTexture, displayRT);
             }
 

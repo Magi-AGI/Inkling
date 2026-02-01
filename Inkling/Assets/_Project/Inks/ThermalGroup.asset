@@ -18,23 +18,26 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 2a479c9de68b35042b619687310e729a, type: 2}
   - {fileID: 11400000, guid: 84ea5c909487b764c934fad7c76e218d, type: 2}
   - {fileID: 11400000, guid: 4d5cac36951b253469623e9d3dcf56dd, type: 2}
-  reactionMatrix:
-    e00: 0
-    e01: -1
-    e02: 0
+  productMatrix:
+    e00: -0.2
+    e01: 0
+    e02: -0.1
     e03: 0
-    e10: -1
+    e10: -0.2
     e11: 0
-    e12: 0
+    e12: 0.2
     e13: 0
-    e20: 1
-    e21: 1
+    e20: 0.4
+    e21: 0
     e22: 0
     e23: 0
     e30: 0
     e31: 0
-    e32: 0
+    e32: -0.1
     e33: 0
+  productCol4: {x: 0, y: -0.02, z: 0, w: 0.02}
+  productCol5: {x: 0, y: 0.35, z: -0.22, w: -0.13}
+  reactionRateMultiplier: 8
   selfWeight: 1
   cardinalWeight: 1
   diagonalWeight: 0.707

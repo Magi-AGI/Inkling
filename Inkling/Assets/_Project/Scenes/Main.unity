@@ -1274,7 +1274,7 @@ GameObject:
   - component: {fileID: 1299845688}
   - component: {fileID: 1299845689}
   m_Layer: 0
-  m_Name: SimulationDriver
+  m_Name: SimDriver
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1308,14 +1308,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.SimDriver
   fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
-  resolution: 1080
+  resolution: 1024
   viscosity: 0.0001
   vorticity: 5
   dissipation: 0.999
   velocityDissipation: 0.99
   timestep: 0.016
-  pressureIterations: 20
-  diffusionIterations: 10
+  pressureIterations: 60
+  diffusionIterations: 20
   useRedBlackSolver: 1
   autoInject: 0
   injectionForce: 100
@@ -1338,7 +1338,25 @@ MonoBehaviour:
   useParticleSimulation: 1
   useParticleAdvection: 1
   useParticleDissipation: 1
-  maxParticleSimResolution: 1080
+  useParticleDiffusion: 1
+  maxParticleSimResolution: 1024
+  inkInteractionsCompute: {fileID: 7200000, guid: aa92fa222fb65b04f87571b5ecc49a6f, type: 3}
+  useInkInteractions: 1
+  inkInteractionsDebugMode: 0
+  affinityGroups:
+  - {fileID: 11400000, guid: da76efa99d9a5cf4aadca3f811d21554, type: 2}
+  - {fileID: 11400000, guid: bb5975a015651cc47aab80f9ac703167, type: 2}
+  inkDefinitions:
+  - {fileID: 11400000, guid: b95f0ee9596be374186a08a2bcba1023, type: 2}
+  - {fileID: 11400000, guid: 2a479c9de68b35042b619687310e729a, type: 2}
+  - {fileID: 11400000, guid: 4ecdf3669256ff74586c1fdd5e58f38b, type: 2}
+  - {fileID: 11400000, guid: 085dfe8b59bc3a54286508756ca46cf9, type: 2}
+  - {fileID: 11400000, guid: 84ea5c909487b764c934fad7c76e218d, type: 2}
+  - {fileID: 11400000, guid: f08898fb3f1ffb942a5b2615fb98c46e, type: 2}
+  - {fileID: 11400000, guid: 9f2e1f50c8d7bc14ea26fb284756ee68, type: 2}
+  - {fileID: 11400000, guid: 50ea6e5c4ac9a58459b4f3b7a083b114, type: 2}
+  - {fileID: 11400000, guid: 4f68a274df5e692418fe1a0fcd8e536c, type: 2}
+  - {fileID: 11400000, guid: 4d5cac36951b253469623e9d3dcf56dd, type: 2}
   particleToColorCompute: {fileID: 7200000, guid: 0334aaf5539bd7649886292613ec7ad8, type: 3}
   particleChannelSplatCompute: {fileID: 7200000, guid: 2e75d1648379b174584d6d1a1c20b62c, type: 3}
   useParticleRenderPass: 0

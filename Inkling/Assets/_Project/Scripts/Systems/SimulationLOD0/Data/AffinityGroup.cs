@@ -3,8 +3,8 @@ using UnityEngine;
 namespace Magi.Inkling.Systems.SimulationLOD0
 {
     /// <summary>
-    /// Defines a group of 4 interacting inks and their reaction matrix.
-    /// The matrix encodes reaction rates (per second) between inks.
+    /// Defines a group of 4 interacting inks and their product reaction matrix.
+    /// Product matrix encodes reactions requiring TWO inks (A + B → C).
     /// Negative values = consumption, Positive = production.
     /// </summary>
     [CreateAssetMenu(fileName = "NewAffinityGroup", menuName = "Inkling/Affinity Group")]
@@ -16,10 +16,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Exactly 4 ink types that form this interaction group")]
         public InkTypeDef[] inks = new InkTypeDef[4];
 
-        [Header("Reaction Matrix (per second)")]
-        [Tooltip("Row i, Col j = rate at which ink j affects ink i. Negative = consumption, Positive = production.")]
-        public Matrix4x4 reactionMatrix = Matrix4x4.zero;
+        [Header("Product Reaction Matrix (A + B → C)")]
+        [Tooltip("For reactions requiring TWO inks (e.g., fire+water→steam). Columns: 0×1, 0×2, 0×3, 1×2 (stored in Matrix4x4)")]
+        public Matrix4x4 productMatrix = Matrix4x4.zero;
 
+        [Tooltip("Product matrix column 4: reactions involving inks 1×3")]
+        public Vector4 productCol4 = Vector4.zero;
+
+        [Tooltip("Product matrix column 5: reactions involving inks 2×3")]
+        public Vector4 productCol5 = Vector4.zero;
+
+        [Header("Rate Settings")]
         [Tooltip("Global multiplier for reaction rates. Reference uses ~10-20 for visible effects.")]
         [Range(0.1f, 50f)]
         public float reactionRateMultiplier = 10f;
