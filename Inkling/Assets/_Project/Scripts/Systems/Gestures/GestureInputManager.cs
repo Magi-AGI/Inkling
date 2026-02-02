@@ -77,7 +77,7 @@ namespace Magi.Inkling.Systems.Gestures
 
         private void DispatchAction(string actionId)
         {
-            // Minimal routing: two example actions. Expand as needed.
+            // Minimal routing: examples for seeds and force line.
             switch (actionId)
             {
                 case "seed.plant":
@@ -86,9 +86,25 @@ namespace Magi.Inkling.Systems.Gestures
                 case "seed.electric":
                     writer.InjectDensity(GetCentroid(), Color.white, 7); // electricitySeeded
                     break;
+                case "force.line":
+                    InjectLineForce();
+                    break;
                 default:
                     break;
             }
+        }
+
+        private void InjectLineForce()
+        {
+            if (stroke.Count < 2) return;
+            Vector2 start = stroke[0];
+            Vector2 end = stroke[stroke.Count - 1];
+            Vector2 dir = (end - start);
+            if (dir.sqrMagnitude < 1e-6f) return;
+
+            // Scale force by stroke length in UV space
+            float forceScale = Mathf.Clamp(dir.magnitude * 200f, 0f, 300f);
+            writer.InjectForce(GetCentroid(), dir.normalized * forceScale);
         }
 
         private Vector2 GetCentroid()
