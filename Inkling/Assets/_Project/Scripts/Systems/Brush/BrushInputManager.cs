@@ -17,8 +17,10 @@ namespace Magi.Inkling.Systems.Brush
         [SerializeField] private BrushConfig config;
 
         private ISimulationWriter writer;
-        private Vector2 lastUv;
-        private bool hasLast;
+        private Vector2 lastPrimaryUv;
+        private bool hasLastPrimary;
+        private Vector2 lastMirrorUv;
+        private bool hasLastMirror;
 
         private void Awake()
         {
@@ -44,7 +46,8 @@ namespace Magi.Inkling.Systems.Brush
             var mouse = Mouse.current;
             if (!mouse.leftButton.isPressed)
             {
-                hasLast = false;
+                hasLastPrimary = false;
+                hasLastMirror = false;
                 return;
             }
 
@@ -52,19 +55,35 @@ namespace Magi.Inkling.Systems.Brush
                 Mathf.Clamp01(mouse.position.ReadValue().x / Screen.width),
                 Mathf.Clamp01(mouse.position.ReadValue().y / Screen.height));
 
-            InjectStroke(uv);
+            InjectStrokePair(uv);
         }
 
-        private void InjectStroke(Vector2 uv)
+        private void InjectStrokePair(Vector2 uv)
         {
-            // Density injection at pointer
-            var color = Color.white * config.densityMultiplier;
-            writer.InjectDensity(uv, color, 0); // default to fire; gesture/action map will refine later
+            InjectStrokeSingle(uv, ref lastPrimaryUv, ref hasLastPrimary, mirror: false);
 
-            // Velocity injection based on drag delta
+            if (config.enableMirror)
+            {
+                float mirroredX = config.mirrorAxisX + (config.mirrorAxisX - uv.x);
+                var uvMirror = new Vector2(Mathf.Clamp01(mirroredX), uv.y);
+                InjectStrokeSingle(uvMirror, ref lastMirrorUv, ref hasLastMirror, mirror: true);
+            }
+        }
+
+        private void InjectStrokeSingle(Vector2 uv, ref Vector2 lastUv, ref bool hasLast, bool mirror)
+        {
+            // Min-distance gating
+            if (hasLast && config.minDistanceUv > 0f && Vector2.Distance(uv, lastUv) < config.minDistanceUv)
+                return;
+
+            var color = Color.white * config.densityMultiplier;
+            writer.InjectDensity(uv, color, 0); // default ink channel; higher-level gesture/action maps will override
+
             if (hasLast)
             {
                 Vector2 delta = (uv - lastUv) * config.forceMultiplier;
+                if (mirror && config.mirrorInvertForceX)
+                    delta.x = -delta.x;
                 writer.InjectForce(uv, delta);
             }
 
@@ -73,7 +92,7 @@ namespace Magi.Inkling.Systems.Brush
 
             if (config.verboseLogging)
             {
-                Debug.Log($"[BrushInputManager] Inject at {uv} color {color} delta {(hasLast ? (uv - lastUv) : Vector2.zero)}");
+                Debug.Log($"[BrushInputManager] Inject {(mirror ? \"(mirror)\" : \"(primary)\")} uv={uv} color={color}");
             }
         }
     }
