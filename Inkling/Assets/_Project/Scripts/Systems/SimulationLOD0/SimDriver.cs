@@ -91,6 +91,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             "Decouples display from simulation: the gradient shader runs at this resolution, " +
             "sampling sim-resolution channel textures with hardware minification.")]
         [SerializeField] private int displayResolution = 0;
+        [Tooltip("When displayResolution is 0, scale the simulation resolution by this factor to derive display resolution.")]
+        [Range(0.1f, 1f)]
+        [SerializeField] private float displayResolutionScale = 1f;
 
         [Header("Creature / Stamp Rendering")]
         [SerializeField] private Shader densityStampShader;
@@ -622,7 +625,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // the silent mipmap failure that caused blockiness at sim resolution.
             effectiveDisplayRes = displayResolution > 0
                 ? displayResolution
-                : Mathf.Min(resolution, Mathf.Max(Screen.width, Screen.height));
+                : Mathf.Max(32, Mathf.RoundToInt(resolution * displayResolutionScale));
 
             // Downsampled SRV copies at display resolution for 1:1 sampling.
             // Only allocate when display < sim; otherwise mipped copies are sufficient.
