@@ -85,6 +85,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (idx < 0 || idx >= (int)InkTypeId.Count)
             {
                 Debug.LogWarning($"[InkTypeDef] '{name}' has invalid inkType {inkType} (index {idx}). Must be 0-{(int)InkTypeId.Count - 1}.");
+                Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal($"InkTypeDef invalid index: {name} idx {idx}");
             }
         }
     }
