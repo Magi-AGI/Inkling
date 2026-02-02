@@ -116,6 +116,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Affinity groups defining which inks interact and how. Each group processes 4 inks.")]
         [SerializeField] private AffinityGroup[] affinityGroups;
 
+        [Header("Black Body Ink")]
+        [Tooltip("Enable black body ink clearing behavior (drains other inks when bb > threshold).")]
+        [SerializeField] private bool enableBlackBodyClearing = true;
+        [Tooltip("Black body concentration threshold to activate clearing (default 0.5 = 50%).")]
+        [Range(0f, 1f)]
+        [SerializeField] private float blackBodyThreshold = 0.5f;
+        [Tooltip("Rate at which other inks are cleared per tick when black body is active (default 0.05).")]
+        [Range(0f, 0.2f)]
+        [SerializeField] private float blackBodyClearingRate = 0.05f;
+
         [Header("Ink Properties")]
         [Tooltip("Ink type definitions with per-ink properties. Index must match InkTypeId enum.")]
         [SerializeField] private InkTypeDef[] inkDefinitions = new InkTypeDef[10];
@@ -1234,6 +1244,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                         inkInteractionsCompute.SetInt("_Resolution", resolution);
                         inkInteractionsCompute.SetFloat("_DeltaTime", timestep);
                         inkInteractionsCompute.SetInt("_DebugMode", inkInteractionsDebugMode ? 1 : 0);
+
+                        // Black body ink clearing parameters
+                        inkInteractionsCompute.SetInt("_EnableBlackBodyClearing", enableBlackBodyClearing ? 1 : 0);
+                        inkInteractionsCompute.SetFloat("_BlackBodyThreshold", blackBodyThreshold);
+                        inkInteractionsCompute.SetFloat("_BlackBodyClearingRate", blackBodyClearingRate);
 
                         foreach (var group in affinityGroups)
                         {

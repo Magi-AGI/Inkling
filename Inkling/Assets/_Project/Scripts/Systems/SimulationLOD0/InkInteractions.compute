@@ -23,6 +23,11 @@ int _Resolution;
 float _DeltaTime;
 int _DebugMode;  // 0=normal, 1=test mode (boost fire when plant present)
 
+// Black body ink clearing parameters
+float _BlackBodyThreshold;    // Activation threshold (default 0.5)
+float _BlackBodyClearingRate; // Rate at which other inks are cleared (default 0.05)
+int _EnableBlackBodyClearing; // Toggle for black body clearing (0=off, 1=on)
+
 // Affinity group data (MVP: single group, hardcoded thermal)
 // Future: StructuredBuffer<GPUAffinityGroup> _AffinityGroups; int _NumGroups;
 int4 _InkIndices;       // Which iparticle fields map to slots 0-3
@@ -213,6 +218,25 @@ void InkInteractions(uint3 id : SV_DispatchThreadID)
         float currentVal = GetInkByIndex(result, fieldIdx);
         float newVal = max(0.0, currentVal + delta[i]);  // Clamp to non-negative
         SetInkByIndex(result, fieldIdx, newVal);
+    }
+
+    // ----- Black Body Ink Clearing -----
+    // When black body concentration exceeds threshold, it actively clears all other inks.
+    // Reference behavior: bb > 0.5 triggers -0.05 per tick drain on all 9 other ink types.
+    if (_EnableBlackBodyClearing > 0 && result.blackBody > _BlackBodyThreshold)
+    {
+        float clearAmount = _BlackBodyClearingRate;
+
+        // Clear all other ink types (indices 0-5, 7-9; skip 6 which is blackBody itself)
+        result.fire = max(0.0, result.fire - clearAmount);
+        result.water = max(0.0, result.water - clearAmount);
+        result.plantSeeded = max(0.0, result.plantSeeded - clearAmount);
+        result.plantGrown = max(0.0, result.plantGrown - clearAmount);
+        result.steam = max(0.0, result.steam - clearAmount);
+        result.glitter = max(0.0, result.glitter - clearAmount);
+        result.electricitySeeded = max(0.0, result.electricitySeeded - clearAmount);
+        result.electricityGrown = max(0.0, result.electricityGrown - clearAmount);
+        result.ice = max(0.0, result.ice - clearAmount);
     }
 
     // Write to output buffer
