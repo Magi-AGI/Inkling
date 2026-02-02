@@ -4,19 +4,138 @@ using UnityEngine;
 namespace Magi.Inkling.Systems.Gestures
 {
     /// <summary>
-    /// Minimal placeholder recognizer.
-    /// For now, returns the first template and a dummy score to keep pipelines compiling.
-    /// A full P$ implementation will replace this in Phase 7B.
+    /// Lightweight P$-style recognizer: resample, scale, translate, then sum distance.
+    /// Rotation invariance is omitted for simplicity (fits our straight-stroke gestures).
     /// </summary>
     public static class GestureRecognizer
     {
+        private const int SampleCount = 64;
+        private const float SquareSize = 1f;
+
         public static (GestureTemplate template, float score) Recognize(IReadOnlyList<Vector2> input, IReadOnlyList<GestureTemplate> templates)
         {
-            if (templates == null || templates.Count == 0)
+            if (input == null || input.Count < 2 || templates == null || templates.Count == 0)
                 return (null, 0f);
 
-            // TODO: replace with proper P$ matching; this is a stub
-            return (templates[0], 1f);
+            var candidate = Normalize(input);
+
+            float bestDist = float.MaxValue;
+            GestureTemplate best = null;
+
+            foreach (var t in templates)
+            {
+                if (t == null || t.points == null || t.points.Count < 2) continue;
+
+                var norm = Normalize(t.points);
+                float d = PathDistance(candidate, norm);
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    best = t;
+                }
+            }
+
+            // Convert distance to a simple [0,1] score (smaller dist = higher score)
+            float score = best == null ? 0f : 1f / (1f + bestDist);
+            return (best, score);
+        }
+
+        private static List<Vector2> Normalize(IReadOnlyList<Vector2> pts)
+        {
+            var resampled = Resample(pts, SampleCount);
+            var boxed = ScaleToSquare(resampled, SquareSize);
+            var translated = TranslateToOrigin(boxed);
+            return translated;
+        }
+
+        private static List<Vector2> Resample(IReadOnlyList<Vector2> pts, int n)
+        {
+            float pathLength = 0f;
+            for (int i = 1; i < pts.Count; i++)
+                pathLength += Vector2.Distance(pts[i - 1], pts[i]);
+            float interval = pathLength / (n - 1);
+            float D = 0f;
+
+            var newPts = new List<Vector2> { pts[0] };
+
+            for (int i = 1; i < pts.Count; i++)
+            {
+                float d = Vector2.Distance(pts[i - 1], pts[i]);
+                if ((D + d) >= interval)
+                {
+                    float t = (interval - D) / d;
+                    Vector2 np = Vector2.Lerp(pts[i - 1], pts[i], t);
+                    newPts.Add(np);
+                    pts = InsertAt(pts, i, np);
+                    D = 0f;
+                }
+                else
+                {
+                    D += d;
+                }
+            }
+
+            // Pad last point if we fell short
+            while (newPts.Count < n)
+                newPts.Add(pts[pts.Count - 1]);
+
+            return newPts;
+        }
+
+        private static IReadOnlyList<Vector2> InsertAt(IReadOnlyList<Vector2> pts, int index, Vector2 value)
+        {
+            var list = new List<Vector2>(pts.Count + 1);
+            for (int i = 0; i < pts.Count; i++)
+            {
+                if (i == index) list.Add(value);
+                list.Add(pts[i]);
+            }
+            return list;
+        }
+
+        private static List<Vector2> ScaleToSquare(IReadOnlyList<Vector2> pts, float size)
+        {
+            float minX = float.MaxValue, minY = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue;
+            foreach (var p in pts)
+            {
+                minX = Mathf.Min(minX, p.x);
+                minY = Mathf.Min(minY, p.y);
+                maxX = Mathf.Max(maxX, p.x);
+                maxY = Mathf.Max(maxY, p.y);
+            }
+            float width = maxX - minX;
+            float height = maxY - minY;
+            float scale = (width > height) ? size / width : size / height;
+            var scaled = new List<Vector2>(pts.Count);
+            foreach (var p in pts)
+            {
+                scaled.Add(new Vector2(
+                    (p.x - minX) * scale,
+                    (p.y - minY) * scale));
+            }
+            return scaled;
+        }
+
+        private static List<Vector2> TranslateToOrigin(IReadOnlyList<Vector2> pts)
+        {
+            Vector2 centroid = Vector2.zero;
+            foreach (var p in pts) centroid += p;
+            centroid /= pts.Count;
+            var translated = new List<Vector2>(pts.Count);
+            foreach (var p in pts) translated.Add(p - centroid);
+            return translated;
+        }
+
+        private static float PathDistance(IReadOnlyList<Vector2> a, IReadOnlyList<Vector2> b)
+        {
+            int count = Mathf.Min(a.Count, b.Count);
+            float sum = 0f;
+            for (int i = 0; i < count; i++)
+            {
+                sum += Vector2.Distance(a[i], b[i]);
+            }
+            return sum / count;
         }
     }
 }

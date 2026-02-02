@@ -7,8 +7,8 @@ using Magi.Inkling.Services;
 namespace Magi.Inkling.Systems.Capture
 {
     /// <summary>
-    /// Lightweight capture scaffold. Uses AsyncGPUReadback when hooked up.
-    /// Currently writes a stub PNG with clear color to prove the path.
+    /// Capture service: reads a RenderTexture to PNG and writes metadata JSON.
+    /// Uses AsyncGPUReadback when available, falls back to ReadPixels.
     /// </summary>
     public class CaptureService : MonoBehaviour
     {
@@ -29,23 +29,88 @@ namespace Magi.Inkling.Systems.Capture
             }
         }
 
-        public void CaptureFrameStub()
+        public void CaptureFrame()
         {
-            string dir = string.IsNullOrEmpty(config.outputPath)
-                ? Application.persistentDataPath
-                : config.outputPath;
-            Directory.CreateDirectory(dir);
+            if (reader == null) return;
+            var src = config.captureSimulationBuffer
+                ? reader.GetDisplayTexture() ?? reader.GetObstacleTexture()
+                : reader.GetDisplayTexture();
+            if (src == null)
+            {
+                Debug.LogWarning("[CaptureService] No source texture available.");
+                return;
+            }
+            string dir = ResolveOutputDir();
+            string baseName = $"capture_{Time.frameCount:D06}";
+            string pngPath = Path.Combine(dir, baseName + ".png");
+            string jsonPath = Path.Combine(dir, baseName + ".json");
 
-            string path = Path.Combine(dir, $"capture_stub_{Time.frameCount:D06}.png");
+            CaptureRenderTexture(src, pngPath);
+            WriteMetadata(jsonPath, src);
+        }
 
-            // For now write a 2x2 black image as a placeholder; real pipeline will GPU-read buffers.
-            var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
-            tex.SetPixels(new[] { Color.black, Color.black, Color.black, Color.black });
+        public void CaptureRenderTexture(RenderTexture src, string outputPngPath)
+        {
+            if (src == null) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPngPath)!);
+
+            // Async path when possible
+            if (SystemInfo.supportsAsyncGPUReadback)
+            {
+                UnityEngine.Rendering.AsyncGPUReadback.Request(src, 0, TextureFormat.RGBA32, req =>
+                {
+                    if (req.hasError)
+                    {
+                        Debug.LogWarning("[CaptureService] AsyncGPUReadback failed, falling back.");
+                        FallbackReadback(src, outputPngPath);
+                        return;
+                    }
+                    var data = req.GetData<byte>();
+                    var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false, true);
+                    tex.LoadRawTextureData(data);
+                    tex.Apply();
+                    File.WriteAllBytes(outputPngPath, tex.EncodeToPNG());
+                    Destroy(tex);
+                });
+            }
+            else
+            {
+                FallbackReadback(src, outputPngPath);
+            }
+        }
+
+        private void FallbackReadback(RenderTexture src, string path)
+        {
+            var prev = RenderTexture.active;
+            RenderTexture.active = src;
+            var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false, true);
+            tex.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
             tex.Apply();
             File.WriteAllBytes(path, tex.EncodeToPNG());
             Destroy(tex);
+            RenderTexture.active = prev;
+        }
 
-            Debug.Log($"[CaptureService] Wrote stub capture to {path}");
+        private void WriteMetadata(string path, RenderTexture src)
+        {
+            var meta = new
+            {
+                frame = Time.frameCount,
+                width = src.width,
+                height = src.height,
+                format = src.format.ToString(),
+                colorSpace = QualitySettings.activeColorSpace.ToString(),
+                timestamp = System.DateTime.UtcNow.ToString("o")
+            };
+            var json = JsonUtility.ToJson(meta, true);
+            File.WriteAllText(path, json);
+        }
+
+        private string ResolveOutputDir()
+        {
+            return string.IsNullOrEmpty(config.outputPath)
+                ? Application.persistentDataPath
+                : config.outputPath;
         }
     }
 }
