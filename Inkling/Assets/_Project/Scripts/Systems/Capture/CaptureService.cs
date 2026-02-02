@@ -27,6 +27,12 @@ namespace Magi.Inkling.Systems.Capture
             {
                 config = ScriptableObject.CreateInstance<CaptureConfig>();
             }
+
+            var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
+            if (locator != null)
+            {
+                locator.RegisterService(this);
+            }
         }
 
         public void CaptureFrame()

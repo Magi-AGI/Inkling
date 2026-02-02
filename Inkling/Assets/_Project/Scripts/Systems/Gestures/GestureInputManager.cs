@@ -36,6 +36,12 @@ namespace Magi.Inkling.Systems.Gestures
                 Debug.LogWarning("[GestureInputManager] ISimulationWriter not assigned; disabling.");
                 enabled = false;
             }
+
+            var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
+            if (locator != null)
+            {
+                locator.RegisterService(this);
+            }
         }
 
         private void Update()

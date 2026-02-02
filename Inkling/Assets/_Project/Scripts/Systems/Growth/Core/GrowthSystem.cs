@@ -122,6 +122,13 @@ namespace Magi.Inkling.Systems.Growth
                 Debug.LogWarning("[GrowthSystem] No ISimulationReader found. " +
                                "Growth simulation will not run.");
             }
+
+            // Register as service
+            var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
+            if (locator != null)
+            {
+                locator.RegisterService(this);
+            }
         }
 
         private void LateUpdate()
