@@ -15,6 +15,8 @@ namespace Magi.Inkling.Systems.OpticalFlow
         [SerializeField] private MonoBehaviour simulationWriterSource;
         [SerializeField] [Range(0f, 500f)] private float forceMultiplier = 50f;
         [SerializeField] private bool enabledModule = false;
+        [SerializeField] private float sampleU = 0.5f;
+        [SerializeField] private float sampleV = 0.5f;
 
         private ISimulationWriter writer;
 
@@ -35,7 +37,7 @@ namespace Magi.Inkling.Systems.OpticalFlow
             if (!enabledModule || writer == null || flowTexture == null) return;
 
             // Sample a few points and inject average flow as force
-            Color flow = flowTexture.GetPixelBilinear(0.5f, 0.5f);
+            Color flow = flowTexture.GetPixelBilinear(sampleU, sampleV);
             Vector2 dir = new Vector2(flow.r * 2f - 1f, flow.g * 2f - 1f);
             writer.InjectForce(new Vector2(0.5f, 0.5f), dir * forceMultiplier);
         }
