@@ -282,6 +282,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private void Start()
         {
             InitializeSimulation();
+
+            // Register with ServiceLocator if present
+            var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
+            if (locator != null)
+            {
+                locator.RegisterService(this);
+            }
         }
 
         private void EnsureStampMaterial()
