@@ -20,6 +20,11 @@ namespace Magi.Inkling.Systems.Obstacles
         [Header("Simulation Reference")]
         [Tooltip("Reference to simulation for obstacle texture. If null, will attempt to find ISimulationReader at runtime.")]
         [SerializeField] private MonoBehaviour simulationSource;
+        [Header("Batched/Alt Pipeline")]
+        [Tooltip("Experimental: use batched obstacle RT path (static/dynamic channels) instead of compute-buffer stamping.")]
+        [SerializeField] private bool useBatchedObstacleBuffer = false;
+        [Tooltip("Compute shader for batched obstacle stamping (static/dynamic channels).")]
+        [SerializeField] private ComputeShader obstacleBufferCompute;
 
         // GPU buffers
         private ComputeBuffer circleBuffer;
@@ -33,6 +38,9 @@ namespace Magi.Inkling.Systems.Obstacles
         private int kernelStampCircles;
         private int kernelStampTriangles;
         private int kernelClearObstacles;
+        private int kernelStampCirclesBatched;
+        private int kernelStampTrianglesBatched;
+        private int kernelClearObstacleBuffer;
 
         // Runtime state
         private ISimulationReader simReader;
@@ -40,6 +48,8 @@ namespace Magi.Inkling.Systems.Obstacles
         private int triangleCount;
         private bool isInitialized;
         private bool buffersDirty;
+        private bool obstacleBufferReady;
+        private RenderTexture obstacleBufferRT;
 
         #region IObstacleSystem Implementation
 
@@ -236,6 +246,24 @@ namespace Magi.Inkling.Systems.Obstacles
                 Debug.LogWarning("[ObstacleSystem] No ISimulationReader found. " +
                                "Obstacles will not be stamped to simulation.");
             }
+
+            // Optional obstacle buffer compute init
+            if (useBatchedObstacleBuffer && obstacleBufferCompute != null)
+            {
+                try
+                {
+                    kernelStampCirclesBatched = obstacleBufferCompute.FindKernel("StampCirclesBatched");
+                    kernelStampTrianglesBatched = obstacleBufferCompute.FindKernel("StampTrianglesBatched");
+                    kernelClearObstacleBuffer = obstacleBufferCompute.FindKernel("ClearObstacleBuffer");
+                    obstacleBufferReady = true;
+                    Debug.Log("[ObstacleSystem] Batched obstacle buffer path ready.");
+                }
+                catch (System.Exception e)
+                {
+                    obstacleBufferReady = false;
+                    Debug.LogWarning($"[ObstacleSystem] Batched obstacle buffer init failed ({e.Message}). Falling back to legacy path.");
+                }
+            }
         }
 
         private void LateUpdate()
@@ -278,30 +306,81 @@ namespace Magi.Inkling.Systems.Obstacles
             int resolution = simReader.Resolution;
             int threadGroups = Mathf.CeilToInt(resolution / 8f);
 
-            // Clear obstacles first (they're regenerated each frame)
-            obstacleCompute.SetTexture(kernelClearObstacles, "_ObstaclesWrite", obstacleTexture);
-            obstacleCompute.SetInt("_Resolution", resolution);
-            obstacleCompute.Dispatch(kernelClearObstacles, threadGroups, threadGroups, 1);
-
-            // Stamp circle obstacles
-            if (circleCount > 0)
+            if (useBatchedObstacleBuffer && obstacleBufferReady)
             {
-                obstacleCompute.SetBuffer(kernelStampCircles, "_CircleObstacles", circleBuffer);
-                obstacleCompute.SetTexture(kernelStampCircles, "_ObstaclesWrite", obstacleTexture);
-                obstacleCompute.SetInt("_CircleCount", maxCircleObstacles);
-                obstacleCompute.SetInt("_Resolution", resolution);
-                obstacleCompute.Dispatch(kernelStampCircles, threadGroups, threadGroups, 1);
-            }
+                EnsureObstacleBuffer(obstacleTexture);
 
-            // Stamp triangle obstacles
-            if (triangleCount > 0)
-            {
-                obstacleCompute.SetBuffer(kernelStampTriangles, "_TriangleObstacles", triangleBuffer);
-                obstacleCompute.SetTexture(kernelStampTriangles, "_ObstaclesWrite", obstacleTexture);
-                obstacleCompute.SetInt("_TriangleCount", maxTriangleObstacles);
-                obstacleCompute.SetInt("_Resolution", resolution);
-                obstacleCompute.Dispatch(kernelStampTriangles, threadGroups, threadGroups, 1);
+                obstacleBufferCompute.SetInt("_Width", obstacleBufferRT.width);
+                obstacleBufferCompute.SetInt("_Height", obstacleBufferRT.height);
+
+                // Clear
+                obstacleBufferCompute.SetTexture(kernelClearObstacleBuffer, "_ObstacleBuffer", obstacleBufferRT);
+                obstacleBufferCompute.Dispatch(kernelClearObstacleBuffer, threadGroups, threadGroups, 1);
+
+                // Circles
+                if (circleCount > 0)
+                {
+                    obstacleBufferCompute.SetBuffer(kernelStampCirclesBatched, "_Circles", circleBuffer);
+                    obstacleBufferCompute.SetInt("_CircleCount", circleCount);
+                    obstacleBufferCompute.SetTexture(kernelStampCirclesBatched, "_ObstacleBuffer", obstacleBufferRT);
+                    obstacleBufferCompute.Dispatch(kernelStampCirclesBatched, threadGroups, threadGroups, 1);
+                }
+
+                // Triangles
+                if (triangleCount > 0)
+                {
+                    obstacleBufferCompute.SetBuffer(kernelStampTrianglesBatched, "_Triangles", triangleBuffer);
+                    obstacleBufferCompute.SetBuffer(kernelStampTrianglesBatched, "_TrianglesB", triangleBuffer);
+                    obstacleBufferCompute.SetInt("_TriangleCount", triangleCount);
+                    obstacleBufferCompute.SetTexture(kernelStampTrianglesBatched, "_ObstacleBuffer", obstacleBufferRT);
+                    obstacleBufferCompute.Dispatch(kernelStampTrianglesBatched, threadGroups, threadGroups, 1);
+                }
+
+                // Copy to sim obstacle texture
+                Graphics.Blit(obstacleBufferRT, obstacleTexture);
             }
+            else
+            {
+                // Clear obstacles first (they're regenerated each frame)
+                obstacleCompute.SetTexture(kernelClearObstacles, "_ObstaclesWrite", obstacleTexture);
+                obstacleCompute.SetInt("_Resolution", resolution);
+                obstacleCompute.Dispatch(kernelClearObstacles, threadGroups, threadGroups, 1);
+
+                // Stamp circle obstacles
+                if (circleCount > 0)
+                {
+                    obstacleCompute.SetBuffer(kernelStampCircles, "_CircleObstacles", circleBuffer);
+                    obstacleCompute.SetTexture(kernelStampCircles, "_ObstaclesWrite", obstacleTexture);
+                    obstacleCompute.SetInt("_CircleCount", maxCircleObstacles);
+                    obstacleCompute.SetInt("_Resolution", resolution);
+                    obstacleCompute.Dispatch(kernelStampCircles, threadGroups, threadGroups, 1);
+                }
+
+                // Stamp triangle obstacles
+                if (triangleCount > 0)
+                {
+                    obstacleCompute.SetBuffer(kernelStampTriangles, "_TriangleObstacles", triangleBuffer);
+                    obstacleCompute.SetTexture(kernelStampTriangles, "_ObstaclesWrite", obstacleTexture);
+                    obstacleCompute.SetInt("_TriangleCount", maxTriangleObstacles);
+                    obstacleCompute.SetInt("_Resolution", resolution);
+                    obstacleCompute.Dispatch(kernelStampTriangles, threadGroups, threadGroups, 1);
+                }
+            }
+        }
+
+        private void EnsureObstacleBuffer(RenderTexture simObstacle)
+        {
+            if (obstacleBufferRT != null &&
+                obstacleBufferRT.width == simObstacle.width &&
+                obstacleBufferRT.height == simObstacle.height)
+                return;
+
+            if (obstacleBufferRT != null) obstacleBufferRT.Release();
+            obstacleBufferRT = new RenderTexture(simObstacle.width, simObstacle.height, 0, RenderTextureFormat.RGFloat)
+            {
+                enableRandomWrite = true
+            };
+            obstacleBufferRT.Create();
         }
 
         #endregion

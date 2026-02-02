@@ -1,0 +1,82 @@
+#pragma kernel ClearObstacleBuffer
+#pragma kernel StampCirclesBatched
+#pragma kernel StampTrianglesBatched
+
+RWTexture2D<float2> _ObstacleBuffer; // x = dynamic, y = static
+int _Width;
+int _Height;
+
+StructuredBuffer<float4> _Circles;   // center.xy, radius, isStatic
+StructuredBuffer<float4> _Triangles; // v0.xy, v1.xy
+StructuredBuffer<float4> _TrianglesB; // v2.xy, isStatic, padding
+int _CircleCount;
+int _TriangleCount;
+
+[numthreads(8,8,1)]
+void ClearObstacleBuffer(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Width || id.y >= _Height) return;
+    _ObstacleBuffer[int2(id.xy)] = float2(0, 0);
+}
+
+[numthreads(8,8,1)]
+void StampCirclesBatched(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Width || id.y >= _Height) return;
+    float2 uv = (float2(id.xy) + 0.5) / float2(_Width, _Height);
+    float2 accum = _ObstacleBuffer[int2(id.xy)];
+
+    [loop]
+    for (int i = 0; i < _CircleCount; i++)
+    {
+        float4 c = _Circles[i];
+        float2 center = c.xy;
+        float radius = c.z;
+        float isStatic = c.w;
+        float d = distance(uv, center);
+        if (d <= radius)
+        {
+            if (isStatic > 0.5) accum.y = 1.0; else accum.x = 1.0;
+        }
+    }
+
+    _ObstacleBuffer[int2(id.xy)] = accum;
+}
+
+float Sign2D(float2 p1, float2 p2, float2 p3)
+{
+    return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
+}
+
+bool PointInTri(float2 p, float2 a, float2 b, float2 c)
+{
+    bool b1 = Sign2D(p, a, b) < 0.0;
+    bool b2 = Sign2D(p, b, c) < 0.0;
+    bool b3 = Sign2D(p, c, a) < 0.0;
+    return ((b1 == b2) && (b2 == b3));
+}
+
+[numthreads(8,8,1)]
+void StampTrianglesBatched(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Width || id.y >= _Height) return;
+    float2 uv = (float2(id.xy) + 0.5) / float2(_Width, _Height);
+    float2 accum = _ObstacleBuffer[int2(id.xy)];
+
+    [loop]
+    for (int i = 0; i < _TriangleCount; i++)
+    {
+        float4 t0 = _Triangles[i];
+        float4 t1 = _TrianglesB[i];
+        float2 v0 = t0.xy;
+        float2 v1 = t0.zw;
+        float2 v2 = t1.xy;
+        float isStatic = t1.z;
+        if (PointInTri(uv, v0, v1, v2))
+        {
+            if (isStatic > 0.5) accum.y = 1.0; else accum.x = 1.0;
+        }
+    }
+
+    _ObstacleBuffer[int2(id.xy)] = accum;
+}
