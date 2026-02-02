@@ -60,6 +60,12 @@ namespace Magi.Inkling.Services
         RenderTexture GetObstacleTexture();
 
         /// <summary>
+        /// Gets the particle compute buffer for reading (iparticle structs).
+        /// Used by systems that need to read particle data on GPU.
+        /// </summary>
+        ComputeBuffer GetParticleBuffer();
+
+        /// <summary>
         /// Gets the total frame time for the last simulation frame in milliseconds.
         /// </summary>
         float GetLastFrameMs();

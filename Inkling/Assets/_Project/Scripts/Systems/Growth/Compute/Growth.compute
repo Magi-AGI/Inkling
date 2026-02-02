@@ -1,0 +1,120 @@
+// Growth.compute - GPU kernels for seed → grown conversion
+// Converts plantSeeded → plantGrown and electricitySeeded → electricityGrown over time
+
+#pragma kernel GrowSeeds
+
+// Include iparticle struct definition
+#define ifloat float
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+// Buffers (operate in-place, no ping-pong needed for growth)
+RWStructuredBuffer<iparticle> _Particles;
+
+// Parameters
+int _Resolution;
+float _DeltaTime;
+
+// Plant growth
+float _PlantGrowthRate;
+float _PlantMaxGrown;
+float _PlantSeedThreshold;
+
+// Electricity growth
+float _ElectricityGrowthRate;
+float _ElectricityMaxGrown;
+float _ElectricitySeedThreshold;
+
+// Spreading (optional)
+int _EnableSpread;
+float _CardinalSpreadWeight;
+float _DiagonalSpreadWeight;
+
+// Helper: Sample particle at position (clamped)
+iparticle SampleParticle(int2 pos)
+{
+    pos = clamp(pos, int2(0, 0), int2(_Resolution - 1, _Resolution - 1));
+    return _Particles[pos.y * _Resolution + pos.x];
+}
+
+[numthreads(8, 8, 1)]
+void GrowSeeds(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution || id.y >= (uint)_Resolution)
+        return;
+
+    uint idx = id.y * _Resolution + id.x;
+    iparticle p = _Particles[idx];
+
+    // ----- Plant Growth -----
+    if (p.plantSeeded > _PlantSeedThreshold)
+    {
+        // Calculate growth amount for this frame
+        float plantGrowth = min(p.plantSeeded, _PlantGrowthRate * _DeltaTime);
+
+        // Cap at max grown
+        float headroom = _PlantMaxGrown - p.plantGrown;
+        plantGrowth = min(plantGrowth, headroom);
+
+        if (plantGrowth > 0)
+        {
+            p.plantSeeded -= plantGrowth;
+            p.plantGrown += plantGrowth;
+        }
+    }
+
+    // ----- Electricity Growth -----
+    if (p.electricitySeeded > _ElectricitySeedThreshold)
+    {
+        float elecGrowth = min(p.electricitySeeded, _ElectricityGrowthRate * _DeltaTime);
+
+        float headroom = _ElectricityMaxGrown - p.electricityGrown;
+        elecGrowth = min(elecGrowth, headroom);
+
+        if (elecGrowth > 0)
+        {
+            p.electricitySeeded -= elecGrowth;
+            p.electricityGrown += elecGrowth;
+        }
+    }
+
+    // ----- Optional Spreading -----
+    if (_EnableSpread > 0)
+    {
+        int2 pos = int2(id.xy);
+
+        // Sample cardinal neighbors
+        iparticle pUp = SampleParticle(pos + int2(0, 1));
+        iparticle pDown = SampleParticle(pos + int2(0, -1));
+        iparticle pLeft = SampleParticle(pos + int2(-1, 0));
+        iparticle pRight = SampleParticle(pos + int2(1, 0));
+
+        float cardinalPlant = (pUp.plantGrown + pDown.plantGrown + pLeft.plantGrown + pRight.plantGrown) * 0.25;
+        float cardinalElec = (pUp.electricityGrown + pDown.electricityGrown + pLeft.electricityGrown + pRight.electricityGrown) * 0.25;
+
+        // Sample diagonal neighbors
+        iparticle pUL = SampleParticle(pos + int2(-1, 1));
+        iparticle pUR = SampleParticle(pos + int2(1, 1));
+        iparticle pDL = SampleParticle(pos + int2(-1, -1));
+        iparticle pDR = SampleParticle(pos + int2(1, -1));
+
+        float diagPlant = (pUL.plantGrown + pUR.plantGrown + pDL.plantGrown + pDR.plantGrown) * 0.25;
+        float diagElec = (pUL.electricityGrown + pUR.electricityGrown + pDL.electricityGrown + pDR.electricityGrown) * 0.25;
+
+        // Add spread contribution
+        float plantSpread = (cardinalPlant * _CardinalSpreadWeight + diagPlant * _DiagonalSpreadWeight) * _DeltaTime;
+        float elecSpread = (cardinalElec * _CardinalSpreadWeight + diagElec * _DiagonalSpreadWeight) * _DeltaTime;
+
+        // Only spread if we have some seed present (prevents unconstrained growth)
+        if (p.plantSeeded > 0.001)
+        {
+            p.plantGrown = min(p.plantGrown + plantSpread, _PlantMaxGrown);
+        }
+        if (p.electricitySeeded > 0.001)
+        {
+            p.electricityGrown = min(p.electricityGrown + elecSpread, _ElectricityMaxGrown);
+        }
+    }
+
+    // Write back
+    _Particles[idx] = p;
+}
