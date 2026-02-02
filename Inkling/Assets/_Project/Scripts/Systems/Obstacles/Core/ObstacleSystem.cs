@@ -264,6 +264,10 @@ namespace Magi.Inkling.Systems.Obstacles
                     Debug.LogWarning($"[ObstacleSystem] Batched obstacle buffer init failed ({e.Message}). Falling back to legacy path.");
                 }
             }
+            else if (useBatchedObstacleBuffer)
+            {
+                Debug.LogWarning("[ObstacleSystem] Batched obstacle buffer enabled but compute shader not assigned. Using legacy path.");
+            }
         }
 
         private void LateUpdate()
