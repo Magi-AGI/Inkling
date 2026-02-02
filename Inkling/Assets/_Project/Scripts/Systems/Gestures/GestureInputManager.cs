@@ -34,6 +34,7 @@ namespace Magi.Inkling.Systems.Gestures
             if (writer == null)
             {
                 Debug.LogWarning("[GestureInputManager] ISimulationWriter not assigned; disabling.");
+                Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("[GestureInputManager] ISimulationWriter not assigned; disabling.");
                 enabled = false;
             }
 
