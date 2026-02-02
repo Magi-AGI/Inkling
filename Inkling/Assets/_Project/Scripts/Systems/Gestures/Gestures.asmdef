@@ -1,0 +1,16 @@
+{
+    "name": "Magi.Inkling.Gestures",
+    "rootNamespace": "Magi.Inkling.Systems.Gestures",
+    "references": [
+        "Magi.Inkling"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

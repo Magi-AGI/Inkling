@@ -1,0 +1,17 @@
+{
+    "name": "Magi.Inkling.Brush",
+    "rootNamespace": "Magi.Inkling.Systems.Brush",
+    "references": [
+        "Magi.Inkling",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
