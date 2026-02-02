@@ -13,6 +13,7 @@ namespace Magi.Inkling.Services.Diagnostics
     {
         [SerializeField] private bool show = true;
         [SerializeField] private Color textColor = Color.white;
+        [SerializeField] private LogSink logSink;
 
         private ISimulationReader sim;
         private float lastFrameMs;
@@ -37,9 +38,17 @@ namespace Magi.Inkling.Services.Diagnostics
             if (!show) return;
 
             GUI.color = textColor;
-            GUILayout.BeginArea(new Rect(10, 10, 260, 120), GUI.skin.box);
+            GUILayout.BeginArea(new Rect(10, 10, 320, 200), GUI.skin.box);
             GUILayout.Label($"Frame ms: {lastFrameMs:F2}");
             GUILayout.Label($"Adv/Diff/Press/Proj/Vort: {timings.adv:F2}/{timings.diff:F2}/{timings.press:F2}/{timings.proj:F2}/{timings.vort:F2}");
+            if (logSink != null)
+            {
+                GUILayout.Label("Recent logs:");
+                foreach (var e in logSink.GetEntries())
+                {
+                    GUILayout.Label($"- {e}");
+                }
+            }
             GUILayout.EndArea();
         }
     }

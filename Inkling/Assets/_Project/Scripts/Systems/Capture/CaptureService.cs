@@ -120,10 +120,19 @@ namespace Magi.Inkling.Systems.Capture
                 format = src.format.ToString(),
                 colorSpace = QualitySettings.activeColorSpace.ToString(),
                 timestamp = System.DateTime.UtcNow.ToString("o"),
-                captureStatus = captureResult.IsSuccess ? "OK" : captureResult.Error
+                captureStatus = captureResult.IsSuccess ? "OK" : captureResult.Error,
+                logs = CollectLogs()
             };
             var json = JsonUtility.ToJson(meta, true);
             File.WriteAllText(path, json);
+        }
+
+        private string[] CollectLogs()
+        {
+            var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<Magi.Inkling.Services.Diagnostics.LogSink>();
+            if (sink == null) return System.Array.Empty<string>();
+            var list = new System.Collections.Generic.List<string>(sink.GetEntries());
+            return list.ToArray();
         }
 
         private string ResolveOutputDir()
