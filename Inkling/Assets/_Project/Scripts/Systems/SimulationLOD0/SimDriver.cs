@@ -200,6 +200,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Compute shader that splats iparticle channels into 3 RGBA render textures for gradient rendering. Required for particle-authoritative gradient path (avoids half/float stride mismatch in fragment shaders).")]
         [SerializeField] private ComputeShader particleChannelSplatCompute;
         [SerializeField] private bool useParticleRenderPass = false;
+        [Header("Update Rate")]
+        [Tooltip("If >0, run the simulation at this target Hz (skipping frames if needed). 0 = every frame.")]
+        [SerializeField] private int simulationUpdateRate = 0;
 
         // Kernel indices
         private int kernelAdvection;
@@ -252,6 +255,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private bool channelSplatReady;
         private bool loggedDisplayDiagnostic;
         private bool hasLoggedFirstParticleStamp;
+        private float simAccumulator;
+        private bool simRanThisFrame;
 
         // Performance tracking
         private Stopwatch stopwatch = new Stopwatch();
@@ -996,8 +1001,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 InjectAtMousePosition(InkType.Water);
             }
 
-            // Run simulation pipeline
-            SimulateFrame();
+            // Run simulation pipeline (honor optional target Hz)
+            simRanThisFrame = false;
+            simAccumulator += Time.deltaTime;
+            float targetStep = simulationUpdateRate > 0 ? 1f / simulationUpdateRate : 0f;
+            if (targetStep <= 0f || simAccumulator >= targetStep)
+            {
+                SimulateFrame();
+                simRanThisFrame = true;
+                if (targetStep > 0f)
+                    simAccumulator = Mathf.Max(0f, simAccumulator - targetStep);
+            }
 
             if (measurePerformance)
             {
@@ -1010,7 +1024,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Display runs in LateUpdate so density.Read is guaranteed to reflect
             // the final post-simulation state — all Update() calls (injection
             // queuing, simulation, swaps) have completed by this point.
-            UpdateDisplay();
+            if (simRanThisFrame || simulationUpdateRate <= 0)
+            {
+                UpdateDisplay();
+            }
         }
 
         /// <summary>
