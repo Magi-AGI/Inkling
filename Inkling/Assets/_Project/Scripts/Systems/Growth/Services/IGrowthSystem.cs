@@ -6,7 +6,7 @@ namespace Magi.Inkling.Systems.Growth
     /// Service interface for the seed/growth system.
     /// Manages the conversion of seeded particles to grown particles.
     /// </summary>
-    public interface IGrowthSystem
+    public interface IGrowthSystem : Magi.Inkling.Services.Core.IService
     {
         /// <summary>Whether the growth system is initialized and ready.</summary>
         bool IsInitialized { get; }

@@ -8,7 +8,7 @@ namespace Magi.Inkling.Services
     /// Prefer using <see cref="ISimulationReader"/> or <see cref="ISimulationWriter"/>
     /// individually when possible to maintain cleaner dependency boundaries.
     /// </remarks>
-    public interface ISimulationService : ISimulationReader, ISimulationWriter
+    public interface ISimulationService : ISimulationReader, ISimulationWriter, Magi.Inkling.Services.Core.IService
     {
         // Combined interface - inherits all members from both interfaces.
         // No additional members needed; this exists for convenience when
