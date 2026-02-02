@@ -15,7 +15,7 @@ namespace Magi.Inkling.Services.Core
 
         private void Awake()
         {
-            var locator = ServiceLocator.Instance ?? FindAnyObjectByType<ServiceLocator>();
+            var locator = ServiceLocator.Instance ?? FindAnyObjectByType<ServiceLocator>(FindObjectsInactive.Include);
             if (locator == null)
             {
                 Debug.LogWarning("[ServiceBootstrap] ServiceLocator not found; skipping bootstrap.");
@@ -27,7 +27,10 @@ namespace Magi.Inkling.Services.Core
             // Auto-discover common services if not explicitly listed
             if (toRegister.Count == 0)
             {
-                toRegister.AddRange(FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None));
+                foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (mb is IService) toRegister.Add(mb);
+                }
             }
 
             foreach (var obj in toRegister)
