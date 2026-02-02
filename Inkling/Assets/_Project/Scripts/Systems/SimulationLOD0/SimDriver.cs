@@ -238,6 +238,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // Batched stamp kernels (optional)
         private int kernelStampDensityBatched;
         private bool batchedStampReady;
+        private bool loggedStampBatchMixedTextures;
+        private bool loggedStampBatchUnavailable;
+        private bool loggedMaskBatchUnavailable;
 
         // Channel splat compute kernel (from ParticleChannelSplat.compute)
         private int kernelChannelSplat;
@@ -1077,6 +1080,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
                     if (!canBatch)
                     {
+                        if (useBatchedStamping && !batchedStampReady && !loggedStampBatchUnavailable)
+                        {
+                            loggedStampBatchUnavailable = true;
+                            Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("[SimDriver] Stamp batching requested but batchedStampCompute is not ready; falling back to per-stamp dispatch.");
+                        }
+                        if (useBatchedStamping && batchedStampReady && !loggedStampBatchMixedTextures && pendingDensityStamps.Count > 1)
+                        {
+                            loggedStampBatchMixedTextures = true;
+                            Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("[SimDriver] Stamp batching skipped because stamps use different textures; running per-stamp dispatch.");
+                        }
+
                         foreach (var s in pendingDensityStamps)
                         {
                             if (s.stamp == null) continue;
@@ -1188,6 +1202,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // ── Clear-density masks ──────────────────────────────────────────
             if (pendingClearDensityMasks.Count > 0 && density != null)
             {
+                if (pendingClearDensityMasks.Count > 1 && !loggedMaskBatchUnavailable)
+                {
+                    loggedMaskBatchUnavailable = true;
+                    Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("[SimDriver] Mask staging not batched; executing per-mask dispatches.");
+                }
+
                 foreach (var c in pendingClearDensityMasks)
                 {
                     if (c.mask == null) continue;
