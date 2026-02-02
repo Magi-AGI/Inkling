@@ -95,6 +95,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Range(0.1f, 1f)]
         [SerializeField] private float displayResolutionScale = 1f;
 
+        [Header("Multi-Resolution Overrides")]
+        [Tooltip("Override resolution for velocity RT (0 = match sim). Allows lower-res velocity for perf.")]
+        [Range(0, 4096)]
+        [SerializeField] private int velocityResolutionOverride = 0;
+        [Tooltip("Override resolution for obstacle RT (0 = match sim). Allows lower-res obstacles for perf.")]
+        [Range(0, 4096)]
+        [SerializeField] private int obstacleResolutionOverride = 0;
+        [Tooltip("Override resolution for particle buffers (0 = match sim). Lowering cuts particle count but reduces fidelity.")]
+        [Range(0, 4096)]
+        [SerializeField] private int particleResolutionOverride = 0;
+
         [Header("Creature / Stamp Rendering")]
         [SerializeField] private Shader densityStampShader;
         [Tooltip("Compute-shader stamp (preferred over Blit shader). Eliminates DX12 cross-queue barriers on density ping-pong buffers. If unassigned, stamps fall back to Graphics.Blit via densityStampShader.")]
@@ -572,12 +583,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private void AllocateRenderTextures()
         {
             // Use PingPongRenderTexture from MagiUnityTools for cleaner ping-pong management
-            velocity = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.RGHalf, "Velocity");
+            int velRes = velocityResolutionOverride > 0 ? velocityResolutionOverride : resolution;
+            velocity = new PingPongRenderTexture(velRes, velRes, RenderTextureFormat.RGHalf, "Velocity");
             pressure = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.RHalf, "Pressure");
             density = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.ARGBHalf, "Density");
             divergence = CreateRT(RenderTextureFormat.RHalf, "Divergence");
             vorticityTex = CreateRT(RenderTextureFormat.RHalf, "Vorticity");
-            obstacles = CreateRT(RenderTextureFormat.RFloat, "Obstacles");
+            int obsRes = obstacleResolutionOverride > 0 ? obstacleResolutionOverride : resolution;
+            obstacles = CreateRT(RenderTextureFormat.RFloat, "Obstacles", obsRes);
 
             // Creature ink buffer (cleared each frame, composited with density before simulation)
             creatureInkBuffer = CreateRT(RenderTextureFormat.ARGBHalf, "CreatureInk");
@@ -591,7 +604,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             //   OpenGL (no native half), Vulkan desktop (SPIR-V typically promotes).
             // Native half in StructuredBuffers is only reliable on mobile GPUs
             // (Metal on Apple Silicon, GLES on Mali/Adreno with explicit support).
-            int particleCount = resolution * resolution;
+            int particleRes = particleResolutionOverride > 0 ? particleResolutionOverride : resolution;
+            int particleCount = particleRes * particleRes;
             // Force float stride (all-float iparticle) for all platforms to avoid half/float promotion mismatch
             gpuPromotesHalf = true;
             gpuParticleStride = Marshal.SizeOf<iparticle>(); // 56 bytes
@@ -648,9 +662,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         }
 
-        private RenderTexture CreateRT(RenderTextureFormat format, string name)
+        private RenderTexture CreateRT(RenderTextureFormat format, string name, int sizeOverride = 0)
         {
-            var rt = new RenderTexture(resolution, resolution, 0, format);
+            int size = sizeOverride > 0 ? sizeOverride : resolution;
+            var rt = new RenderTexture(size, size, 0, format);
             rt.enableRandomWrite = true;
             rt.filterMode = FilterMode.Bilinear;
             rt.wrapMode = TextureWrapMode.Clamp;
