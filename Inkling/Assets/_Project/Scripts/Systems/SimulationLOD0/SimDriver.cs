@@ -1566,15 +1566,30 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         }
 
         /// <summary>
-        /// Interface-compatible overload using int index instead of InkType enum.
+        /// Interface-compatible overload using raw iparticle field index (0-9).
+        /// This bypasses the InkType enum to allow direct injection into specific channels.
+        /// Use InkTypeId values: PlantSeeded=2, ElectricitySeeded=7, etc.
         /// </summary>
         void ISimulationWriter.InjectDensity(Vector2 position, Color color, int inkTypeIndex)
         {
-            // Convert index to InkType enum, default to Fire if out of range
-            InkType inkType = (inkTypeIndex >= 0 && inkTypeIndex < 9)
-                ? (InkType)inkTypeIndex
-                : InkType.Fire;
-            InjectDensity(position, color, inkType);
+            if (fluidCompute == null || density == null) return;
+
+            float colorIntensity = Mathf.Max(color.r, Mathf.Max(color.g, color.b));
+            if (colorIntensity <= 0f || densityAmount <= 0f) return;
+
+            // Use raw iparticle field index directly (0-9), clamped to valid range
+            int validIndex = Mathf.Clamp(inkTypeIndex, 0, 9);
+
+            pendingDensityInjections.Add(new PendingDensityInjection
+            {
+                position = position,
+                color = color,
+                inkTypeIndex = validIndex
+            });
+
+            // GPU path (AddParticlesGaussian) is dispatched in ProcessPendingOperations.
+            // CPU fallback doesn't support arbitrary channels, so skip it for seeds.
+            // This is acceptable since seed injection requires particle simulation anyway.
         }
 
         /// <summary>

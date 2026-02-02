@@ -20,7 +20,9 @@ namespace Magi.Inkling.Services
         /// </summary>
         /// <param name="position">UV position (0-1 range)</param>
         /// <param name="color">Color/density to inject</param>
-        /// <param name="inkTypeIndex">Index into ink type array (default 0)</param>
+        /// <param name="inkTypeIndex">Raw iparticle field index (0-9) matching InkTypeId enum.
+        /// Use: Fire=0, Water=1, PlantSeeded=2, PlantGrown=3, Steam=4, Glitter=5,
+        /// BlackBody=6, ElectricitySeeded=7, ElectricityGrown=8, Ice=9</param>
         void InjectDensity(Vector2 position, Color color, int inkTypeIndex = 0);
 
         /// <summary>

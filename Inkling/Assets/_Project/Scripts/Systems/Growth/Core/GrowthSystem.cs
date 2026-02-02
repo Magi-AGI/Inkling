@@ -1,5 +1,6 @@
 using UnityEngine;
 using Magi.Inkling.Services;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.Growth
 {
@@ -37,10 +38,10 @@ namespace Magi.Inkling.Systems.Growth
         {
             if (!isInitialized || simWriter == null) return;
 
-            // Use the simulation writer to inject the seed as density
-            // Plant seeds go to plantSeeded channel (index 2)
-            // Electricity seeds go to electricitySeeded channel (index 7)
-            int inkIndex = seedType == SeedType.Plant ? 2 : 7;
+            // Use canonical InkTypeId enum for iparticle field indices
+            int inkIndex = seedType == SeedType.Plant
+                ? (int)InkTypeId.PlantSeeded       // 2
+                : (int)InkTypeId.ElectricitySeeded; // 7
 
             // Create a color that represents the seed amount
             // The StampParticlesCompute shader uses inkTypeIndex to route to correct channel
