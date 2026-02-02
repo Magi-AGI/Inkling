@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using Magi.Inkling.Services;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {
@@ -27,11 +28,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float captureInterval = 0.033f; // ~30fps
 
         [Header("Simulation Parameters")]
-        [SerializeField] private SimDriver simDriver;
+        [SerializeField] private SimDriver simDriverComponent;
         [SerializeField] private float viscosity = 0.01f;
         [SerializeField] private float vorticity = 2.0f;
         [SerializeField] private float dissipation = 0.98f;
         [SerializeField] private float velocityDissipation = 0.99f;
+
+        // Cached service interface for decoupled access
+        private ISimulationReader simReader;
 
         private string sessionId;
         private float captureTimer;
@@ -59,6 +63,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private void Start()
         {
             CreateOutputDirectory();
+
+            // Initialize service interface for decoupled access
+            if (simDriverComponent != null)
+            {
+                simReader = simDriverComponent.AsReader();
+            }
         }
 
         private void Update()
@@ -271,10 +281,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 {
                     ["deltaTime"] = Time.fixedDeltaTime,
                     ["timeScale"] = Time.timeScale,
-                    ["viscosity"] = simDriver != null ? simDriver.Viscosity : viscosity,
-                    ["vorticity"] = simDriver != null ? simDriver.Vorticity : vorticity,
-                    ["dissipation"] = simDriver != null ? simDriver.Dissipation : dissipation,
-                    ["velocityDissipation"] = simDriver != null ? simDriver.VelocityDissipation : velocityDissipation
+                    ["viscosity"] = simReader != null ? simReader.Viscosity : viscosity,
+                    ["vorticity"] = simReader != null ? simReader.Vorticity : vorticity,
+                    ["dissipation"] = simReader != null ? simReader.Dissipation : dissipation,
+                    ["velocityDissipation"] = simReader != null ? simReader.VelocityDissipation : velocityDissipation
                 }
             };
         }

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using Magi.Inkling.Services;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {
@@ -11,7 +12,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     public class TexturedInjector : MonoBehaviour
     {
         [Header("Injection Settings")]
-        [SerializeField] private SimDriver simDriver;
+        [SerializeField] private SimDriver simDriverComponent;
+
+        // Cached service interfaces for decoupled access
+        private ISimulationWriter simWriter;
+        private ISimulationReader simReader;
         [SerializeField] private Texture2D injectionMask;
         [SerializeField] private int maskResolution = 64;
         [Tooltip("Downsample mask to this resolution (square). Keeps injection lightweight and avoids huge masks.")]
@@ -56,12 +61,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Cache color space at runtime (cannot query in field initializer)
             useLinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
 
-            if (simDriver == null)
+            if (simDriverComponent == null)
             {
                 Debug.LogError("[TexturedInjector] SimDriver reference is required. Please assign it in the Inspector.");
                 enabled = false;
                 return;
             }
+
+            // Initialize service interfaces for decoupled access
+            simWriter = simDriverComponent.AsWriter();
+            simReader = simDriverComponent.AsReader();
 
             // Start at random position if autonomous
             if (autonomous)
@@ -144,7 +153,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void Update()
         {
-            if (simDriver == null) return;
+            if (simWriter == null) return;
             if (!maskValid) return;
 
             // Update movement
@@ -217,7 +226,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void InjectAtPosition(Vector2 uvPosition)
         {
-            if (simDriver == null || !maskValid || injectionMask == null) return;
+            if (simWriter == null || !maskValid || injectionMask == null) return;
 
             if (stampTexture == null)
             {
@@ -241,7 +250,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             // GPU stamp colored portions into the RT-based density field
-            simDriver.StampDensity(
+            simWriter.StampDensity(
                 uvPosition,
                 stampTexture,
                 densityMultiplier,
@@ -252,7 +261,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 // Use the original mask to clear density in black regions so black inks
                 // appear solid and do not advect/linger, and to update obstacle map.
-                simDriver.ClearDensityWithMask(uvPosition, injectionMask, blackLuminanceThreshold);
+                simWriter.ClearDensityWithMask(uvPosition, injectionMask, blackLuminanceThreshold);
             }
 
             // Inject velocity if moving
@@ -261,7 +270,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 Vector2 movementVelocity = (position - previousPosition) * velocityScale;
                 if (movementVelocity.magnitude > 0.1f)
                 {
-                    simDriver.InjectForce(uvPosition, movementVelocity);
+                    simWriter.InjectForce(uvPosition, movementVelocity);
                 }
             }
 
@@ -273,10 +282,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         /// </summary>
         private bool OverlapsSim(Vector2 uvPosition)
         {
-            if (simDriver == null || stampTexture == null) return true; // Can't cull without info
+            if (simReader == null || stampTexture == null) return true; // Can't cull without info
 
             // Compute mask size in UV space (same calculation as SimDriver.ProcessPendingOperations)
-            float simRes = simDriver.Resolution;
+            float simRes = simReader.Resolution;
             if (simRes <= 0) return true; // Safety: allow if resolution not yet initialized
 
             Vector2 maskSizeUV = new Vector2(

@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 using Magi.UnityTools.Core;
+using Magi.Inkling.Services;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {
@@ -17,9 +18,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool useAdaptiveResolution = false;
 
         [Header("References")]
-        [SerializeField] private SimDriver simDriver;
+        [SerializeField] private SimDriver simDriverComponent;
         [SerializeField] private ComputeShader multiResCompute;
         [SerializeField] private Renderer displayRenderer;
+
+        // Cached service interface for decoupled access
+        private ISimulationReader simReader;
 
         [Header("Quality Settings")]
         [SerializeField] private FilterMode upsampleFilter = FilterMode.Bilinear;
@@ -41,10 +45,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void Start()
         {
-            if (simDriver == null)
+            if (simDriverComponent == null)
             {
-                simDriver = GetComponent<SimDriver>();
-                if (simDriver == null)
+                simDriverComponent = GetComponent<SimDriver>();
+                if (simDriverComponent == null)
                 {
                     Debug.LogError("[MultiResolutionDriver] No SimDriver found!");
                     enabled = false;
@@ -52,8 +56,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 }
             }
 
+            // Initialize service interface for decoupled access
+            simReader = simDriverComponent.AsReader();
+
             // Use the same compute shader as SimDriver
-            multiResCompute = simDriver.fluidCompute;
+            multiResCompute = simDriverComponent.fluidCompute;
             if (multiResCompute == null)
             {
                 Debug.LogWarning("[MultiResolutionDriver] No compute shader assigned. Multi-resolution disabled.");
@@ -111,11 +118,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void LateUpdate()
         {
-            if (multiResCompute == null || simDriver == null) return;
+            if (multiResCompute == null || simReader == null) return;
 
             // Get simulation textures
-            var simDensity = simDriver.GetDensityTexture();
-            var simVelocity = simDriver.GetVelocityTexture();
+            var simDensity = simReader.GetDensityTexture();
+            var simVelocity = simReader.GetVelocityTexture();
 
             if (simDensity == null || simVelocity == null) return;
 
@@ -145,7 +152,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             // Set parameters
             multiResCompute.SetVector("_SimulationSize", new Vector2(simulationResolution, simulationResolution));
-            multiResCompute.SetFloat("_DeltaTime", simDriver.Timestep);
+            multiResCompute.SetFloat("_DeltaTime", simReader.Timestep);
 
             // Upsample density
             multiResCompute.SetTexture(kernelUpsampleBilinear, "_DensityRead", simDensity);
@@ -163,7 +170,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             int threadGroups = Mathf.CeilToInt(displayResolution / 8f);
 
             multiResCompute.SetVector("_SimulationSize", new Vector2(simulationResolution, simulationResolution));
-            multiResCompute.SetFloat("_DeltaTime", simDriver.Timestep);
+            multiResCompute.SetFloat("_DeltaTime", simReader.Timestep);
 
             // Temporal upsampling with history
             multiResCompute.SetTexture(kernelTemporalUpsample, "_DensityRead", simDensity);

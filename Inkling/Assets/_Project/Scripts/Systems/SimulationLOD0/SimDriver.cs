@@ -8,6 +8,7 @@ using Unity.Mathematics;
 using Debug = UnityEngine.Debug;
 using Magi.UnityTools.Core;
 using Magi.InkTools.Simulation;
+using Magi.Inkling.Services;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {
@@ -16,7 +17,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     /// Manages RT allocation, kernel execution, and display output.
     /// </summary>
     [DefaultExecutionOrder(50)] // Run after TexturedInjector (-50) so queued stamps are drained in SimulateFrame
-    public class SimDriver : MonoBehaviour
+    public class SimDriver : MonoBehaviour, ISimulationService
     {
         [Header("Compute Shader")]
         [SerializeField] public ComputeShader fluidCompute;
@@ -1527,6 +1528,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         }
 
         /// <summary>
+        /// Interface-compatible overload using int index instead of InkType enum.
+        /// </summary>
+        void ISimulationWriter.InjectDensity(Vector2 position, Color color, int inkTypeIndex)
+        {
+            // Convert index to InkType enum, default to Fire if out of range
+            InkType inkType = (inkTypeIndex >= 0 && inkTypeIndex < 9)
+                ? (InkType)inkTypeIndex
+                : InkType.Fire;
+            InjectDensity(position, color, inkType);
+        }
+
+        /// <summary>
         /// CPU helper: inject ink at a single UV position into the iparticle buffer
         /// using a simple circular radius and mapping RGB to fire/water/ice channels.
         /// </summary>
@@ -2129,6 +2142,29 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             return (advectionMs, diffusionMs, pressureMs, projectionMs, vorticityMs);
         }
+
+        // Explicit interface implementation for tuple element names
+        (float advection, float diffusion, float pressure, float projection, float vorticity)
+            ISimulationReader.GetDetailedTimings() => GetDetailedTimings();
+
+        #region Service Accessors
+
+        /// <summary>
+        /// Returns this SimDriver as an ISimulationService for full read/write access.
+        /// </summary>
+        public ISimulationService AsService() => this;
+
+        /// <summary>
+        /// Returns this SimDriver as an ISimulationReader for read-only access.
+        /// </summary>
+        public ISimulationReader AsReader() => this;
+
+        /// <summary>
+        /// Returns this SimDriver as an ISimulationWriter for injection/stamping access.
+        /// </summary>
+        public ISimulationWriter AsWriter() => this;
+
+        #endregion
 
         private void OnDestroy()
         {

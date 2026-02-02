@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using Magi.Inkling.Systems.SimulationLOD0;
+using Magi.Inkling.Services;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -22,6 +23,7 @@ namespace Magi.Inkling.Dev
         private TestPatternGenerator pattern;
         private SimulationRecorder recorder;
         private SimDriver simDriver;
+        private ISimulationReader simReader;
 
         [Header("Direct References (Required to avoid Resources.Load)")]
         public ComputeShader fluidComputeShader;
@@ -115,6 +117,9 @@ namespace Magi.Inkling.Dev
                 simDriver = go.AddComponent<SimDriver>();
                 TryLoadAndAssignComputeShader();
             }
+
+            // Initialize service interface for decoupled access
+            simReader = simDriver.AsReader();
         }
 
         void TryLoadAndAssignComputeShader()
@@ -151,9 +156,9 @@ namespace Magi.Inkling.Dev
         RenderTexture GetDisplayTexture()
         {
             // Use SimDriver output if available, otherwise fall back to hiResRT
-            if (simDriver != null)
+            if (simReader != null)
             {
-                var tex = simDriver.GetDisplayTexture();
+                var tex = simReader.GetDisplayTexture();
                 if (tex != null) return tex;
             }
             return hiResRT;
