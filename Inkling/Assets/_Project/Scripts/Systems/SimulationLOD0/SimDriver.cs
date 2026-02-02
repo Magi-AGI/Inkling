@@ -52,6 +52,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool useBatchedDensityInjection = true; // Use batched compute pass for point injections
         [SerializeField] private ComputeShader batchedInjectionCompute;  // Optional: AddDensityBatched / AddParticlesBatched
         [SerializeField] private bool useBatchedStamping = true; // Use batched compute pass for density stamps when textures match
+        [SerializeField] private bool useBatchedMasks = true;    // Use batched compute pass for clear-density masks when textures match
 
         [Header("Ink Type Selection")]
         [SerializeField] private InkType currentInkType = InkType.Fire;
@@ -99,6 +100,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private ComputeShader stampParticlesCompute;
         [Tooltip("Optional compute to batch stamp payloads (density + particles) into a staging buffer to reduce dispatch count.")]
         [SerializeField] private ComputeShader batchedStampCompute;
+        [Tooltip("Optional compute to batch clear-density masks.")]
+        [SerializeField] private ComputeShader batchedMaskCompute;
 
         [Header("Particle Simulation")]
         [SerializeField] private bool useParticleSimulation = true;
@@ -238,6 +241,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // Batched stamp kernels (optional)
         private int kernelStampDensityBatched;
         private bool batchedStampReady;
+        private int kernelClearMaskBatched;
+        private bool batchedMaskReady;
         private bool loggedStampBatchMixedTextures;
         private bool loggedStampBatchUnavailable;
         private bool loggedMaskBatchUnavailable;
@@ -439,6 +444,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             else
             {
                 batchedStampReady = false;
+            }
+
+            // Batched mask compute (optional)
+            if (batchedMaskCompute != null)
+            {
+                try
+                {
+                    kernelClearMaskBatched = batchedMaskCompute.FindKernel("ClearMaskBatched");
+                    batchedMaskReady = true;
+                    Debug.Log("[SimDriver] Batched mask compute ready.");
+                }
+                catch (System.Exception e)
+                {
+                    batchedMaskReady = false;
+                    Debug.LogWarning($"[SimDriver] Batched mask compute init failed ({e.Message}).");
+                }
+            }
+            else
+            {
+                batchedMaskReady = false;
             }
         }
 
@@ -1202,71 +1227,119 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // ── Clear-density masks ──────────────────────────────────────────
             if (pendingClearDensityMasks.Count > 0 && density != null)
             {
-                if (pendingClearDensityMasks.Count > 1 && !loggedMaskBatchUnavailable)
+                bool canBatchMasks = useBatchedMasks && batchedMaskReady;
+                if (canBatchMasks)
                 {
-                    loggedMaskBatchUnavailable = true;
-                    Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("[SimDriver] Mask staging not batched; executing per-mask dispatches.");
-                }
-
-                foreach (var c in pendingClearDensityMasks)
-                {
-                    if (c.mask == null) continue;
-
-                    float stampWidthUV  = (float)c.mask.width  / resolution;
-                    float stampHeightUV = (float)c.mask.height / resolution;
-
-                    // Density clear – compute path preferred
-                    if (stampComputeReady)
+                    Texture2D firstMask = pendingClearDensityMasks[0].mask;
+                    for (int i = 0; i < pendingClearDensityMasks.Count; i++)
                     {
-                        stampCompute.SetTexture(kernelClearBlackDensity, "_DensityRead",  density.Read);
-                        stampCompute.SetTexture(kernelClearBlackDensity, "_DensityWrite", density.Write);
-                        stampCompute.SetTexture(kernelClearBlackDensity, "_StampTex",     c.mask);
-                        stampCompute.SetVector("_StampCenter", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
-                        stampCompute.SetVector("_StampSize",   new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
-                        stampCompute.SetFloat("_AlphaThreshold", 0.01f);
-                        stampCompute.SetFloat("_BlackLumThreshold", c.blackLuminanceThreshold);
-                        stampCompute.SetVector("_Resolution", new Vector2(resolution, resolution));
-
-                        stampCompute.Dispatch(kernelClearBlackDensity, threadGroups, threadGroups, 1);
-                        density.Swap();
-                    }
-                    else
-                    {
-                        EnsureStampMaterial();
-                        if (densityStampMaterial != null)
+                        if (pendingClearDensityMasks[i].mask != firstMask || firstMask == null)
                         {
-                            densityStampMaterial.SetTexture("_StampTex", c.mask);
-                            densityStampMaterial.SetVector("_StampCenterUV", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
-                            densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
-                            densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
-                            densityStampMaterial.SetFloat("_StampMode", 1f);
-                            densityStampMaterial.SetFloat("_BlackLuminanceThreshold", c.blackLuminanceThreshold);
-
-                            Graphics.Blit(density.Read, density.Write, densityStampMaterial);
-                            density.Swap();
+                            canBatchMasks = false;
+                            break;
                         }
                     }
+                }
 
-                    // Obstacle map update (single RT, always Blit-based – not on density ping-pong)
-                    if (obstacles != null)
+                if (canBatchMasks)
+                {
+                    int count = pendingClearDensityMasks.Count;
+                    var payloadA = new Vector4[count];
+                    var payloadB = new Vector4[count];
+                    for (int i = 0; i < count; i++)
                     {
-                        EnsureStampMaterial();
-                        if (densityStampMaterial != null)
+                        var m = pendingClearDensityMasks[i];
+                        float stampWidthUV = (float)m.mask.width / resolution;
+                        float stampHeightUV = (float)m.mask.height / resolution;
+                        payloadA[i] = new Vector4(m.uvPosition.x, m.uvPosition.y, stampWidthUV, stampHeightUV);
+                        payloadB[i] = new Vector4(0.01f, m.blackLuminanceThreshold, 0f, 0f);
+                    }
+
+                    using (var bufA = new ComputeBuffer(count, sizeof(float) * 4))
+                    using (var bufB = new ComputeBuffer(count, sizeof(float) * 4))
+                    {
+                        bufA.SetData(payloadA);
+                        bufB.SetData(payloadB);
+
+                        batchedMaskCompute.SetInt("_MaskCount", count);
+                        batchedMaskCompute.SetVector("_Resolution", new Vector2(resolution, resolution));
+                        batchedMaskCompute.SetBuffer(kernelClearMaskBatched, "_MaskPayloadA", bufA);
+                        batchedMaskCompute.SetBuffer(kernelClearMaskBatched, "_MaskPayloadB", bufB);
+                        batchedMaskCompute.SetTexture(kernelClearMaskBatched, "_MaskTex", pendingClearDensityMasks[0].mask);
+                        batchedMaskCompute.SetTexture(kernelClearMaskBatched, "_DensityRead", density.Read);
+                        batchedMaskCompute.SetTexture(kernelClearMaskBatched, "_DensityWrite", density.Write);
+                        batchedMaskCompute.Dispatch(kernelClearMaskBatched, threadGroups, threadGroups, 1);
+                        density.Swap();
+                    }
+                }
+                else
+                {
+                    if (useBatchedMasks && !batchedMaskReady && !loggedMaskBatchUnavailable)
+                    {
+                        loggedMaskBatchUnavailable = true;
+                        Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("[SimDriver] Mask batching requested but batchedMaskCompute is not ready; falling back to per-mask dispatch.");
+                    }
+
+                    foreach (var c in pendingClearDensityMasks)
+                    {
+                        if (c.mask == null) continue;
+
+                        float stampWidthUV  = (float)c.mask.width  / resolution;
+                        float stampHeightUV = (float)c.mask.height / resolution;
+
+                        // Density clear – compute path preferred
+                        if (stampComputeReady)
                         {
-                            RenderTexture tmpObs = RenderTexture.GetTemporary(
-                                obstacles.width, obstacles.height, 0, obstacles.format);
-                            Graphics.Blit(obstacles, tmpObs);
+                            stampCompute.SetTexture(kernelClearBlackDensity, "_DensityRead",  density.Read);
+                            stampCompute.SetTexture(kernelClearBlackDensity, "_DensityWrite", density.Write);
+                            stampCompute.SetTexture(kernelClearBlackDensity, "_StampTex",     c.mask);
+                            stampCompute.SetVector("_StampCenter", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
+                            stampCompute.SetVector("_StampSize",   new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                            stampCompute.SetFloat("_AlphaThreshold", 0.01f);
+                            stampCompute.SetFloat("_BlackLumThreshold", c.blackLuminanceThreshold);
+                            stampCompute.SetVector("_Resolution", new Vector2(resolution, resolution));
 
-                            densityStampMaterial.SetTexture("_MainTex", tmpObs);
-                            densityStampMaterial.SetTexture("_StampTex", c.mask);
-                            densityStampMaterial.SetVector("_StampCenterUV", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
-                            densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
-                            densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
-                            densityStampMaterial.SetFloat("_StampMode", 2f);
-                            densityStampMaterial.SetFloat("_BlackLuminanceThreshold", c.blackLuminanceThreshold);
+                            stampCompute.Dispatch(kernelClearBlackDensity, threadGroups, threadGroups, 1);
+                            density.Swap();
+                        }
+                        else
+                        {
+                            EnsureStampMaterial();
+                            if (densityStampMaterial != null)
+                            {
+                                densityStampMaterial.SetTexture("_StampTex", c.mask);
+                                densityStampMaterial.SetVector("_StampCenterUV", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
+                                densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                                densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
+                                densityStampMaterial.SetFloat("_StampMode", 1f);
+                                densityStampMaterial.SetFloat("_BlackLuminanceThreshold", c.blackLuminanceThreshold);
 
-                            Graphics.Blit(tmpObs, obstacles, densityStampMaterial);
-                            RenderTexture.ReleaseTemporary(tmpObs);
+                                Graphics.Blit(density.Read, density.Write, densityStampMaterial);
+                                density.Swap();
+                            }
+                        }
+
+                        // Obstacle map update (single RT, always Blit-based – not on density ping-pong)
+                        if (obstacles != null)
+                        {
+                            EnsureStampMaterial();
+                            if (densityStampMaterial != null)
+                            {
+                                RenderTexture tmpObs = RenderTexture.GetTemporary(
+                                    obstacles.width, obstacles.height, 0, obstacles.format);
+                                Graphics.Blit(obstacles, tmpObs);
+
+                                densityStampMaterial.SetTexture("_MainTex", tmpObs);
+                                densityStampMaterial.SetTexture("_StampTex", c.mask);
+                                densityStampMaterial.SetVector("_StampCenterUV", new Vector4(c.uvPosition.x, c.uvPosition.y, 0f, 0f));
+                                densityStampMaterial.SetVector("_StampSizeUV", new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                                densityStampMaterial.SetFloat("_AlphaThreshold", 0.01f);
+                                densityStampMaterial.SetFloat("_StampMode", 2f);
+                                densityStampMaterial.SetFloat("_BlackLuminanceThreshold", c.blackLuminanceThreshold);
+
+                                Graphics.Blit(tmpObs, obstacles, densityStampMaterial);
+                                RenderTexture.ReleaseTemporary(tmpObs);
+                            }
                         }
                     }
                 }
