@@ -49,6 +49,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float densityAmount = 10.0f;    // Scalar density factor for mouse/texture injection
         [SerializeField] private float forceRadius = 40f;       // Larger injection area
         [SerializeField] private float forceStrength = 50f;     // Force gets multiplied by velocity magnitude
+        [SerializeField] private bool useBatchedDensityInjection = true; // Use batched compute pass for point injections
+        [SerializeField] private ComputeShader batchedInjectionCompute;  // Optional: AddDensityBatched / AddParticlesBatched
 
         [Header("Ink Type Selection")]
         [SerializeField] private InkType currentInkType = InkType.Fire;
@@ -204,6 +206,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private int kernelVorticityConfinement;
         private int kernelAddForce;
         private int kernelAddDensity;
+        private int kernelAddDensityBatched;
         private int kernelClear;
         private int kernelUpdateObstacles;
         private int kernelApplyObstacleBoundary;
@@ -213,10 +216,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private int kernelDissipateParticles;
         private int kernelDiffuseParticles;
         private int kernelAddParticlesGaussian;
+        private int kernelAddParticlesBatched;
 
         // Ink interactions kernel (from InkInteractions.compute)
         private int kernelInkInteractions;
         private bool inkInteractionsReady;
+        private bool batchedInjectionReady;
 
         // Stamp compute kernels (from StampDensityCompute.compute)
         private int kernelStampDensity;
@@ -272,6 +277,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             public Vector2 uvPosition;
             public Texture2D mask;
             public float blackLuminanceThreshold;
+        }
+
+        private struct BatchedInjection
+        {
+            public Vector2 uv;
+            public Vector3 color;
+            public int inkIndex;
         }
 
         private readonly List<PendingDensityStamp> pendingDensityStamps = new List<PendingDensityStamp>();
@@ -447,6 +459,27 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 Debug.LogWarning("[SimDriver] Compute shader doesn't have required kernels. Running in test pattern mode. Make sure you've assigned the correct Fluids.compute.");
                 kernelsFound = false;
                 fluidCompute = null; // Disable compute operations
+            }
+
+            // Optional batched injection compute
+            if (batchedInjectionCompute != null)
+            {
+                try
+                {
+                    kernelAddDensityBatched = batchedInjectionCompute.FindKernel("AddDensityBatched");
+                    kernelAddParticlesBatched = batchedInjectionCompute.FindKernel("AddParticlesBatched");
+                    batchedInjectionReady = true;
+                    Debug.Log("[SimDriver] Batched injection compute ready (density + particles).");
+                }
+                catch (System.Exception e)
+                {
+                    batchedInjectionReady = false;
+                    Debug.LogWarning($"[SimDriver] Batched injection compute init failed ({e.Message}). Falling back to per-injection dispatch.");
+                }
+            }
+            else
+            {
+                batchedInjectionReady = false;
             }
 
             AllocateRenderTextures();
@@ -1158,32 +1191,78 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // ── Density injections (Compute-based) ──────────────────────────
             if (pendingDensityInjections.Count > 0 && fluidCompute != null && density != null)
             {
-                foreach (var d in pendingDensityInjections)
+                if (useBatchedDensityInjection && batchedInjectionReady)
                 {
-                    float colorIntensity = Mathf.Max(d.color.r, Mathf.Max(d.color.g, d.color.b));
-                    if (colorIntensity <= 0f) continue;
-
-                    Vector2 pixelPos = d.position * resolution;
-
-                    fluidCompute.SetVector("_ForcePosition", pixelPos);
-                    fluidCompute.SetFloat("_ForceRadius", forceRadius);
-                    fluidCompute.SetFloat("_DensityAmount", densityAmount);
-                    fluidCompute.SetVector("_DensityColor", (Vector4)d.color);
-                    fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
-
-                    fluidCompute.SetTexture(kernelAddDensity, "_DensityRead", density.Read);
-                    fluidCompute.SetTexture(kernelAddDensity, "_DensityWrite", density.Write);
-                    fluidCompute.Dispatch(kernelAddDensity, threadGroups, threadGroups, 1);
-                    density.Swap();
-
-                    // Mirror into particle buffer via GPU (same ForceParams already set)
-                    if (useParticleSimulation && particlesBuffer != null && kernelAddParticlesGaussian != 0)
+                    int count = pendingDensityInjections.Count;
+                    var injA = new Vector4[count];
+                    var injB = new Vector4[count];
+                    for (int i = 0; i < count; i++)
                     {
-                        fluidCompute.SetInt("_InkTypeIndex", d.inkTypeIndex);
-                        fluidCompute.SetBuffer(kernelAddParticlesGaussian, "_ParticlesRead", particlesBuffer[particleReadIndex]);
-                        fluidCompute.SetBuffer(kernelAddParticlesGaussian, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
-                        fluidCompute.Dispatch(kernelAddParticlesGaussian, threadGroups, threadGroups, 1);
-                        SwapParticleBuffers();
+                        var d = pendingDensityInjections[i];
+                        float colorIntensity = Mathf.Max(d.color.r, Mathf.Max(d.color.g, d.color.b));
+                        if (colorIntensity <= 0f) continue;
+                        injA[i] = new Vector4(d.position.x, d.position.y, d.color.r, d.color.g);
+                        injB[i] = new Vector4(d.color.b, d.inkTypeIndex, 0f, 0f);
+                    }
+
+                    using (var bufferA = new ComputeBuffer(count, sizeof(float) * 4))
+                    using (var bufferB = new ComputeBuffer(count, sizeof(float) * 4))
+                    {
+                        bufferA.SetData(injA);
+                        bufferB.SetData(injB);
+
+                        batchedInjectionCompute.SetInt("_InjectionCount", count);
+                        batchedInjectionCompute.SetFloat("_ForceRadius", forceRadius);
+                        batchedInjectionCompute.SetFloat("_DensityAmount", densityAmount);
+                        batchedInjectionCompute.SetVector("_Resolution", new Vector2(resolution, resolution));
+                        batchedInjectionCompute.SetBuffer(kernelAddDensityBatched, "_Injections", bufferA);
+                        batchedInjectionCompute.SetBuffer(kernelAddDensityBatched, "_Injections2", bufferB);
+                        batchedInjectionCompute.SetTexture(kernelAddDensityBatched, "_DensityRead", density.Read);
+                        batchedInjectionCompute.SetTexture(kernelAddDensityBatched, "_DensityWrite", density.Write);
+                        batchedInjectionCompute.Dispatch(kernelAddDensityBatched, threadGroups, threadGroups, 1);
+                        density.Swap();
+
+                        if (useParticleSimulation && particlesBuffer != null && kernelAddParticlesBatched != 0)
+                        {
+                            batchedInjectionCompute.SetBuffer(kernelAddParticlesBatched, "_Injections", bufferA);
+                            batchedInjectionCompute.SetBuffer(kernelAddParticlesBatched, "_Injections2", bufferB);
+                            batchedInjectionCompute.SetBuffer(kernelAddParticlesBatched, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                            batchedInjectionCompute.SetBuffer(kernelAddParticlesBatched, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
+                            batchedInjectionCompute.SetVector("_Resolution", new Vector2(resolution, resolution));
+                            batchedInjectionCompute.Dispatch(kernelAddParticlesBatched, threadGroups, threadGroups, 1);
+                            SwapParticleBuffers();
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var d in pendingDensityInjections)
+                    {
+                        float colorIntensity = Mathf.Max(d.color.r, Mathf.Max(d.color.g, d.color.b));
+                        if (colorIntensity <= 0f) continue;
+
+                        Vector2 pixelPos = d.position * resolution;
+
+                        fluidCompute.SetVector("_ForcePosition", pixelPos);
+                        fluidCompute.SetFloat("_ForceRadius", forceRadius);
+                        fluidCompute.SetFloat("_DensityAmount", densityAmount);
+                        fluidCompute.SetVector("_DensityColor", (Vector4)d.color);
+                        fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
+
+                        fluidCompute.SetTexture(kernelAddDensity, "_DensityRead", density.Read);
+                        fluidCompute.SetTexture(kernelAddDensity, "_DensityWrite", density.Write);
+                        fluidCompute.Dispatch(kernelAddDensity, threadGroups, threadGroups, 1);
+                        density.Swap();
+
+                        // Mirror into particle buffer via GPU (same ForceParams already set)
+                        if (useParticleSimulation && particlesBuffer != null && kernelAddParticlesGaussian != 0)
+                        {
+                            fluidCompute.SetInt("_InkTypeIndex", d.inkTypeIndex);
+                            fluidCompute.SetBuffer(kernelAddParticlesGaussian, "_ParticlesRead", particlesBuffer[particleReadIndex]);
+                            fluidCompute.SetBuffer(kernelAddParticlesGaussian, "_ParticlesWrite", particlesBuffer[particleWriteIndex]);
+                            fluidCompute.Dispatch(kernelAddParticlesGaussian, threadGroups, threadGroups, 1);
+                            SwapParticleBuffers();
+                        }
                     }
                 }
                 pendingDensityInjections.Clear();
