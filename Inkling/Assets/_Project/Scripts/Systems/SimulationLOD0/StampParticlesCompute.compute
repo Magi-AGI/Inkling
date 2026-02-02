@@ -3,6 +3,14 @@
 // RWStructuredBuffer<iparticle> instead of density RenderTextures.
 // Stamps occur before AdvectParticles in ProcessPendingOperations,
 // so sequential dispatch ordering provides an implicit barrier.
+//
+// Color Palette Lookup: Each ink type has a "key color" defined in InkTypeDef.
+// Stamp pixel colors are matched against these key colors to determine which
+// ink channel(s) to write to. This allows arbitrary texture colors to map to
+// any ink type based on artist-defined palettes.
+//
+// Future: Reverse gradient lookup could sample gradients backwards to find
+// the ink type whose gradient produces the closest output color.
 
 #pragma kernel StampParticles
 
@@ -20,6 +28,38 @@ float  _DensityMul;
 float  _UseOverride;
 float4 _OverrideColor;
 float2 _Resolution;
+
+// Color palette for ink type matching (10 ink types, RGB + tolerance in .w)
+// Index matches InkTypeId enum: 0=Fire, 1=Water, 2=PlantSeeded, 3=PlantGrown,
+// 4=Steam, 5=Glitter, 6=BlackBody, 7=ElectricitySeeded, 8=ElectricityGrown, 9=Ice
+float4 _InkKeyColors[10];     // RGB in xyz, tolerance in w
+int _NumActiveInks;           // How many inks have valid key colors (default 10)
+int _UsePaletteLookup;        // 1 = use palette matching, 0 = legacy RGB mapping
+
+// Helper: Calculate RGB distance between two colors (ignoring alpha)
+float ColorDistance(float3 a, float3 b)
+{
+    float3 diff = a - b;
+    return sqrt(dot(diff, diff));
+}
+
+// Helper: Add ink amount to the appropriate channel by index
+void AddInkByIndex(inout iparticle p, int inkIdx, float amount)
+{
+    switch (inkIdx)
+    {
+        case 0: p.fire += (ifloat)amount; break;
+        case 1: p.water += (ifloat)amount; break;
+        case 2: p.plantSeeded += (ifloat)amount; break;
+        case 3: p.plantGrown += (ifloat)amount; break;
+        case 4: p.steam += (ifloat)amount; break;
+        case 5: p.glitter += (ifloat)amount; break;
+        case 6: p.blackBody += (ifloat)amount; break;
+        case 7: p.electricitySeeded += (ifloat)amount; break;
+        case 8: p.electricityGrown += (ifloat)amount; break;
+        case 9: p.ice += (ifloat)amount; break;
+    }
+}
 
 [numthreads(8, 8, 1)]
 void StampParticles(uint3 id : SV_DispatchThreadID)
@@ -39,16 +79,60 @@ void StampParticles(uint3 id : SV_DispatchThreadID)
         return;
 
     float4 color;
-    if (_UseOverride > 0.5)
-        color = float4(_OverrideColor.rgb * stamp.a, stamp.a);
-    else
-        color = stamp * _DensityMul;
+    float3 matchColor;
 
-    // Map stamp RGB -> iparticle channels (R->fire, G->water, B->ice)
+    // Separate palette matching hue from injected amount.
+    // Multiplying RGB by _DensityMul was pushing values >1, causing no palette entry
+    // to fall within tolerance when density multipliers are high (e.g., 5).
+    if (_UseOverride > 0.5)
+    {
+        matchColor = _OverrideColor.rgb;                 // use artist override hue
+        color = float4(_OverrideColor.rgb * stamp.a,     // premultiply by alpha for write
+                       stamp.a);                         // preserve original amount
+    }
+    else
+    {
+        matchColor = stamp.rgb;                          // sampled texture hue (unscaled)
+        color = float4(stamp.rgb * _DensityMul,          // scale amount only
+                       stamp.a   * _DensityMul);
+    }
+
     uint idx = id.y * (uint)_Resolution.x + id.x;
     iparticle p = _ParticlesRW[idx];
-    p.fire  += (ifloat)color.r;
-    p.water += (ifloat)color.g;
-    p.ice   += (ifloat)color.b;
+
+    if (_UsePaletteLookup > 0)
+    {
+        // Color Palette Lookup: find best matching ink type
+        float bestDist = 1e10;
+        int bestInk = -1;
+        float3 inputColor = matchColor;
+
+        for (int i = 0; i < _NumActiveInks; i++)
+        {
+            float3 keyColor = _InkKeyColors[i].xyz;
+            float tolerance = _InkKeyColors[i].w;
+            float dist = ColorDistance(inputColor, keyColor);
+
+            if (dist < bestDist && dist <= tolerance * 1.732) // 1.732 = sqrt(3) for max RGB distance
+            {
+                bestDist = dist;
+                bestInk = i;
+            }
+        }
+
+        // If we found a match, add ink to that channel
+        if (bestInk >= 0)
+        {
+            AddInkByIndex(p, bestInk, color.a);
+        }
+    }
+    else
+    {
+        // Legacy mode: direct RGB -> fire/water/ice mapping
+        p.fire  += (ifloat)color.r;
+        p.water += (ifloat)color.g;
+        p.ice   += (ifloat)color.b;
+    }
+
     _ParticlesRW[idx] = p;
 }

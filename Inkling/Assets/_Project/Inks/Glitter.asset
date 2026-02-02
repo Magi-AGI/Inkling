@@ -15,7 +15,9 @@ MonoBehaviour:
   inkType: 5
   displayName: Glitter
   debugColor: {r: 1, g: 0.5019608, b: 1, a: 1}
-  dissipation: 0.995
+  dissipation: 0.99999
   viscosity: 0.05
   vorticity: 2
   interactionThreshold: 0.1
+  advectionWeight: 1
+  pressureWeight: 1

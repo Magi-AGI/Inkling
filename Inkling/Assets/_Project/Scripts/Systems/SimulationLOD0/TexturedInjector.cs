@@ -24,8 +24,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Range(0, 1)] [SerializeField] private float alphaThreshold = 0.1f;
         [Range(0, 1)] [SerializeField] private float blackLuminanceThreshold = 0.05f;
         [SerializeField] private bool enableBlackMaskClearing = false; // If false, skip obstacle/black masking to avoid flicker
-        [Tooltip("Enable CPU-side particle stamping (GetData/SetData). Disabled by default because the GPU flush causes flickering on DX12.")]
-        [SerializeField] private bool useParticleStamping = false;
 
         [Header("Movement")]
         [SerializeField] private bool autonomous = true;
@@ -230,6 +228,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Overlap culling: skip if the mask quad does not intersect the sim plane.
             if (!OverlapsSim(uvPosition))
             {
+                Debug.LogWarning($"[TexturedInjector] Skipping injection - creature at UV {uvPosition} is off-screen");
                 return;
             }
 
@@ -249,27 +248,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 useTextureColors ? false : true,
                 inkColorOverride);
 
-            // CPU particle stamping (GetData/SetData) forces a full GPU flush that
-            // can interleave with the queued compute stamps and cause flickering on
-            // DX12.  Disabled by default; enable only when multi-ink particle state
-            // is required and the flicker trade-off is acceptable.
-            if (useParticleStamping)
-            {
-                simDriver.StampParticles(uvPosition, stampTexture);
-            }
-
             if (enableBlackMaskClearing)
             {
                 // Use the original mask to clear density in black regions so black inks
                 // appear solid and do not advect/linger, and to update obstacle map.
                 simDriver.ClearDensityWithMask(uvPosition, injectionMask, blackLuminanceThreshold);
-
-                // Stamp black/body ink into the particle buffer so the gradient-based
-                // renderer can treat black as an overriding ink layer.
-                if (useParticleStamping)
-                {
-                    simDriver.StampBlackBody(uvPosition, injectionMask, alphaThreshold, blackLuminanceThreshold);
-                }
             }
 
             // Inject velocity if moving
@@ -285,12 +268,23 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         }
 
         /// <summary>
-        /// Returns true if the mask quad (centered at uvPosition, size = maskSize) overlaps the simulation rect [0,1]x[0,1].
+        /// Returns true if the mask quad (centered at uvPosition) overlaps the simulation rect [0,1]x[0,1].
         /// Prevents dispatch when the mask is completely off the sim plane.
         /// </summary>
         private bool OverlapsSim(Vector2 uvPosition)
         {
-            Vector2 half = maskSize * 0.5f;
+            if (simDriver == null || stampTexture == null) return true; // Can't cull without info
+
+            // Compute mask size in UV space (same calculation as SimDriver.ProcessPendingOperations)
+            float simRes = simDriver.Resolution;
+            if (simRes <= 0) return true; // Safety: allow if resolution not yet initialized
+
+            Vector2 maskSizeUV = new Vector2(
+                (float)stampTexture.width / simRes,
+                (float)stampTexture.height / simRes
+            );
+
+            Vector2 half = maskSizeUV * 0.5f;
             float minX = uvPosition.x - half.x;
             float maxX = uvPosition.x + half.x;
             float minY = uvPosition.y - half.y;

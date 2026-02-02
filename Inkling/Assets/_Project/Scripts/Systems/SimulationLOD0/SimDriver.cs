@@ -220,6 +220,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private int kernelChannelSplat;
         private bool channelSplatReady;
         private bool loggedDisplayDiagnostic;
+        private bool hasLoggedFirstParticleStamp;
 
         // Performance tracking
         private Stopwatch stopwatch = new Stopwatch();
@@ -723,6 +724,46 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             return defaultValue;
         }
 
+        /// <summary>
+        /// Builds the ink key color palette for GPU upload.
+        /// Returns array of Vector4 where xyz = RGB key color, w = tolerance.
+        /// </summary>
+        private Vector4[] BuildInkKeyColorPalette()
+        {
+            var palette = new Vector4[10];
+
+            // Default key colors based on traditional mappings
+            var defaults = new Color[]
+            {
+                new Color(1f, 0.3f, 0f),      // Fire - orange-red
+                new Color(0f, 0.5f, 1f),      // Water - blue
+                new Color(0.2f, 0.8f, 0.2f),  // PlantSeeded - green
+                new Color(0f, 0.5f, 0f),      // PlantGrown - dark green
+                new Color(0.8f, 0.8f, 0.9f),  // Steam - light gray
+                new Color(1f, 0.8f, 0f),      // Glitter - gold
+                new Color(0.1f, 0.1f, 0.1f),  // BlackBody - near black
+                new Color(1f, 1f, 0f),        // ElectricitySeeded - yellow
+                new Color(0.5f, 0f, 1f),      // ElectricityGrown - purple
+                new Color(0.5f, 0.8f, 1f),    // Ice - light cyan
+            };
+
+            for (int i = 0; i < 10; i++)
+            {
+                Color keyColor = defaults[i];
+                float tolerance = 0.3f;
+
+                if (inkDefinitions != null && i < inkDefinitions.Length && inkDefinitions[i] != null)
+                {
+                    keyColor = inkDefinitions[i].inputKeyColor;
+                    tolerance = inkDefinitions[i].colorMatchTolerance;
+                }
+
+                palette[i] = new Vector4(keyColor.r, keyColor.g, keyColor.b, tolerance);
+            }
+
+            return palette;
+        }
+
         private void ClearBuffers()
         {
             int threadGroups = Mathf.CeilToInt(resolution / 8f);
@@ -923,6 +964,27 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 // ── GPU particle stamps (mirror density stamps into particle buffer) ─
                 if (stampParticlesComputeReady && particlesBuffer != null)
                 {
+                    // Upload ink key color palette for color-to-ink-type matching
+                    Vector4[] inkPalette = BuildInkKeyColorPalette();
+                    stampParticlesCompute.SetVectorArray("_InkKeyColors", inkPalette);
+                    stampParticlesCompute.SetInt("_NumActiveInks", 10);
+                    stampParticlesCompute.SetInt("_UsePaletteLookup", 1); // Enable palette lookup
+
+                    // Debug: log first particle stamp
+                    if (!hasLoggedFirstParticleStamp && pendingDensityStamps.Count > 0)
+                    {
+                        hasLoggedFirstParticleStamp = true;
+                        var firstStamp = pendingDensityStamps[0];
+                        Debug.Log($"[SimDriver] First particle stamp: texture={firstStamp.stamp?.name}, " +
+                                  $"pos={firstStamp.uvPosition}, mul={firstStamp.multiplier}, " +
+                                  $"useOverride={firstStamp.useColorOverride}, override={firstStamp.overrideColor}");
+                        // Log palette colors
+                        for (int i = 0; i < 10; i++)
+                        {
+                            Debug.Log($"[SimDriver] Ink palette[{i}]: RGB=({inkPalette[i].x:F2},{inkPalette[i].y:F2},{inkPalette[i].z:F2}), tolerance={inkPalette[i].w:F2}");
+                        }
+                    }
+
                     foreach (var s in pendingDensityStamps)
                     {
                         if (s.stamp == null) continue;
@@ -943,6 +1005,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
                         stampParticlesCompute.Dispatch(kernelStampParticles, threadGroups, threadGroups, 1);
                     }
+                }
+                else if (!hasLoggedFirstParticleStamp && pendingDensityStamps.Count > 0)
+                {
+                    // One-time warning that particle stamps won't work
+                    hasLoggedFirstParticleStamp = true;
+                    Debug.LogWarning($"[SimDriver] Particle stamps SKIPPED - stampParticlesComputeReady={stampParticlesComputeReady}, " +
+                                     $"particlesBuffer={(particlesBuffer != null ? "valid" : "null")}. " +
+                                     "Assign StampParticlesCompute in Inspector for creature visibility.");
                 }
 
                 pendingDensityStamps.Clear();
@@ -1549,66 +1619,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             });
         }
 
-        /// <summary>
-        /// CPU path: stamp a texture into the particle buffer (iparticle) so that
-        /// multi-ink interactions can be driven from the canonical particle state.
-        /// This is a transitional implementation and may be replaced by a GPU kernel.
-        /// </summary>
-        public void StampParticles(Vector2 uvPosition, Texture2D stamp)
-        {
-            if (particlesBuffer == null || stamp == null) return;
-
-            int stampWidth = stamp.width;
-            int stampHeight = stamp.height;
-            Color[] stampPixels = stamp.GetPixels();
-
-            int centerX = Mathf.RoundToInt(uvPosition.x * resolution);
-            int centerY = Mathf.RoundToInt(uvPosition.y * resolution);
-            int startX = centerX - stampWidth / 2;
-            int startY = centerY - stampHeight / 2;
-
-            int particleCount = resolution * resolution;
-
-            if (gpuPromotesHalf)
-            {
-                var particles = new iparticle_gpu[particleCount];
-                particlesBuffer[particleReadIndex].GetData(particles);
-                for (int y = 0; y < stampHeight; y++)
-                    for (int x = 0; x < stampWidth; x++)
-                    {
-                        int targetX = startX + x;
-                        int targetY = startY + y;
-                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
-                        Color c = stampPixels[y * stampWidth + x];
-                        if (c.a < 0.01f) continue;
-                        int idx = targetY * resolution + targetX;
-                        particles[idx].fire  += c.r * c.a;
-                        particles[idx].water += c.g * c.a;
-                        particles[idx].ice   += c.b * c.a;
-                    }
-                particlesBuffer[particleReadIndex].SetData(particles);
-            }
-            else
-            {
-                var particles = new iparticle[particleCount];
-                particlesBuffer[particleReadIndex].GetData(particles);
-                for (int y = 0; y < stampHeight; y++)
-                    for (int x = 0; x < stampWidth; x++)
-                    {
-                        int targetX = startX + x;
-                        int targetY = startY + y;
-                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
-                        Color c = stampPixels[y * stampWidth + x];
-                        if (c.a < 0.01f) continue;
-                        int idx = targetY * resolution + targetX;
-                        particles[idx].fire  += (half)(c.r * c.a);
-                        particles[idx].water += (half)(c.g * c.a);
-                        particles[idx].ice   += (half)(c.b * c.a);
-                    }
-                particlesBuffer[particleReadIndex].SetData(particles);
-            }
-        }
-
         private void SwapParticleBuffers()
         {
             int temp = particleReadIndex;
@@ -1634,70 +1644,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 mask = mask,
                 blackLuminanceThreshold = blackLuminanceThreshold
             });
-        }
-
-        /// <summary>
-        /// CPU path: stamp black/body ink into the iparticle buffer based on a mask texture.
-        /// Black pixels (by luminance) are written into the blackBody channel so that
-        /// gradient-based rendering can treat them as an overriding ink layer.
-        /// </summary>
-        /// <param name="uvPosition">Center position in UV space (0-1)</param>
-        /// <param name="mask">Source mask texture</param>
-        /// <param name="alphaThreshold">Minimum alpha for a pixel to be considered</param>
-        /// <param name="blackLuminanceThreshold">Luminance threshold for "black" classification</param>
-        public void StampBlackBody(Vector2 uvPosition, Texture2D mask, float alphaThreshold, float blackLuminanceThreshold)
-        {
-            if (particlesBuffer == null || mask == null) return;
-
-            int maskWidth = mask.width;
-            int maskHeight = mask.height;
-            Color[] maskPixels = mask.GetPixels();
-
-            int centerX = Mathf.RoundToInt(uvPosition.x * resolution);
-            int centerY = Mathf.RoundToInt(uvPosition.y * resolution);
-            int startX = centerX - maskWidth / 2;
-            int startY = centerY - maskHeight / 2;
-
-            int particleCount = resolution * resolution;
-
-            if (gpuPromotesHalf)
-            {
-                var particles = new iparticle_gpu[particleCount];
-                particlesBuffer[particleReadIndex].GetData(particles);
-                for (int y = 0; y < maskHeight; y++)
-                    for (int x = 0; x < maskWidth; x++)
-                    {
-                        int targetX = startX + x;
-                        int targetY = startY + y;
-                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
-                        Color mc = maskPixels[y * maskWidth + x];
-                        if (mc.a < alphaThreshold) continue;
-                        float luminance = 0.299f * mc.r + 0.587f * mc.g + 0.114f * mc.b;
-                        if (luminance >= blackLuminanceThreshold) continue;
-                        int idx = targetY * resolution + targetX;
-                        particles[idx].blackBody = Mathf.Clamp01(particles[idx].blackBody + mc.a);
-                    }
-                particlesBuffer[particleReadIndex].SetData(particles);
-            }
-            else
-            {
-                var particles = new iparticle[particleCount];
-                particlesBuffer[particleReadIndex].GetData(particles);
-                for (int y = 0; y < maskHeight; y++)
-                    for (int x = 0; x < maskWidth; x++)
-                    {
-                        int targetX = startX + x;
-                        int targetY = startY + y;
-                        if (targetX < 0 || targetX >= resolution || targetY < 0 || targetY >= resolution) continue;
-                        Color mc = maskPixels[y * maskWidth + x];
-                        if (mc.a < alphaThreshold) continue;
-                        float luminance = 0.299f * mc.r + 0.587f * mc.g + 0.114f * mc.b;
-                        if (luminance >= blackLuminanceThreshold) continue;
-                        int idx = targetY * resolution + targetX;
-                        particles[idx].blackBody = (half)Mathf.Clamp01((float)particles[idx].blackBody + mc.a);
-                    }
-                particlesBuffer[particleReadIndex].SetData(particles);
-            }
         }
 
         /// <summary>

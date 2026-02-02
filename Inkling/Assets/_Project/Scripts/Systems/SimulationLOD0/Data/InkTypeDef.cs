@@ -21,6 +21,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Debug visualization color")]
         public Color debugColor = Color.white;
 
+        [Header("Input Color Mapping")]
+        [Tooltip("Key color used to identify this ink type when stamping from textures. Stamp pixels closest to this color will map to this ink.")]
+        public Color inputKeyColor = Color.white;
+
+        [Tooltip("How close a stamp color must be to inputKeyColor to match (0=exact, 1=any color). Uses RGB distance.")]
+        [Range(0f, 1f)]
+        public float colorMatchTolerance = 0.3f;
+
         [Header("Simulation Properties")]
         [Tooltip("How fast this ink fades (0.9=fast, 0.999=slow, 1.0=never)")]
         [Range(0f, 1f)]

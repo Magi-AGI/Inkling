@@ -19,3 +19,5 @@ MonoBehaviour:
   viscosity: 0.01
   vorticity: 2
   interactionThreshold: 0.1
+  advectionWeight: 1
+  pressureWeight: 1
