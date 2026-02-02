@@ -14,6 +14,7 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private bool show = true;
         [SerializeField] private Color textColor = Color.white;
         [SerializeField] private LogSink logSink;
+        [SerializeField] private KeyCode toggleKey = KeyCode.F9;
 
         private ISimulationReader sim;
         private float lastFrameMs;
@@ -26,6 +27,11 @@ namespace Magi.Inkling.Services.Diagnostics
 
         private void Update()
         {
+            if (toggleKey != KeyCode.None && Input.GetKeyDown(toggleKey))
+            {
+                show = !show;
+            }
+
             if (sim != null)
             {
                 lastFrameMs = sim.GetLastFrameMs();

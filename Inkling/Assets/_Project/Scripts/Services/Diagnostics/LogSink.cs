@@ -25,5 +25,10 @@ namespace Magi.Inkling.Services.Diagnostics
             var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<LogSink>();
             sink?.Add(message);
         }
+
+        public void Clear()
+        {
+            entries.Clear();
+        }
     }
 }
