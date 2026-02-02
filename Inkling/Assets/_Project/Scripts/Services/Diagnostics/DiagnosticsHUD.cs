@@ -23,6 +23,8 @@ namespace Magi.Inkling.Services.Diagnostics
         private void Start()
         {
             sim = ServiceLocator.Instance?.Resolve<ISimulationReader>();
+            if (logSink == null)
+                logSink = ServiceLocator.Instance?.Resolve<LogSink>();
         }
 
         private void Update()

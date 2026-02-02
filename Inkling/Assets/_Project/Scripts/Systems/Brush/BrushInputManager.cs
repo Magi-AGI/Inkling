@@ -15,6 +15,10 @@ namespace Magi.Inkling.Systems.Brush
         [Header("References")]
         [SerializeField] private MonoBehaviour simulationWriterSource; // ISimulationWriter provider (e.g., SimDriver)
         [SerializeField] private BrushConfig config;
+        [Tooltip("Optional renderer used to map screen position to simulation UV (e.g., display quad). If null, falls back to screen-normalized UV.")]
+        [SerializeField] private Renderer targetRenderer;
+        [Tooltip("Camera used for screen-to-world mapping when targetRenderer is set. Defaults to Camera.main.")]
+        [SerializeField] private Camera inputCamera;
 
         private ISimulationWriter writer;
         private Vector2 lastPrimaryUv;
@@ -51,9 +55,7 @@ namespace Magi.Inkling.Systems.Brush
                 return;
             }
 
-            Vector2 uv = new Vector2(
-                Mathf.Clamp01(mouse.position.ReadValue().x / Screen.width),
-                Mathf.Clamp01(mouse.position.ReadValue().y / Screen.height));
+            Vector2 uv = ComputeUv(mouse.position.ReadValue());
 
             InjectStrokePair(uv);
         }
@@ -94,6 +96,35 @@ namespace Magi.Inkling.Systems.Brush
             {
                 Debug.Log($"[BrushInputManager] Inject {(mirror ? \"(mirror)\" : \"(primary)\")} uv={uv} color={color}");
             }
+        }
+
+        private Vector2 ComputeUv(Vector2 screenPos)
+        {
+            if (targetRenderer == null)
+            {
+                return new Vector2(
+                    Mathf.Clamp01(screenPos.x / Screen.width),
+                    Mathf.Clamp01(screenPos.y / Screen.height));
+            }
+
+            var cam = inputCamera != null ? inputCamera : Camera.main;
+            if (cam == null)
+            {
+                return new Vector2(
+                    Mathf.Clamp01(screenPos.x / Screen.width),
+                    Mathf.Clamp01(screenPos.y / Screen.height));
+            }
+
+            Ray ray = cam.ScreenPointToRay(screenPos);
+            Plane plane = new Plane(targetRenderer.transform.forward, targetRenderer.transform.position);
+            if (!plane.Raycast(ray, out float dist))
+                return Vector2.zero;
+
+            Vector3 hit = ray.GetPoint(dist);
+            Bounds b = targetRenderer.bounds;
+            float u = Mathf.InverseLerp(b.min.x, b.max.x, hit.x);
+            float v = Mathf.InverseLerp(b.min.y, b.max.y, hit.y);
+            return new Vector2(Mathf.Clamp01(u), Mathf.Clamp01(v));
         }
     }
 }
