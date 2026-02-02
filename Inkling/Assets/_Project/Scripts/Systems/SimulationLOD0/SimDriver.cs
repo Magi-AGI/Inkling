@@ -2136,6 +2136,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         }
         public RenderTexture GetVelocityTexture() => velocity?.Read;
         public RenderTexture GetDisplayTexture() => displayRT;
+        public RenderTexture GetObstacleTexture() => obstacles;
 
         public float GetLastFrameMs() => lastFrameMs;
         public (float adv, float diff, float press, float proj, float vort) GetDetailedTimings()

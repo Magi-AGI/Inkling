@@ -54,6 +54,12 @@ namespace Magi.Inkling.Services
         RenderTexture GetDisplayTexture();
 
         /// <summary>
+        /// Gets the obstacle texture (RFloat, 1.0 = obstacle, 0.0 = free).
+        /// Used by ObstacleSystem for GPU-based obstacle stamping.
+        /// </summary>
+        RenderTexture GetObstacleTexture();
+
+        /// <summary>
         /// Gets the total frame time for the last simulation frame in milliseconds.
         /// </summary>
         float GetLastFrameMs();
