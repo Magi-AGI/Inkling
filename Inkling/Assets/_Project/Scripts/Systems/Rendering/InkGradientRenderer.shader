@@ -26,7 +26,7 @@ Shader "Inkling/InkGradientRenderer"
         _AlphaCutoff ("Alpha Cutoff", Range(0, 1)) = 0.01
 
         [Header(Background)]
-        _BackgroundColor ("Background Color", Color) = (1, 1, 1, 1)
+        _BackgroundColor ("Background Color", Color) = (0, 0, 0, 1)
         [Toggle] _UseBackgroundColor ("Use Background Color", Float) = 1
 
         [Header(Debug)]
