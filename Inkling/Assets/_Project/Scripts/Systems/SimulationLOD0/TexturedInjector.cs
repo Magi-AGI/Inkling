@@ -325,6 +325,23 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             InjectAtPosition(position);
         }
 
+        /// <summary>
+        /// Change the injection mask texture at runtime.
+        /// Used by AnimatedCreature for frame-based animation.
+        /// </summary>
+        public void SetMask(Texture2D newMask)
+        {
+            if (newMask == null) return;
+
+            injectionMask = newMask;
+            ValidateMask();
+        }
+
+        /// <summary>
+        /// Gets the current injection mask.
+        /// </summary>
+        public Texture2D GetMask() => injectionMask;
+
         private void OnDestroy()
         {
             if (stampTexture != null)
