@@ -77,20 +77,12 @@ namespace Magi.Inkling.Systems.Growth
 
         private void Awake()
         {
-            if (growthCompute == null)
+            var init = InitializeGrowth();
+            if (!init.IsSuccess)
             {
-                Debug.LogError("[GrowthSystem] Growth compute shader not assigned.");
+                Debug.LogError($"[GrowthSystem] Init failed: {init}");
                 enabled = false;
                 return;
-            }
-
-            // Find kernel
-            kernelGrowSeeds = growthCompute.FindKernel("GrowSeeds");
-
-            if (config == null)
-            {
-                config = ScriptableObject.CreateInstance<GrowthConfig>();
-                Debug.LogWarning("[GrowthSystem] No config assigned, using defaults.");
             }
 
             isInitialized = true;
@@ -129,6 +121,31 @@ namespace Magi.Inkling.Systems.Growth
             {
                 locator.RegisterService(this);
             }
+        }
+
+        private Magi.Inkling.Services.Core.Result InitializeGrowth()
+        {
+            if (growthCompute == null)
+            {
+                return Magi.Inkling.Services.Core.Result.Fail("Growth compute shader not assigned.");
+            }
+
+            try
+            {
+                kernelGrowSeeds = growthCompute.FindKernel("GrowSeeds");
+            }
+            catch (System.Exception e)
+            {
+                return Magi.Inkling.Services.Core.Result.Fail(e);
+            }
+
+            if (config == null)
+            {
+                config = ScriptableObject.CreateInstance<GrowthConfig>();
+                Debug.LogWarning("[GrowthSystem] No config assigned, using defaults.");
+            }
+
+            return Magi.Inkling.Services.Core.Result.Success();
         }
 
         private void LateUpdate()
