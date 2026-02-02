@@ -47,6 +47,18 @@ namespace Magi.Inkling.Data
         [Range(0f, 1f)]
         public float interactionThreshold = 0.1f;
 
+        [Header("Special Behaviors")]
+        [Tooltip("Enable clearing behavior (this ink clears other inks when above threshold). Used for black body ink.")]
+        public bool enableClearing = false;
+
+        [Tooltip("Concentration threshold to activate clearing behavior.")]
+        [Range(0f, 1f)]
+        public float clearingThreshold = 0.5f;
+
+        [Tooltip("Rate at which other inks are cleared per tick when clearing is active.")]
+        [Range(0f, 0.2f)]
+        public float clearingRate = 0.05f;
+
         [Header("Input Mapping")]
         [Tooltip("Key color used to identify this ink when stamping from textures.")]
         public Color inputKeyColor = Color.white;

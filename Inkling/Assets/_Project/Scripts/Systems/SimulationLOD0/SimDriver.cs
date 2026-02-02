@@ -116,15 +116,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Affinity groups defining which inks interact and how. Each group processes 4 inks.")]
         [SerializeField] private AffinityGroup[] affinityGroups;
 
-        [Header("Black Body Ink")]
-        [Tooltip("Enable black body ink clearing behavior (drains other inks when bb > threshold).")]
-        [SerializeField] private bool enableBlackBodyClearing = true;
-        [Tooltip("Black body concentration threshold to activate clearing (default 0.5 = 50%).")]
+        [Header("Black Body Ink (Fallback)")]
+        [Tooltip("Fallback: Enable black body clearing if no InkTypeDef has enableClearing set.")]
+        [SerializeField] private bool enableBlackBodyClearingFallback = true;
+        [Tooltip("Fallback: Black body threshold if not set in InkTypeDef.")]
         [Range(0f, 1f)]
-        [SerializeField] private float blackBodyThreshold = 0.5f;
-        [Tooltip("Rate at which other inks are cleared per tick when black body is active (default 0.05).")]
+        [SerializeField] private float blackBodyThresholdFallback = 0.5f;
+        [Tooltip("Fallback: Clearing rate if not set in InkTypeDef.")]
         [Range(0f, 0.2f)]
-        [SerializeField] private float blackBodyClearingRate = 0.05f;
+        [SerializeField] private float blackBodyClearingRateFallback = 0.05f;
 
         [Header("Ink Properties")]
         [Tooltip("Ink type definitions with per-ink properties. Index must match InkTypeId enum.")]
@@ -736,6 +736,28 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         }
 
         /// <summary>
+        /// Gets clearing parameters from InkTypeDef that has enableClearing=true.
+        /// Falls back to standalone fields if no ink has clearing enabled.
+        /// </summary>
+        private (bool enabled, float threshold, float rate) GetClearingParameters()
+        {
+            // Search for an ink with clearing enabled
+            if (inkDefinitions != null)
+            {
+                foreach (var def in inkDefinitions)
+                {
+                    if (def != null && def.enableClearing)
+                    {
+                        return (true, def.clearingThreshold, def.clearingRate);
+                    }
+                }
+            }
+
+            // Fallback to standalone fields
+            return (enableBlackBodyClearingFallback, blackBodyThresholdFallback, blackBodyClearingRateFallback);
+        }
+
+        /// <summary>
         /// Builds the ink key color palette for GPU upload.
         /// Returns array of Vector4 where xyz = RGB key color, w = tolerance.
         /// </summary>
@@ -1245,10 +1267,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                         inkInteractionsCompute.SetFloat("_DeltaTime", timestep);
                         inkInteractionsCompute.SetInt("_DebugMode", inkInteractionsDebugMode ? 1 : 0);
 
-                        // Black body ink clearing parameters
-                        inkInteractionsCompute.SetInt("_EnableBlackBodyClearing", enableBlackBodyClearing ? 1 : 0);
-                        inkInteractionsCompute.SetFloat("_BlackBodyThreshold", blackBodyThreshold);
-                        inkInteractionsCompute.SetFloat("_BlackBodyClearingRate", blackBodyClearingRate);
+                        // Black body ink clearing parameters (from InkTypeDef or fallback)
+                        var clearing = GetClearingParameters();
+                        inkInteractionsCompute.SetInt("_EnableBlackBodyClearing", clearing.enabled ? 1 : 0);
+                        inkInteractionsCompute.SetFloat("_BlackBodyThreshold", clearing.threshold);
+                        inkInteractionsCompute.SetFloat("_BlackBodyClearingRate", clearing.rate);
 
                         foreach (var group in affinityGroups)
                         {

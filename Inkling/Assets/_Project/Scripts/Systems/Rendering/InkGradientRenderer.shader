@@ -25,6 +25,10 @@ Shader "Inkling/InkGradientRenderer"
         _EmissionStrength ("Emission Strength", Range(0, 3)) = 1.0
         _AlphaCutoff ("Alpha Cutoff", Range(0, 1)) = 0.01
 
+        [Header(Background)]
+        _BackgroundColor ("Background Color", Color) = (1, 1, 1, 1)
+        [Toggle] _UseBackgroundColor ("Use Background Color", Float) = 1
+
         [Header(Debug)]
         [Toggle] _ShowChannels ("Show Raw Channels", Float) = 0
         [KeywordEnum(Combined, Fire, Water, Metal, Electric)] _DebugMode ("Debug Mode", Float) = 0
@@ -108,6 +112,8 @@ Shader "Inkling/InkGradientRenderer"
             float _EdgeGlow;
             float _EmissionStrength;
             float _AlphaCutoff;
+            float4 _BackgroundColor;
+            float _UseBackgroundColor;
 
             Varyings vert(Attributes input)
             {
@@ -235,19 +241,24 @@ Shader "Inkling/InkGradientRenderer"
 
                 #if _DEBUGMODE_FIRE
                     finalColor = fireColor * simData.r;
+                    finalColor.a = simData.r;
                 #elif _DEBUGMODE_WATER
                     finalColor = waterColor * simData.g;
+                    finalColor.a = simData.g;
                 #elif _DEBUGMODE_METAL
                     finalColor = metalColor * simData.b;
+                    finalColor.a = simData.b;
                 #elif _DEBUGMODE_ELECTRIC
                     float4 electricColor = SampleGradient(_ElectricityGradientTex, metalIntensity, sin(_Time.y * 10));
                     finalColor = electricColor * simData.b;
+                    finalColor.a = simData.b;
                 #else
                     float totalConcentration = simData.r + simData.g + simData.b + 0.001;
                     finalColor = (fireColor * simData.r +
                                  waterColor * simData.g +
                                  metalColor * simData.b) / totalConcentration;
-                    finalColor.a = simData.a;
+                    // Calculate alpha as total ink presence for background blending
+                    finalColor.a = saturate(simData.r + simData.g + simData.b);
                 #endif
 
                 finalColor = lerp(simData, finalColor, _GradientIntensity);
@@ -260,7 +271,17 @@ Shader "Inkling/InkGradientRenderer"
                 // Common post-processing
                 finalColor.rgb = BoostSaturation(finalColor.rgb, _SaturationBoost);
                 finalColor.rgb *= _EmissionStrength;
-                // Force opaque alpha; background is provided by RT clear (black)
+
+                // Blend with background color based on ink presence
+                // This ensures inks dissipate to the background color, not black
+                if (_UseBackgroundColor > 0.5)
+                {
+                    // Use the alpha we calculated (ink presence) to blend with background
+                    float inkPresence = saturate(finalColor.a);
+                    finalColor.rgb = lerp(_BackgroundColor.rgb, finalColor.rgb, inkPresence);
+                }
+
+                // Output opaque since we've already composited with background
                 finalColor.a = 1.0;
 
                 return finalColor;

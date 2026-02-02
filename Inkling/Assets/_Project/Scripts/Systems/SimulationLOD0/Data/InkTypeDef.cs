@@ -55,6 +55,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Range(0f, 5f)]
         public float pressureWeight = 1.0f;
 
+        [Header("Special Behaviors")]
+        [Tooltip("Enable clearing behavior (this ink clears other inks when above threshold). Used for black body ink.")]
+        public bool enableClearing = false;
+
+        [Tooltip("Concentration threshold to activate clearing behavior.")]
+        [Range(0f, 1f)]
+        public float clearingThreshold = 0.5f;
+
+        [Tooltip("Rate at which other inks are cleared per tick when clearing is active.")]
+        [Range(0f, 0.2f)]
+        public float clearingRate = 0.05f;
+
         /// <summary>
         /// Returns the particle field index for GPU upload.
         /// </summary>
