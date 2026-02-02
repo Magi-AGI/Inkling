@@ -281,7 +281,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void Start()
         {
-            InitializeSimulation();
+            var init = InitializeSimulation();
+            if (!init.IsSuccess)
+            {
+                Debug.LogError($"[SimDriver] Initialization failed: {init}");
+                enabled = false;
+                return;
+            }
 
             // Register with ServiceLocator if present
             var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
@@ -392,7 +398,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
         }
 
-        private void InitializeSimulation()
+        private Magi.Inkling.Services.Core.Result InitializeSimulation()
         {
             if (fluidCompute == null)
             {
