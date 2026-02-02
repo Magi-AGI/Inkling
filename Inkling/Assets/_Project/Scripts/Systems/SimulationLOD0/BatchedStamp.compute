@@ -1,0 +1,49 @@
+#pragma kernel StampDensityBatched
+
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+StructuredBuffer<float4> _StampPayloadA; // center.xy, sizeUV.xy
+StructuredBuffer<float4> _StampPayloadB; // color.rg, color.ba (unused for now)
+StructuredBuffer<float4> _StampPayloadC; // alphaThreshold, densityMul, useOverride, inkIndex (unused here)
+StructuredBuffer<float4> _StampPayloadD; // overrideColor
+int _StampCount;
+float2 _Resolution;
+
+Texture2D<float4> _StampTex;
+SamplerState sampler_StampTex;
+
+RWTexture2D<float4> _DensityRead;
+RWTexture2D<float4> _DensityWrite;
+
+[numthreads(8,8,1)]
+void StampDensityBatched(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution.x || id.y >= (uint)_Resolution.y) return;
+    float2 uv = (float2(id.xy) + 0.5) / _Resolution;
+    float4 baseCol = _DensityRead[id.xy];
+    float3 accum = baseCol.rgb;
+    float alpha = baseCol.a;
+
+    [loop]
+    for (int i = 0; i < _StampCount; i++)
+    {
+        float4 a = _StampPayloadA[i]; // center.xy size.xy
+        float4 c = _StampPayloadC[i]; // alphaThresh, densityMul, useOverride, inkIndex
+        float4 d = _StampPayloadD[i]; // override color
+
+        float2 rel = (uv - a.xy) / a.zw + 0.5;
+        if (rel.x < 0 || rel.x > 1 || rel.y < 0 || rel.y > 1) continue;
+
+        float4 stamp = _StampTex.SampleLevel(sampler_StampTex, rel, 0);
+        if (stamp.a < c.x) continue;
+
+        float4 writeColor = (c.z > 0.5)
+            ? float4(d.rgb * stamp.a, stamp.a)
+            : float4(stamp.rgb * c.y, stamp.a * c.y);
+
+        accum += writeColor.rgb;
+        alpha = max(alpha, writeColor.a);
+    }
+
+    _DensityWrite[id.xy] = float4(accum, alpha);
+}

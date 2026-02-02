@@ -51,6 +51,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float forceStrength = 50f;     // Force gets multiplied by velocity magnitude
         [SerializeField] private bool useBatchedDensityInjection = true; // Use batched compute pass for point injections
         [SerializeField] private ComputeShader batchedInjectionCompute;  // Optional: AddDensityBatched / AddParticlesBatched
+        [SerializeField] private bool useBatchedStamping = true; // Use batched compute pass for density stamps when textures match
 
         [Header("Ink Type Selection")]
         [SerializeField] private InkType currentInkType = InkType.Fire;
@@ -96,6 +97,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private ComputeShader stampCompute;
         [Tooltip("Compute-shader stamp for particle buffer. If unassigned, particle stamps fall back to CPU path.")]
         [SerializeField] private ComputeShader stampParticlesCompute;
+        [Tooltip("Optional compute to batch stamp payloads (density + particles) into a staging buffer to reduce dispatch count.")]
+        [SerializeField] private ComputeShader batchedStampCompute;
 
         [Header("Particle Simulation")]
         [SerializeField] private bool useParticleSimulation = true;
@@ -231,6 +234,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // Stamp particles compute kernel (from StampParticlesCompute.compute)
         private int kernelStampParticles;
         private bool stampParticlesComputeReady;
+
+        // Batched stamp kernels (optional)
+        private int kernelStampDensityBatched;
+        private bool batchedStampReady;
 
         // Channel splat compute kernel (from ParticleChannelSplat.compute)
         private int kernelChannelSplat;
@@ -408,6 +415,27 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     Debug.LogWarning($"[SimDriver] Ink interactions compute init failed ({e.Message}). Ink reactions disabled.");
                     inkInteractionsReady = false;
                 }
+            }
+
+            // Batched stamp compute (optional)
+            if (batchedStampCompute != null)
+            {
+                try
+                {
+                    kernelStampDensityBatched = batchedStampCompute.FindKernel("StampDensityBatched");
+                    kernelStampParticlesBatched = batchedStampCompute.FindKernel("StampParticlesBatched");
+                    batchedStampReady = true;
+                    Debug.Log("[SimDriver] Batched stamp compute ready.");
+                }
+                catch (System.Exception e)
+                {
+                    batchedStampReady = false;
+                    Debug.LogWarning($"[SimDriver] Batched stamp compute init failed ({e.Message}).");
+                }
+            }
+            else
+            {
+                batchedStampReady = false;
             }
         }
 
@@ -991,26 +1019,85 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 if (stampComputeReady)
                 {
-                    foreach (var s in pendingDensityStamps)
+                    bool canBatch = useBatchedStamping && batchedStampReady;
+                    if (canBatch)
                     {
-                        if (s.stamp == null) continue;
+                        // Batch only if all stamps share the same texture (current compute supports single _StampTex)
+                        Texture2D firstTex = pendingDensityStamps[0].stamp;
+                        for (int i = 0; i < pendingDensityStamps.Count; i++)
+                        {
+                            if (pendingDensityStamps[i].stamp != firstTex || firstTex == null)
+                            {
+                                canBatch = false;
+                                break;
+                            }
+                        }
+                        if (canBatch)
+                        {
+                            int count = pendingDensityStamps.Count;
+                            var payloadA = new Vector4[count];
+                            var payloadB = new Vector4[count];
+                            var payloadC = new Vector4[count];
+                            var payloadD = new Vector4[count];
+                            for (int i = 0; i < count; i++)
+                            {
+                                var s = pendingDensityStamps[i];
+                                float stampWidthUV = (float)s.stamp.width / resolution;
+                                float stampHeightUV = (float)s.stamp.height / resolution;
+                                payloadA[i] = new Vector4(s.uvPosition.x, s.uvPosition.y, stampWidthUV, stampHeightUV);
+                                payloadB[i] = Vector4.zero; // reserved
+                                payloadC[i] = new Vector4(0.01f, s.multiplier, s.useColorOverride ? 1f : 0f, 0f);
+                                payloadD[i] = (Vector4)s.overrideColor;
+                            }
 
-                        float stampWidthUV  = (float)s.stamp.width  / resolution;
-                        float stampHeightUV = (float)s.stamp.height / resolution;
+                            using (var bufA = new ComputeBuffer(count, sizeof(float) * 4))
+                            using (var bufB = new ComputeBuffer(count, sizeof(float) * 4))
+                            using (var bufC = new ComputeBuffer(count, sizeof(float) * 4))
+                            using (var bufD = new ComputeBuffer(count, sizeof(float) * 4))
+                            {
+                                bufA.SetData(payloadA);
+                                bufB.SetData(payloadB);
+                                bufC.SetData(payloadC);
+                                bufD.SetData(payloadD);
 
-                        stampCompute.SetTexture(kernelStampDensity, "_DensityRead",  density.Read);
-                        stampCompute.SetTexture(kernelStampDensity, "_DensityWrite", density.Write);
-                        stampCompute.SetTexture(kernelStampDensity, "_StampTex",     s.stamp);
-                        stampCompute.SetVector("_StampCenter", new Vector4(s.uvPosition.x, s.uvPosition.y, 0f, 0f));
-                        stampCompute.SetVector("_StampSize",   new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
-                        stampCompute.SetFloat("_AlphaThreshold", 0.01f);
-                        stampCompute.SetFloat("_DensityMul",     s.multiplier);
-                        stampCompute.SetFloat("_UseOverride",    s.useColorOverride ? 1f : 0f);
-                        stampCompute.SetVector("_OverrideColor", (Vector4)s.overrideColor);
-                        stampCompute.SetVector("_Resolution",    new Vector2(resolution, resolution));
+                                batchedStampCompute.SetInt("_StampCount", count);
+                                batchedStampCompute.SetVector("_Resolution", new Vector2(resolution, resolution));
+                                batchedStampCompute.SetBuffer(kernelStampDensityBatched, "_StampPayloadA", bufA);
+                                batchedStampCompute.SetBuffer(kernelStampDensityBatched, "_StampPayloadB", bufB);
+                                batchedStampCompute.SetBuffer(kernelStampDensityBatched, "_StampPayloadC", bufC);
+                                batchedStampCompute.SetBuffer(kernelStampDensityBatched, "_StampPayloadD", bufD);
+                                batchedStampCompute.SetTexture(kernelStampDensityBatched, "_StampTex", firstTex);
+                                batchedStampCompute.SetTexture(kernelStampDensityBatched, "_DensityRead", density.Read);
+                                batchedStampCompute.SetTexture(kernelStampDensityBatched, "_DensityWrite", density.Write);
+                                batchedStampCompute.Dispatch(kernelStampDensityBatched, threadGroups, threadGroups, 1);
+                                density.Swap();
+                            }
+                        }
+                    }
 
-                        stampCompute.Dispatch(kernelStampDensity, threadGroups, threadGroups, 1);
-                        density.Swap();
+                    if (!canBatch)
+                    {
+                        foreach (var s in pendingDensityStamps)
+                        {
+                            if (s.stamp == null) continue;
+
+                            float stampWidthUV  = (float)s.stamp.width  / resolution;
+                            float stampHeightUV = (float)s.stamp.height / resolution;
+
+                            stampCompute.SetTexture(kernelStampDensity, "_DensityRead",  density.Read);
+                            stampCompute.SetTexture(kernelStampDensity, "_DensityWrite", density.Write);
+                            stampCompute.SetTexture(kernelStampDensity, "_StampTex",     s.stamp);
+                            stampCompute.SetVector("_StampCenter", new Vector4(s.uvPosition.x, s.uvPosition.y, 0f, 0f));
+                            stampCompute.SetVector("_StampSize",   new Vector4(stampWidthUV, stampHeightUV, 0f, 0f));
+                            stampCompute.SetFloat("_AlphaThreshold", 0.01f);
+                            stampCompute.SetFloat("_DensityMul",     s.multiplier);
+                            stampCompute.SetFloat("_UseOverride",    s.useColorOverride ? 1f : 0f);
+                            stampCompute.SetVector("_OverrideColor", (Vector4)s.overrideColor);
+                            stampCompute.SetVector("_Resolution",    new Vector2(resolution, resolution));
+
+                            stampCompute.Dispatch(kernelStampDensity, threadGroups, threadGroups, 1);
+                            density.Swap();
+                        }
                     }
                 }
                 else
