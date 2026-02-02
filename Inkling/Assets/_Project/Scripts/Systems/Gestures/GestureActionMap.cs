@@ -20,6 +20,12 @@ namespace Magi.Inkling.Systems.Gestures
 
         public bool TryGetAction(string gestureName, out string actionId)
         {
+            if (string.IsNullOrEmpty(gestureName))
+            {
+                actionId = null;
+                return false;
+            }
+
             foreach (var a in actions)
             {
                 if (a.gestureName == gestureName)
