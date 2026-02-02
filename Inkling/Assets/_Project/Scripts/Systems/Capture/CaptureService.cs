@@ -3,6 +3,8 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using Magi.Inkling.Services;
+using Magi.Inkling.Services.Core;
+using Magi.Inkling.Services.Diagnostics;
 
 namespace Magi.Inkling.Systems.Capture
 {
@@ -17,6 +19,8 @@ namespace Magi.Inkling.Systems.Capture
         [SerializeField] private CaptureConfig config;
 
         private ISimulationReader reader;
+        private ReadbackUtility.ReadbackMetadata lastMeta;
+        private Result lastCaptureResult = Result.Success();
 
         private void Awake()
         {
@@ -52,73 +56,35 @@ namespace Magi.Inkling.Systems.Capture
             string jsonPath = Path.Combine(dir, baseName + ".json");
 
             var result = CaptureRenderTexture(src, pngPath);
-            WriteMetadata(jsonPath, src, result);
+            WriteMetadataDetailed(jsonPath, src, result, lastMeta);
         }
 
-        public Magi.Inkling.Services.Core.Result CaptureRenderTexture(RenderTexture src, string outputPngPath)
+        public Result CaptureRenderTexture(RenderTexture src, string outputPngPath)
         {
-            if (src == null) return Magi.Inkling.Services.Core.Result.Fail("Source texture null");
-            Directory.CreateDirectory(Path.GetDirectoryName(outputPngPath)!);
+            if (src == null) return Result.Fail("Source texture null");
 
-            // Async path when possible
-            if (SystemInfo.supportsAsyncGPUReadback)
-            {
-                UnityEngine.Rendering.AsyncGPUReadback.Request(src, 0, TextureFormat.RGBA32, req =>
-                {
-                    if (req.hasError)
-                    {
-                        Debug.LogWarning("[CaptureService] AsyncGPUReadback failed, falling back.");
-                        Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("Capture async readback failed; using fallback.");
-                        var fallback = FallbackReadback(src, outputPngPath);
-                        // cannot return Result from async callback; log only
-                        return;
-                    }
-                    var data = req.GetData<byte>();
-                    var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false, true);
-                    tex.LoadRawTextureData(data);
-                    tex.Apply();
-                    File.WriteAllBytes(outputPngPath, tex.EncodeToPNG());
-                    Destroy(tex);
-                });
-                return Magi.Inkling.Services.Core.Result.Success();
-            }
-            else
-            {
-                return FallbackReadback(src, outputPngPath);
-            }
+            var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<LogSink>();
+            var result = ReadbackUtility.RequestTextureToPng(src, outputPngPath, sink, out lastMeta);
+            lastCaptureResult = result;
+            return result;
         }
 
-        private Magi.Inkling.Services.Core.Result FallbackReadback(RenderTexture src, string path)
+        // Legacy signature kept for tests; uses last capture meta/result.
+        private void WriteMetadata(string path, RenderTexture src)
         {
-            var prev = RenderTexture.active;
-            RenderTexture.active = src;
-            var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false, true);
-            try
-            {
-                tex.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
-                tex.Apply();
-                File.WriteAllBytes(path, tex.EncodeToPNG());
-            }
-            catch (System.Exception ex)
-            {
-                return Magi.Inkling.Services.Core.Result.Fail(ex);
-            }
-            finally
-            {
-                Destroy(tex);
-                RenderTexture.active = prev;
-            }
-            return Magi.Inkling.Services.Core.Result.Success();
+            WriteMetadataDetailed(path, src, lastCaptureResult, lastMeta);
         }
 
-        private void WriteMetadata(string path, RenderTexture src, Magi.Inkling.Services.Core.Result captureResult)
+        private void WriteMetadataDetailed(string path, RenderTexture src, Result captureResult, ReadbackUtility.ReadbackMetadata captureMeta)
         {
             var meta = new
             {
                 frame = Time.frameCount,
-                width = src.width,
-                height = src.height,
-                format = src.format.ToString(),
+                width = captureMeta.width != 0 ? captureMeta.width : src.width,
+                height = captureMeta.height != 0 ? captureMeta.height : src.height,
+                format = string.IsNullOrEmpty(captureMeta.format) ? src.graphicsFormat.ToString() : captureMeta.format,
+                asyncSupported = captureMeta.asyncSupported,
+                usedAsync = captureMeta.usedAsync,
                 colorSpace = QualitySettings.activeColorSpace.ToString(),
                 timestamp = System.DateTime.UtcNow.ToString("o"),
                 captureStatus = captureResult.IsSuccess ? "OK" : captureResult.Error,
