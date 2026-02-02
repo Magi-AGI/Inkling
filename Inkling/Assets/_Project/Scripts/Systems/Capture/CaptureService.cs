@@ -51,11 +51,11 @@ namespace Magi.Inkling.Systems.Capture
             string pngPath = Path.Combine(dir, baseName + ".png");
             string jsonPath = Path.Combine(dir, baseName + ".json");
 
-            CaptureRenderTexture(src, pngPath);
-            WriteMetadata(jsonPath, src);
+            var result = CaptureRenderTexture(src, pngPath);
+            WriteMetadata(jsonPath, src, result);
         }
 
-        public void CaptureRenderTexture(RenderTexture src, string outputPngPath)
+        public Magi.Inkling.Services.Core.Result CaptureRenderTexture(RenderTexture src, string outputPngPath)
         {
             if (src == null) return;
             Directory.CreateDirectory(Path.GetDirectoryName(outputPngPath)!);
@@ -68,7 +68,8 @@ namespace Magi.Inkling.Systems.Capture
                     if (req.hasError)
                     {
                         Debug.LogWarning("[CaptureService] AsyncGPUReadback failed, falling back.");
-                        FallbackReadback(src, outputPngPath);
+                        var fallback = FallbackReadback(src, outputPngPath);
+                        // cannot return Result from async callback; log only
                         return;
                     }
                     var data = req.GetData<byte>();
@@ -78,26 +79,38 @@ namespace Magi.Inkling.Systems.Capture
                     File.WriteAllBytes(outputPngPath, tex.EncodeToPNG());
                     Destroy(tex);
                 });
+                return Magi.Inkling.Services.Core.Result.Success();
             }
             else
             {
-                FallbackReadback(src, outputPngPath);
+                return FallbackReadback(src, outputPngPath);
             }
         }
 
-        private void FallbackReadback(RenderTexture src, string path)
+        private Magi.Inkling.Services.Core.Result FallbackReadback(RenderTexture src, string path)
         {
             var prev = RenderTexture.active;
             RenderTexture.active = src;
             var tex = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false, true);
-            tex.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
-            tex.Apply();
-            File.WriteAllBytes(path, tex.EncodeToPNG());
-            Destroy(tex);
-            RenderTexture.active = prev;
+            try
+            {
+                tex.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
+                tex.Apply();
+                File.WriteAllBytes(path, tex.EncodeToPNG());
+            }
+            catch (System.Exception ex)
+            {
+                return Magi.Inkling.Services.Core.Result.Fail(ex);
+            }
+            finally
+            {
+                Destroy(tex);
+                RenderTexture.active = prev;
+            }
+            return Magi.Inkling.Services.Core.Result.Success();
         }
 
-        private void WriteMetadata(string path, RenderTexture src)
+        private void WriteMetadata(string path, RenderTexture src, Magi.Inkling.Services.Core.Result captureResult)
         {
             var meta = new
             {
@@ -106,7 +119,8 @@ namespace Magi.Inkling.Systems.Capture
                 height = src.height,
                 format = src.format.ToString(),
                 colorSpace = QualitySettings.activeColorSpace.ToString(),
-                timestamp = System.DateTime.UtcNow.ToString("o")
+                timestamp = System.DateTime.UtcNow.ToString("o"),
+                captureStatus = captureResult.IsSuccess ? "OK" : captureResult.Error
             };
             var json = JsonUtility.ToJson(meta, true);
             File.WriteAllText(path, json);
