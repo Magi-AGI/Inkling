@@ -57,7 +57,7 @@ namespace Magi.Inkling.Systems.Capture
 
         public Magi.Inkling.Services.Core.Result CaptureRenderTexture(RenderTexture src, string outputPngPath)
         {
-            if (src == null) return;
+            if (src == null) return Magi.Inkling.Services.Core.Result.Fail("Source texture null");
             Directory.CreateDirectory(Path.GetDirectoryName(outputPngPath)!);
 
             // Async path when possible
@@ -68,6 +68,7 @@ namespace Magi.Inkling.Systems.Capture
                     if (req.hasError)
                     {
                         Debug.LogWarning("[CaptureService] AsyncGPUReadback failed, falling back.");
+                        Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("Capture async readback failed; using fallback.");
                         var fallback = FallbackReadback(src, outputPngPath);
                         // cannot return Result from async callback; log only
                         return;

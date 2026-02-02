@@ -81,6 +81,7 @@ namespace Magi.Inkling.Systems.Growth
             if (!init.IsSuccess)
             {
                 Debug.LogError($"[GrowthSystem] Init failed: {init}");
+                Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal($"Growth init failed: {init}");
                 enabled = false;
                 return;
             }

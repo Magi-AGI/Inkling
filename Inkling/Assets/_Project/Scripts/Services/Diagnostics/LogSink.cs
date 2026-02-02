@@ -19,5 +19,11 @@ namespace Magi.Inkling.Services.Diagnostics
         }
 
         public IEnumerable<string> GetEntries() => entries;
+
+        public static void AddGlobal(string message)
+        {
+            var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<LogSink>();
+            sink?.Add(message);
+        }
     }
 }

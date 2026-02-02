@@ -285,6 +285,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (!init.IsSuccess)
             {
                 Debug.LogError($"[SimDriver] Initialization failed: {init}");
+                Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal($"SimDriver init failed: {init}");
                 enabled = false;
                 return;
             }
