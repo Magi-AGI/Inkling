@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Magi.Inkling.Services;
+using Magi.Inkling.Services.Core;
+using Magi.Inkling.Services.Core;
 
 namespace Magi.Inkling.Systems.Gestures
 {
@@ -10,7 +12,7 @@ namespace Magi.Inkling.Systems.Gestures
     /// This is a simple single-pointer manager; multi-touch can be added later.
     /// </summary>
     [DefaultExecutionOrder(-41)]
-    public class GestureInputManager : MonoBehaviour
+    public class GestureInputManager : MonoBehaviour, IService
     {
         [Header("References")]
         [SerializeField] private MonoBehaviour simulationWriterSource; // ISimulationWriter
