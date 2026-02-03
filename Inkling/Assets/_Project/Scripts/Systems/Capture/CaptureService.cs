@@ -32,7 +32,7 @@ namespace Magi.Inkling.Systems.Capture
                 config = ScriptableObject.CreateInstance<CaptureConfig>();
             }
 
-            var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
+            var locator = ServiceLocator.Instance;
             if (locator != null)
             {
                 locator.RegisterService(this);
@@ -63,7 +63,7 @@ namespace Magi.Inkling.Systems.Capture
         {
             if (src == null) return Result.Fail("Source texture null");
 
-            var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<LogSink>();
+            var sink = ServiceLocator.Instance?.Resolve<LogSink>();
             var result = ReadbackUtility.RequestTextureToPng(src, outputPngPath, sink, out lastMeta);
             lastCaptureResult = result;
             return result;
@@ -96,7 +96,7 @@ namespace Magi.Inkling.Systems.Capture
 
         private string[] CollectLogs()
         {
-            var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<Magi.Inkling.Services.Diagnostics.LogSink>();
+            var sink = ServiceLocator.Instance?.Resolve<Magi.Inkling.Services.Diagnostics.LogSink>();
             if (sink == null) return System.Array.Empty<string>();
             var list = new System.Collections.Generic.List<string>(sink.GetEntries());
             return list.ToArray();

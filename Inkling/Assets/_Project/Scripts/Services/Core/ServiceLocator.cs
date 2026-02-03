@@ -41,15 +41,11 @@ namespace Magi.Inkling.Services.Core
             var type = service.GetType();
             // register concrete type
             registry[type] = service;
-            // register first interface that implements IService (excluding IService itself)
+            // register all interfaces for easier resolution (e.g., IPersonaService)
             foreach (var iface in type.GetInterfaces())
             {
                 if (iface == typeof(IService)) continue;
-                if (typeof(IService).IsAssignableFrom(iface))
-                {
-                    registry[iface] = service;
-                    break;
-                }
+                registry[iface] = service;
             }
         }
 

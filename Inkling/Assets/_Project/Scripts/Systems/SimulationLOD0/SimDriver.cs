@@ -337,7 +337,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             // Register with ServiceLocator if present
-            var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
+            var locator = ServiceLocator.Instance;
             if (locator != null)
             {
                 locator.RegisterService(this);
@@ -486,7 +486,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
         }
 
-        private Magi.Inkling.Services.Core.Result InitializeSimulation()
+        private Result InitializeSimulation()
         {
             if (fluidCompute == null)
             {

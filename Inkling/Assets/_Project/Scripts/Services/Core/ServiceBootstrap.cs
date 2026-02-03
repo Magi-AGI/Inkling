@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Magi.Inkling.Services.ITUMS;
+using Magi.InkTools.ITUMS;
 
 namespace Magi.Inkling.Services.Core
 {
@@ -12,6 +14,10 @@ namespace Magi.Inkling.Services.Core
     {
         [Tooltip("Explicit service references to register. If empty, will attempt to find common services in scene.")]
         [SerializeField] private List<Object> explicitServices = new();
+        [Tooltip("If enabled, ensure a PersonaService exists (for ITUMS telemetry) even if not placed in scene.")]
+        [SerializeField] private bool ensurePersonaService = true;
+        [Tooltip("Optional default PersonaConfig to assign if PersonaService is auto-created.")]
+        [SerializeField] private PersonaConfig defaultPersonaConfig;
 
         private void Awake()
         {
@@ -30,6 +36,21 @@ namespace Magi.Inkling.Services.Core
                 foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsInactive.Include, FindObjectsSortMode.None))
                 {
                     if (mb is IService) toRegister.Add(mb);
+                }
+
+                if (ensurePersonaService)
+                {
+                    var existingPersona = locator.Resolve<IPersonaService>();
+                    if (existingPersona == null)
+                    {
+                        var go = new GameObject("PersonaService");
+                        var svc = go.AddComponent<PersonaServiceBehaviour>();
+                        if (defaultPersonaConfig != null && svc.config == null)
+                        {
+                            svc.config = defaultPersonaConfig;
+                        }
+                        toRegister.Add(svc);
+                    }
                 }
             }
 

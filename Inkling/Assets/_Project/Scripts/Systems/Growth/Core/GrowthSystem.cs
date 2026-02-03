@@ -117,18 +117,18 @@ namespace Magi.Inkling.Systems.Growth
             }
 
             // Register as service
-            var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
+            var locator = ServiceLocator.Instance;
             if (locator != null)
             {
                 locator.RegisterService(this);
             }
         }
 
-        private Magi.Inkling.Services.Core.Result InitializeGrowth()
+        private Result InitializeGrowth()
         {
             if (growthCompute == null)
             {
-                return Magi.Inkling.Services.Core.Result.Fail("Growth compute shader not assigned.");
+                return Result.Fail("Growth compute shader not assigned.");
             }
 
             try
@@ -137,7 +137,7 @@ namespace Magi.Inkling.Systems.Growth
             }
             catch (System.Exception e)
             {
-                return Magi.Inkling.Services.Core.Result.Fail(e);
+                return Result.Fail(e);
             }
 
             if (config == null)
@@ -146,7 +146,7 @@ namespace Magi.Inkling.Systems.Growth
                 Debug.LogWarning("[GrowthSystem] No config assigned, using defaults.");
             }
 
-            return Magi.Inkling.Services.Core.Result.Success();
+            return Result.Success();
         }
 
         private void LateUpdate()

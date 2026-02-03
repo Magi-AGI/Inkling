@@ -1,6 +1,7 @@
 using UnityEngine;
 using Magi.Inkling.Services;
 using Magi.Inkling.Services.Core;
+using Magi.InkTools.ITUMS;
 
 namespace Magi.Inkling.Services.Diagnostics
 {
@@ -15,6 +16,8 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private Color textColor = Color.white;
         [SerializeField] private LogSink logSink;
         [SerializeField] private KeyCode toggleKey = KeyCode.F9;
+        [SerializeField] private IPersonaService personaService;
+        [SerializeField] private bool showPersona = true;
 
         private ISimulationReader sim;
         private float lastFrameMs;
@@ -25,6 +28,8 @@ namespace Magi.Inkling.Services.Diagnostics
             sim = ServiceLocator.Instance?.Resolve<ISimulationReader>();
             if (logSink == null)
                 logSink = ServiceLocator.Instance?.Resolve<LogSink>();
+            if (personaService == null)
+                personaService = ServiceLocator.Instance?.Resolve<IPersonaService>();
         }
 
         private void Update()
@@ -49,6 +54,10 @@ namespace Magi.Inkling.Services.Diagnostics
             GUILayout.BeginArea(new Rect(10, 10, 320, 200), GUI.skin.box);
             GUILayout.Label($"Frame ms: {lastFrameMs:F2}");
             GUILayout.Label($"Adv/Diff/Press/Proj/Vort: {timings.adv:F2}/{timings.diff:F2}/{timings.press:F2}/{timings.proj:F2}/{timings.vort:F2}");
+            if (showPersona && personaService != null)
+            {
+                GUILayout.Label($"Persona: {personaService.CurrentPersona} (quiet={personaService.QuietScore:F2}s, avgStroke={personaService.AggressiveScore:F3} u/s)");
+            }
             if (logSink != null)
             {
                 GUILayout.Label("Recent logs:");

@@ -38,7 +38,7 @@ namespace Magi.Inkling.Systems.Gestures
                 enabled = false;
             }
 
-            var locator = Magi.Inkling.Services.Core.ServiceLocator.Instance;
+            var locator = ServiceLocator.Instance;
             if (locator != null)
             {
                 locator.RegisterService(this);
