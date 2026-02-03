@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8f4c7d6cc14a4ea8be34b266ad747908, type: 3}
-  m_Name: Line
+  m_Name: GestureTemplate_Line
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Gestures.GestureTemplate
   templateName: Line
   points:

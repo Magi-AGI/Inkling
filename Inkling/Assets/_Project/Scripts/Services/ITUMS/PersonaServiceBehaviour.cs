@@ -31,6 +31,7 @@ namespace Magi.Inkling.Services.ITUMS
             var locator = ServiceLocator.Instance;
             locator?.RegisterService(this);
             OnPersonaChanged += HandlePersonaChanged;
+            Initialized = true;
         }
 
         private void OnDestroy()
@@ -41,6 +42,12 @@ namespace Magi.Inkling.Services.ITUMS
         private void HandlePersonaChanged(Persona previous, Persona current, float quietScore, float avgStroke)
         {
             LogSink.AddGlobal($"[PersonaService] Persona -> {current} (quiet={quietScore:F2}s, avgStroke={avgStroke:F3} u/s)");
+        }
+
+        public System.Threading.Tasks.Task<Result> InitializeAsync()
+        {
+            var r = Initialize(ServiceLocator.Instance);
+            return System.Threading.Tasks.Task.FromResult(r);
         }
     }
 }
