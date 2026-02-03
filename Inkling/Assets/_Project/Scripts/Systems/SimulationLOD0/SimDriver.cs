@@ -258,6 +258,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         // Batched stamp kernels (optional)
         private int kernelStampDensityBatched;
+        private int kernelStampParticlesBatched;
         private bool batchedStampReady;
         private int kernelClearMaskBatched;
         private bool batchedMaskReady;
@@ -493,7 +494,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 Debug.LogWarning("[SimDriver] No compute shader assigned. Running in test pattern mode. To enable fluid simulation, assign Fluids.compute from Packages/InkTools Simulation.");
                 AllocateRenderTextures();
-                return;
+                return Result.Success();
             }
 
             // Try to get kernel indices - handle gracefully if missing
@@ -579,6 +580,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             Debug.Log($"[SimDriver] Initialized {resolution}x{resolution} simulation");
+            return kernelsFound ? Result.Success() : Result.Fail("Missing required kernels");
         }
 
         private void AllocateRenderTextures()

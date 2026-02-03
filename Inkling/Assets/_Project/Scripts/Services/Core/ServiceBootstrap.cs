@@ -45,9 +45,9 @@ namespace Magi.Inkling.Services.Core
                     {
                         var go = new GameObject("PersonaService");
                         var svc = go.AddComponent<PersonaServiceBehaviour>();
-                        if (defaultPersonaConfig != null && svc.config == null)
+                        if (defaultPersonaConfig != null && svc.Config == null)
                         {
-                            svc.config = defaultPersonaConfig;
+                            svc.Config = defaultPersonaConfig;
                         }
                         toRegister.Add(svc);
                     }
