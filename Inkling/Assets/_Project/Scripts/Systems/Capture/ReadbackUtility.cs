@@ -45,15 +45,16 @@ namespace Magi.Inkling.Systems.Capture
 
             try
             {
+                // Meta indicates we attempted async; if an error happens we still return Success() from this call
+                // and rely on fallback result to signal errors.
                 AsyncGPUReadback.Request(src, 0, TextureFormat.RGBA32, req =>
                 {
                     if (req.hasError)
                     {
-                        meta.usedAsync = false;
-                        logSink?.AddGlobal("AsyncGPUReadback failed; using CPU fallback.");
+                        LogSink.AddGlobal("AsyncGPUReadback failed; using CPU fallback.");
                         var fb = FallbackReadback(src, outputPngPath);
-                        if (fb.IsFailure)
-                            logSink?.AddGlobal($"Capture fallback failed: {fb.Error}");
+                        if (!fb.IsSuccess)
+                            LogSink.AddGlobal($"Capture fallback failed: {fb.Error}");
                         return;
                     }
 

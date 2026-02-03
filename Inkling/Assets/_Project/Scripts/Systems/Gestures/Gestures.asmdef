@@ -2,7 +2,8 @@
     "name": "Magi.Inkling.Gestures",
     "rootNamespace": "Magi.Inkling.Systems.Gestures",
     "references": [
-        "Magi.Inkling"
+        "Magi.Inkling",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

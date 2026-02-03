@@ -11,7 +11,7 @@ namespace Magi.Inkling.Systems.Capture
     /// Capture service: reads a RenderTexture to PNG and writes metadata JSON.
     /// Uses AsyncGPUReadback when available, falls back to ReadPixels.
     /// </summary>
-    public class CaptureService : MonoBehaviour
+    public class CaptureService : MonoBehaviour, IService
     {
         [Header("References")]
         [SerializeField] private MonoBehaviour simulationReaderSource; // ISimulationReader provider

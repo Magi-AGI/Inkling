@@ -3,6 +3,7 @@
     "rootNamespace": "Magi.Inkling.Systems.Brush",
     "references": [
         "Magi.Inkling",
+        "Magi.InkTools",
         "Unity.InputSystem"
     ],
     "includePlatforms": [],
