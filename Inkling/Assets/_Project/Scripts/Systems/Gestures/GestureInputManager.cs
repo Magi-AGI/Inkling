@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using Magi.Inkling.Services;
 using Magi.Inkling.Services.Core;
+using Magi.Inkling.Services.ITUMS;
 
 namespace Magi.Inkling.Systems.Gestures
 {
@@ -74,7 +75,8 @@ namespace Magi.Inkling.Systems.Gestures
             var (template, score) = GestureRecognizer.Recognize(stroke, templates);
             if (template == null || score < minScore) return;
 
-            if (actionMap != null && actionMap.TryGetAction(template.templateName, out string actionId))
+            string actionId = null;
+            if (actionMap != null && actionMap.TryGetAction(template.templateName, out actionId))
             {
                 DispatchAction(actionId);
             }
