@@ -3,6 +3,7 @@ using UnityEngine.InputSystem;
 using Magi.Inkling.Services;
 using Magi.Inkling.Services.Core;
 using Magi.InkTools.ITUMS;
+using Magi.Inkling.Services.ITUMS;
 
 namespace Magi.Inkling.Systems.Brush
 {
@@ -28,6 +29,8 @@ namespace Magi.Inkling.Systems.Brush
         [SerializeField] private float aggressiveDensityScale = 1.5f;
         [SerializeField] private float quietForceScale = 0.75f;
         [SerializeField] private float aggressiveForceScale = 1.5f;
+        [Header("ITUMS Logger (optional)")]
+        [SerializeField] private ITUMSEventLogger itumsLogger;
 
         private ISimulationWriter writer;
         private Vector2 lastPrimaryUv;
@@ -57,6 +60,10 @@ namespace Magi.Inkling.Systems.Brush
             if (emitPersonaTelemetry)
             {
                 personaService = ServiceLocator.Instance?.Resolve<IPersonaService>();
+                if (itumsLogger == null)
+                {
+                    itumsLogger = ServiceLocator.Instance?.Resolve<ITUMSEventLogger>();
+                }
                 if (personaService != null)
                 {
                     personaService.OnPersonaChanged += HandlePersonaChanged;
@@ -85,6 +92,11 @@ namespace Magi.Inkling.Systems.Brush
             {
                 float speed = Vector2.Distance(uv, lastPrimaryUv) / Mathf.Max(Time.deltaTime, 0.0001f);
                 personaService.RecordStrokeSpeed(speed);
+            }
+            if (emitPersonaTelemetry && itumsLogger != null && hasLastPrimary)
+            {
+                float speed = Vector2.Distance(uv, lastPrimaryUv) / Mathf.Max(Time.deltaTime, 0.0001f);
+                itumsLogger.LogStrokeSample(lastPrimaryUv, uv, speed, mirror: false);
             }
 
             InjectStrokePair(uv);
@@ -174,6 +186,7 @@ namespace Magi.Inkling.Systems.Brush
                     personaForceScale = 1f;
                     break;
             }
+            itumsLogger?.LogAdaptiveResponse("brush_scaling", current, personaDensityScale, "BrushInputManager");
         }
 
         private void OnDestroy()

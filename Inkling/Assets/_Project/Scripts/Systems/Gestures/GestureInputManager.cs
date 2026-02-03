@@ -3,7 +3,6 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using Magi.Inkling.Services;
 using Magi.Inkling.Services.Core;
-using Magi.Inkling.Services.Core;
 
 namespace Magi.Inkling.Systems.Gestures
 {
@@ -41,10 +40,7 @@ namespace Magi.Inkling.Systems.Gestures
             }
 
             var locator = ServiceLocator.Instance;
-            if (locator != null)
-            {
-                locator.RegisterService(this);
-            }
+            locator?.RegisterService(this);
         }
 
         private void Update()
@@ -81,6 +77,12 @@ namespace Magi.Inkling.Systems.Gestures
             if (actionMap != null && actionMap.TryGetAction(template.templateName, out string actionId))
             {
                 DispatchAction(actionId);
+            }
+
+            // ITUMS event logging
+            if (ServiceLocator.Instance?.Resolve<ITUMSEventLogger>() is ITUMSEventLogger logger)
+            {
+                logger.LogGestureRecognized(template.templateName, score, actionId ?? "<none>");
             }
         }
 
