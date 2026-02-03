@@ -1,7 +1,6 @@
 using System.IO;
 using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal;
 using Magi.Inkling.Services;
 using Magi.Inkling.Services.Core;
 using Magi.Inkling.Services.Diagnostics;

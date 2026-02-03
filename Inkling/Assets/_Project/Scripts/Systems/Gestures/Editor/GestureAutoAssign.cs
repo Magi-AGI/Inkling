@@ -45,7 +45,7 @@ namespace Magi.Inkling.Systems.Gestures.Editor
                 ?.SetValue(manager, map);
 
             EditorUtility.SetDirty(manager);
-            Debug.Log($"Assigned {list.Count} gesture templates and action map {(map ? map.name : \"<none>\")}");
+            Debug.Log($"Assigned {list.Count} gesture templates and action map {(map ? map.name : "<none>")}");
         }
     }
 }

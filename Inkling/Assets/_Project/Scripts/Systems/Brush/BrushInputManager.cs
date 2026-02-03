@@ -124,7 +124,7 @@ namespace Magi.Inkling.Systems.Brush
 
             if (config.verboseLogging)
             {
-                Debug.Log($"[BrushInputManager] Inject {(mirror ? \"(mirror)\" : \"(primary)\")} uv={uv} color={color}");
+                Debug.Log($"[BrushInputManager] Inject {(mirror ? "(mirror)" : "(primary)")} uv={uv} color={color}");
             }
         }
 
