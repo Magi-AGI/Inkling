@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using Magi.Inkling.Services;
 using Magi.Inkling.Services.Core;
 using Magi.Inkling.Services.Diagnostics;
 using Magi.InkTools.ITUMS;
@@ -16,10 +17,16 @@ namespace Magi.Inkling.Services.ITUMS
     {
         [SerializeField] private ITUMSConfig config;
         [SerializeField] private MonoBehaviour personaServiceSource; // optional explicit reference
+        [Header("Context")]
+        [SerializeField] private string buildVersionOverride = string.Empty;
+        [SerializeField] private int simResolutionOverride = 0;
 
         private IPersonaService personaService;
+        private ISimulationReader simReader;
         private string sessionId;
         private string jsonlPath;
+        private string buildVersion;
+        private int simResolution;
 
         private void Awake()
         {
@@ -31,6 +38,10 @@ namespace Magi.Inkling.Services.ITUMS
 
             personaService = personaServiceSource as IPersonaService ??
                              ServiceLocator.Instance?.Resolve<IPersonaService>();
+            simReader = ServiceLocator.Instance?.Resolve<ISimulationReader>();
+
+            buildVersion = string.IsNullOrWhiteSpace(buildVersionOverride) ? Application.version : buildVersionOverride;
+            simResolution = simResolutionOverride > 0 ? simResolutionOverride : simReader?.Resolution ?? 0;
 
             if (config.enableEventLogging && config.writeJsonlFile)
             {
@@ -58,77 +69,75 @@ namespace Magi.Inkling.Services.ITUMS
         private void OnPersonaChanged(Persona prev, Persona current, float quietScore, float avgStroke)
         {
             if (!config.enableEventLogging) return;
-            var evt = new Dictionary<string, object>
-            {
-                ["type"] = "persona_transition",
-                ["sessionId"] = sessionId,
-                ["timestamp"] = DateTime.UtcNow.ToString("o"),
-                ["from"] = prev.ToString(),
-                ["to"] = current.ToString(),
-                ["quietSeconds"] = quietScore,
-                ["avgStrokeSpeed"] = avgStroke
-            };
+            var evt = NewEvent("persona_transition");
+            evt["from"] = prev.ToString();
+            evt["to"] = current.ToString();
+            evt["quietSeconds"] = quietScore;
+            evt["avgStrokeSpeed"] = avgStroke;
+            evt["evalWindowSeconds"] = (personaService as PersonaService)?.Config?.evaluationPeriodSeconds ?? 0f;
             Emit(evt);
         }
 
         public void LogStrokeSample(Vector2 uvStart, Vector2 uvEnd, float speedUvPerSec, bool mirror)
         {
             if (!config.enableEventLogging || !config.logStrokeSamples) return;
-            var evt = new Dictionary<string, object>
-            {
-                ["type"] = "stroke_sample",
-                ["sessionId"] = sessionId,
-                ["timestamp"] = DateTime.UtcNow.ToString("o"),
-                ["uvStart"] = uvStart,
-                ["uvEnd"] = uvEnd,
-                ["speedUvPerSec"] = speedUvPerSec,
-                ["mirror"] = mirror
-            };
+            var evt = NewEvent("stroke_sample");
+            evt["uvStart"] = uvStart;
+            evt["uvEnd"] = uvEnd;
+            evt["speedUvPerSec"] = speedUvPerSec;
+            evt["mirror"] = mirror;
+            evt["distance"] = (uvEnd - uvStart).magnitude;
             Emit(evt);
         }
 
         public void LogIdleTick(float deltaSeconds)
         {
             if (!config.enableEventLogging || !config.logIdleTicks) return;
-            var evt = new Dictionary<string, object>
-            {
-                ["type"] = "idle_tick",
-                ["sessionId"] = sessionId,
-                ["timestamp"] = DateTime.UtcNow.ToString("o"),
-                ["deltaSeconds"] = deltaSeconds
-            };
+            var evt = NewEvent("idle_tick");
+            evt["deltaSeconds"] = deltaSeconds;
             Emit(evt);
         }
 
         public void LogAdaptiveResponse(string responseType, Persona persona, float value, string source)
         {
             if (!config.enableEventLogging || !config.logAdaptiveResponses) return;
-            var evt = new Dictionary<string, object>
-            {
-                ["type"] = "adaptive_response",
-                ["sessionId"] = sessionId,
-                ["timestamp"] = DateTime.UtcNow.ToString("o"),
-                ["responseType"] = responseType,
-                ["persona"] = persona.ToString(),
-                ["value"] = value,
-                ["source"] = source
-            };
+            var evt = NewEvent("adaptive_response");
+            evt["responseType"] = responseType;
+            evt["persona"] = persona.ToString();
+            evt["value"] = value;
+            evt["source"] = source;
             Emit(evt);
         }
 
         public void LogGestureRecognized(string templateId, float score, string action)
         {
             if (!config.enableEventLogging || !config.logGestureRecognized) return;
+            var evt = NewEvent("gesture_recognized");
+            evt["templateId"] = templateId;
+            evt["score"] = score;
+            evt["action"] = action;
+            Emit(evt);
+        }
+
+        private Dictionary<string, object> NewEvent(string type)
+        {
+            if (simResolution == 0 && simReader != null)
+                simResolution = simReader.Resolution;
+
             var evt = new Dictionary<string, object>
             {
-                ["type"] = "gesture_recognized",
+                ["type"] = type,
                 ["sessionId"] = sessionId,
                 ["timestamp"] = DateTime.UtcNow.ToString("o"),
-                ["templateId"] = templateId,
-                ["score"] = score,
-                ["action"] = action
+                ["frame"] = Time.frameCount,
+                ["buildVersion"] = buildVersion,
+                ["simResolution"] = simResolution
             };
-            Emit(evt);
+
+            if (personaService != null)
+                evt["persona"] = personaService.CurrentPersona.ToString();
+
+            return evt;
         }
 
         private void Emit(Dictionary<string, object> evt)
