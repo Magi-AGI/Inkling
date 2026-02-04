@@ -54,43 +54,40 @@ namespace Magi.Inkling.Systems.Gestures
             for (int i = 1; i < pts.Count; i++)
                 pathLength += Vector2.Distance(pts[i - 1], pts[i]);
             float interval = pathLength / (n - 1);
-            float D = 0f;
 
-            var newPts = new List<Vector2> { pts[0] };
+            var resampled = new List<Vector2>(n) { pts[0] };
+            float D = 0f;
+            Vector2 prev = pts[0];
 
             for (int i = 1; i < pts.Count; i++)
             {
-                float d = Vector2.Distance(pts[i - 1], pts[i]);
-                if ((D + d) >= interval)
+                Vector2 curr = pts[i];
+                float segment = Vector2.Distance(prev, curr);
+                if (segment <= Mathf.Epsilon)
                 {
-                    float t = (interval - D) / d;
-                    Vector2 np = Vector2.Lerp(pts[i - 1], pts[i], t);
-                    newPts.Add(np);
-                    pts = InsertAt(pts, i, np);
+                    prev = curr;
+                    continue;
+                }
+
+                while (D + segment >= interval && resampled.Count < n)
+                {
+                    float t = (interval - D) / segment;
+                    Vector2 np = Vector2.Lerp(prev, curr, t);
+                    resampled.Add(np);
+                    prev = np;
+                    segment = Vector2.Distance(prev, curr);
                     D = 0f;
                 }
-                else
-                {
-                    D += d;
-                }
+
+                D += segment;
+                prev = curr;
             }
 
             // Pad last point if we fell short
-            while (newPts.Count < n)
-                newPts.Add(pts[pts.Count - 1]);
+            while (resampled.Count < n)
+                resampled.Add(pts[pts.Count - 1]);
 
-            return newPts;
-        }
-
-        private static IReadOnlyList<Vector2> InsertAt(IReadOnlyList<Vector2> pts, int index, Vector2 value)
-        {
-            var list = new List<Vector2>(pts.Count + 1);
-            for (int i = 0; i < pts.Count; i++)
-            {
-                if (i == index) list.Add(value);
-                list.Add(pts[i]);
-            }
-            return list;
+            return resampled;
         }
 
         private static List<Vector2> ScaleToSquare(IReadOnlyList<Vector2> pts, float size)

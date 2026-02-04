@@ -1,12 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Magi.Inkling.Services.Core;
 
 namespace Magi.Inkling.Services.Diagnostics
 {
     /// <summary>
     /// Simple ring-buffer log sink to collect recent messages for diagnostics and capture metadata.
     /// </summary>
-    public class LogSink : MonoBehaviour
+    public class LogSink : MonoBehaviour, ILogSink, IService
     {
         [SerializeField] private int capacity = 32;
 
@@ -22,7 +23,7 @@ namespace Magi.Inkling.Services.Diagnostics
 
         public static void AddGlobal(string message)
         {
-            var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<LogSink>();
+            var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<ILogSink>();
             sink?.Add(message);
         }
 
