@@ -4,6 +4,7 @@ using Magi.Inkling.Services;
 using Magi.Inkling.Services.Core;
 using Magi.InkTools.ITUMS;
 using Magi.Inkling.Services.ITUMS;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.Brush
 {
@@ -31,6 +32,10 @@ namespace Magi.Inkling.Systems.Brush
         [SerializeField] private float aggressiveForceScale = 1.5f;
         [Header("ITUMS Logger (optional)")]
         [SerializeField] private ITUMSEventLogger itumsLogger;
+        [Header("Force Debug (optional)")]
+        [SerializeField] private bool drawForcesToDebugRT = false;
+        [SerializeField] private ForceDrawer forceDrawer;
+        [SerializeField] private RenderTexture forceDebugTarget;
 
         private ISimulationWriter writer;
         private Vector2 lastPrimaryUv;
@@ -129,6 +134,11 @@ namespace Magi.Inkling.Systems.Brush
                 if (mirror && config.mirrorInvertForceX)
                     delta.x = -delta.x;
                 writer.InjectForce(uv, delta);
+
+                if (drawForcesToDebugRT && forceDrawer != null && forceDebugTarget != null)
+                {
+                    forceDrawer.DrawPoint(forceDebugTarget, uv, delta, radius: config.brushRadius, strength: 1f, falloff: 2f);
+                }
             }
 
             hasLast = true;

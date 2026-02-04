@@ -2,6 +2,7 @@ using UnityEngine;
 using Magi.Inkling.Services;
 using Magi.Inkling.Services.Core;
 using Magi.InkTools.ITUMS;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Services.Diagnostics
 {
@@ -18,6 +19,13 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private KeyCode toggleKey = KeyCode.F9;
         [SerializeField] private IPersonaService personaService;
         [SerializeField] private bool showPersona = true;
+        [Header("Debug Visuals")]
+        [SerializeField] private TracerSystem tracerSystem;
+        [SerializeField] private VelocityArrowsRenderer arrowsRenderer;
+        [SerializeField] private VelocityStatsSystem velocityStats;
+        [SerializeField] private bool showTracerToggle = true;
+        [SerializeField] private bool showArrowsToggle = true;
+        [SerializeField] private bool showStats = true;
 
         private ISimulationReader sim;
         private float lastFrameMs;
@@ -30,6 +38,12 @@ namespace Magi.Inkling.Services.Diagnostics
                 logSink = ServiceLocator.Instance?.Resolve<LogSink>();
             if (personaService == null)
                 personaService = ServiceLocator.Instance?.Resolve<IPersonaService>();
+            if (tracerSystem == null)
+                tracerSystem = FindAnyObjectByType<TracerSystem>();
+            if (arrowsRenderer == null)
+                arrowsRenderer = FindAnyObjectByType<VelocityArrowsRenderer>();
+            if (velocityStats == null)
+                velocityStats = FindAnyObjectByType<VelocityStatsSystem>();
         }
 
         private void Update()
@@ -57,6 +71,20 @@ namespace Magi.Inkling.Services.Diagnostics
             if (showPersona && personaService != null)
             {
                 GUILayout.Label($"Persona: {personaService.CurrentPersona} (quiet={personaService.QuietScore:F2}s, avgStroke={personaService.AggressiveScore:F3} u/s)");
+            }
+            if (showStats && velocityStats != null)
+            {
+                GUILayout.Label($"Avg Vel: {velocityStats.AverageVelocity} | Avg Speed: {velocityStats.AverageSpeed:F3}");
+            }
+            if (showTracerToggle && tracerSystem != null)
+            {
+                bool newRender = GUILayout.Toggle(tracerSystem.enabled && tracerSystem.isActiveAndEnabled, "Render Tracers");
+                tracerSystem.enabled = newRender;
+            }
+            if (showArrowsToggle && arrowsRenderer != null)
+            {
+                bool newRender = GUILayout.Toggle(arrowsRenderer.enabled, "Render Velocity Arrows");
+                arrowsRenderer.enabled = newRender;
             }
             if (logSink != null)
             {
