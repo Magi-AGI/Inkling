@@ -90,10 +90,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Performance")]
         [SerializeField] private bool measurePerformance = true;
-        [Header("Air Debug")]
-        [SerializeField] private bool debugZeroPressure = false;
-        [SerializeField] private bool debugZeroVelocity = false;
-        [SerializeField] private bool debugSkipAir = false;
 
         [Header("Display Resolution")]
         [Tooltip("Resolution for gradient and display render targets. 0 = auto (match screen height). " +
