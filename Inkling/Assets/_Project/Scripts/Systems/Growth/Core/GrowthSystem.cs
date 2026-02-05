@@ -1,4 +1,5 @@
 using UnityEngine;
+using Magi.UnityTools.Core;
 using Magi.UnityTools.Patterns;
 using Magi.InkTools.Simulation;
 

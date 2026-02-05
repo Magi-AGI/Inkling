@@ -2,7 +2,9 @@
     "name": "Magi.Inkling.Capture",
     "rootNamespace": "Magi.Inkling.Systems.Capture",
     "references": [
-        "Magi.Inkling"
+        "Magi.Inkling",
+        "Magi.InkTools.Simulation",
+        "Magi.UnityTools"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

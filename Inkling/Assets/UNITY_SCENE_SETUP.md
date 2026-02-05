@@ -167,8 +167,9 @@ For human collaborators wiring the scene by hand:
     - Assign a `Renderer` to `displayRenderer` if you want a separate high-res output.
 
 - **Dev Overlay (when you hook it up)**
-  - Add a GameObject with `Magi.Inkling.Dev.DevOverlay`.
-  - Add a small script (or extend `SimDriver`) to push `simMs`, `inferMs`, `composeMs` into the overlay each frame.
+  - Add a GameObject with `Magi.UnityTools.Performance.UniversalDevOverlay` (from MagiUnityTools).
+  - Push metrics from any system via the static helper: `Magi.UnityTools.Performance.DevOverlay.SetMetric("sim", ms)`.
+  - The overlay auto-creates itself as a singleton on first use, or you can place one in the scene manually.
 
 - **ML Inference (once Sentis is added)**
   - Install Unity Sentis via Package Manager.

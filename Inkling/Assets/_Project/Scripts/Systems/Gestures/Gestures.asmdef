@@ -3,6 +3,8 @@
     "rootNamespace": "Magi.Inkling.Systems.Gestures",
     "references": [
         "Magi.Inkling",
+        "Magi.InkTools.Simulation",
+        "Magi.UnityTools",
         "Unity.InputSystem"
     ],
     "includePlatforms": [],
