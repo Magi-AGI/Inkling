@@ -57,7 +57,7 @@ namespace Magi.Inkling.Tests.PlayMode
             Directory.Delete(dir, true);
         }
 
-        private class StubReader : MonoBehaviour, Magi.Inkling.Services.ISimulationReader
+        private class StubReader : MonoBehaviour, Magi.InkTools.Simulation.ISimulationReader
         {
             public RenderTexture Texture;
             public float Timestep => 0f;
