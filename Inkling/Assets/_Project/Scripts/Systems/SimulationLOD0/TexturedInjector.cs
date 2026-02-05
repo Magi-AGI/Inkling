@@ -60,6 +60,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             // Cache color space at runtime (cannot query in field initializer)
             useLinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
+            _ = alphaThreshold; // silence unused-field warning (inspector-tunable)
 
             if (simDriverComponent == null)
             {

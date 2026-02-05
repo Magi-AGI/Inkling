@@ -31,9 +31,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float velocityDissipation = 0.99f;  // Keep velocity longer
         [SerializeField] private float timestep = 0.016f;
         [Header("Air Debug")]
-        [SerializeField] private bool debugZeroPressure = false;
-        [SerializeField] private bool debugZeroVelocity = false;
-        [SerializeField] private bool debugSkipAir = false;
+        [SerializeField] public bool debugZeroPressure = false;
+        [SerializeField] public bool debugZeroVelocity = false;
+        [SerializeField] public bool debugSkipAir = false;
 
         // Public properties for metadata export
         public float Viscosity => viscosity;

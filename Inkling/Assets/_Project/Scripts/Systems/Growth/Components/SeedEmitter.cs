@@ -37,6 +37,7 @@ namespace Magi.Inkling.Systems.Growth
 
         private void Start()
         {
+            _ = hasEmittedOnce; // silence unused-field warning; reserved for future state checks
             growthSystem = FindFirstObjectByType<GrowthSystem>();
 
             if (growthSystem == null)

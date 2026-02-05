@@ -57,6 +57,7 @@ namespace Magi.Inkling.Systems.Creatures
 
         private void Awake()
         {
+            _ = logBehaviorChanges; // silence unused-field warning until logging is wired
             injector = GetComponent<TexturedInjector>();
             animator = GetComponent<AnimatedCreature>();
 
