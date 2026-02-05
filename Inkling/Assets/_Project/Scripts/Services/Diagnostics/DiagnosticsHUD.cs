@@ -23,8 +23,11 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private TracerSystem tracerSystem;
         [SerializeField] private VelocityArrowsRenderer arrowsRenderer;
         [SerializeField] private VelocityStatsSystem velocityStats;
+        [SerializeField] private VelocityMaskRenderer velocityMask;
         [SerializeField] private bool showTracerToggle = true;
         [SerializeField] private bool showArrowsToggle = true;
+        [SerializeField] private bool showMaskToggle = true;
+        [SerializeField] private bool showMaskPreview = false;
         [SerializeField] private bool showStats = true;
 
         private ISimulationReader sim;
@@ -44,6 +47,8 @@ namespace Magi.Inkling.Services.Diagnostics
                 arrowsRenderer = FindAnyObjectByType<VelocityArrowsRenderer>();
             if (velocityStats == null)
                 velocityStats = FindAnyObjectByType<VelocityStatsSystem>();
+            if (velocityMask == null)
+                velocityMask = FindAnyObjectByType<VelocityMaskRenderer>();
         }
 
         private void Update()
@@ -85,6 +90,20 @@ namespace Magi.Inkling.Services.Diagnostics
             {
                 bool newRender = GUILayout.Toggle(arrowsRenderer.enabled, "Render Velocity Arrows");
                 arrowsRenderer.enabled = newRender;
+            }
+            if (showMaskToggle && velocityMask != null)
+            {
+                bool newRender = GUILayout.Toggle(velocityMask.enabled, "Render Velocity Mask");
+                velocityMask.enabled = newRender;
+                if (showMaskPreview && velocityMask.enabled && velocityMask.enabled)
+                {
+                    var rt = velocityMask ? velocityMask.GetType().GetField("maskOutput", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.GetValue(velocityMask) as RenderTexture : null;
+                    if (rt != null)
+                    {
+                        GUILayout.Label("Mask Preview:");
+                        GUILayout.Box(rt, GUILayout.Width(128), GUILayout.Height(128));
+                    }
+                }
             }
             if (logSink != null)
             {
