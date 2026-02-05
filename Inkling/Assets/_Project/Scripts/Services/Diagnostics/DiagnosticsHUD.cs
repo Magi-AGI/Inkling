@@ -32,6 +32,8 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private bool showSplitToggle = false;
         [SerializeField] private PressureOverlayRenderer pressureRenderer;
         [SerializeField] private bool showPressureToggle = false;
+        [SerializeField] private AmbientHeatSystem ambientHeat;
+        [SerializeField] private bool showAmbientHeatToggle = false;
         [SerializeField] private bool showStats = true;
 
         private ISimulationReader sim;
@@ -57,6 +59,8 @@ namespace Magi.Inkling.Services.Diagnostics
                 splitRenderer = FindAnyObjectByType<SplitVelocityRenderer>();
             if (pressureRenderer == null)
                 pressureRenderer = FindAnyObjectByType<PressureOverlayRenderer>();
+            if (ambientHeat == null)
+                ambientHeat = FindAnyObjectByType<AmbientHeatSystem>();
         }
 
         private void Update()
@@ -127,6 +131,11 @@ namespace Magi.Inkling.Services.Diagnostics
                 {
                     GUILayout.Box(pressureRenderer.Output, GUILayout.Width(128), GUILayout.Height(128));
                 }
+            }
+            if (showAmbientHeatToggle && ambientHeat != null)
+            {
+                bool newRun = GUILayout.Toggle(ambientHeat.enabled && ambientHeat.isActiveAndEnabled, "Run Ambient Heat");
+                ambientHeat.enabled = newRun;
             }
             if (logSink != null)
             {
