@@ -30,6 +30,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float dissipation = 0.999f;  // Normal fade for regular inks (creatures use separate buffer)
         [SerializeField] private float velocityDissipation = 0.99f;  // Keep velocity longer
         [SerializeField] private float timestep = 0.016f;
+        [Header("Air Debug")]
+        [SerializeField] private bool debugZeroPressure = false;
+        [SerializeField] private bool debugZeroVelocity = false;
+        [SerializeField] private bool debugSkipAir = false;
 
         // Public properties for metadata export
         public float Viscosity => viscosity;
@@ -86,6 +90,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Performance")]
         [SerializeField] private bool measurePerformance = true;
+        [Header("Air Debug")]
+        [SerializeField] private bool debugZeroPressure = false;
+        [SerializeField] private bool debugZeroVelocity = false;
+        [SerializeField] private bool debugSkipAir = false;
 
         [Header("Display Resolution")]
         [Tooltip("Resolution for gradient and display render targets. 0 = auto (match screen height). " +
@@ -740,6 +748,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fluidCompute.SetFloat("_VorticityStrength", vorticity);
             fluidCompute.SetFloat("_Dissipation", dissipation);
             fluidCompute.SetVector("_SimulationSize", new Vector2(resolution, resolution));
+            fluidCompute.SetFloat("_DebugZeroPressure", debugZeroPressure ? 1f : 0f);
+            fluidCompute.SetFloat("_DebugZeroVelocity", debugZeroVelocity ? 1f : 0f);
+            fluidCompute.SetFloat("_DebugSkipAir", debugSkipAir ? 1f : 0f);
 
             // Jacobi iteration parameters for diffusion
             float dx = 1.0f / resolution;
