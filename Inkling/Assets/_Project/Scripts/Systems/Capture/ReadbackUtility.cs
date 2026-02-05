@@ -24,7 +24,7 @@ namespace Magi.Inkling.Systems.Capture
             public bool usedAsync;
         }
 
-        public static Result RequestTextureToPng(RenderTexture src, string outputPngPath, LogSink logSink, out ReadbackMetadata meta)
+        public static Result RequestTextureToPng(RenderTexture src, string outputPngPath, ILogSink logSink, out ReadbackMetadata meta)
         {
             meta = new ReadbackMetadata
             {
@@ -51,10 +51,10 @@ namespace Magi.Inkling.Systems.Capture
                 {
                     if (req.hasError)
                     {
-                        LogSink.AddGlobal("AsyncGPUReadback failed; using CPU fallback.");
+                        logSink?.Add("AsyncGPUReadback failed; using CPU fallback.");
                         var fb = FallbackReadback(src, outputPngPath);
                         if (!fb.IsSuccess)
-                            LogSink.AddGlobal($"Capture fallback failed: {fb.Error}");
+                            logSink?.Add($"Capture fallback failed: {fb.Error}");
                         return;
                     }
 
