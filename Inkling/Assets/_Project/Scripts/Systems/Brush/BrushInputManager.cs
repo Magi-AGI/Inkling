@@ -36,6 +36,10 @@ namespace Magi.Inkling.Systems.Brush
         [SerializeField] private bool drawForcesToDebugRT = false;
         [SerializeField] private ForceDrawer forceDrawer;
         [SerializeField] private RenderTexture forceDebugTarget;
+        [Header("Force Drawer Routing")]
+        [SerializeField] private bool useForceDrawerForGameplay = false;
+        [SerializeField] private float forceDrawerStrength = 1f;
+        [SerializeField] private float forceDrawerFalloff = 2f;
 
         private ISimulationWriter writer;
         private Vector2 lastPrimaryUv;
@@ -135,9 +139,15 @@ namespace Magi.Inkling.Systems.Brush
                     delta.x = -delta.x;
                 writer.InjectForce(uv, delta);
 
-                if (drawForcesToDebugRT && forceDrawer != null && forceDebugTarget != null)
+                if ((drawForcesToDebugRT || useForceDrawerForGameplay) && forceDrawer != null)
                 {
-                    forceDrawer.DrawPoint(forceDebugTarget, uv, delta, radius: config.brushRadius, strength: 1f, falloff: 2f);
+                    var target = forceDebugTarget;
+                    if (useForceDrawerForGameplay && forceDebugTarget != null)
+                        target = forceDebugTarget;
+                    if (target != null)
+                    {
+                        forceDrawer.DrawPoint(target, uv, delta, radius: config.brushRadius, strength: forceDrawerStrength, falloff: forceDrawerFalloff);
+                    }
                 }
             }
 
