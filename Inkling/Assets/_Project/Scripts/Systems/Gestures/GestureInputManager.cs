@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Magi.Inkling.Services;
-using Magi.Inkling.Services.Core;
+using Magi.Inkling.Services.Core; 
 using Magi.Inkling.Services.ITUMS;
 
 namespace Magi.Inkling.Systems.Gestures

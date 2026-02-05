@@ -146,7 +146,7 @@ namespace Magi.Inkling.Systems.Brush
                         target = forceDebugTarget;
                     if (target != null)
                     {
-                        forceDrawer.DrawPoint(target, uv, delta, radius: config.brushRadius, strength: forceDrawerStrength, falloff: forceDrawerFalloff);
+                        forceDrawer.DrawPoint(target, uv, delta, radius: config.brushRadiusUv, strength: forceDrawerStrength, falloff: forceDrawerFalloff);
                     }
                 }
             }
