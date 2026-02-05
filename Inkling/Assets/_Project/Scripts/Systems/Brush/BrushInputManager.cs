@@ -139,15 +139,9 @@ namespace Magi.Inkling.Systems.Brush
                     delta.x = -delta.x;
                 writer.InjectForce(uv, delta);
 
-                if ((drawForcesToDebugRT || useForceDrawerForGameplay) && forceDrawer != null)
+                if (forceDrawer != null && forceDebugTarget != null && (drawForcesToDebugRT || useForceDrawerForGameplay))
                 {
-                    var target = forceDebugTarget;
-                    if (useForceDrawerForGameplay && forceDebugTarget != null)
-                        target = forceDebugTarget;
-                    if (target != null)
-                    {
-                        forceDrawer.DrawPoint(target, uv, delta, radius: config.brushRadiusUv, strength: forceDrawerStrength, falloff: forceDrawerFalloff);
-                    }
+                    forceDrawer.DrawPoint(forceDebugTarget, uv, delta, radius: config.brushRadiusUv, strength: forceDrawerStrength, falloff: forceDrawerFalloff);
                 }
             }
 
