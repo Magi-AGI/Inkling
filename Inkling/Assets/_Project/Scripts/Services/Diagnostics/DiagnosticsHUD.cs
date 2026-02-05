@@ -143,12 +143,12 @@ namespace Magi.Inkling.Services.Diagnostics
                 var simDriver = FindAnyObjectByType<Magi.Inkling.Systems.SimulationLOD0.SimDriver>();
                 if (simDriver != null)
                 {
-                    var zeroP = GUILayout.Toggle(simDriver.debugZeroPressure, "Air: Zero Pressure");
-                    var zeroV = GUILayout.Toggle(simDriver.debugZeroVelocity, "Air: Zero Velocity");
-                    var skip = GUILayout.Toggle(simDriver.debugSkipAir, "Air: Skip Air Update");
-                    simDriver.GetType().GetField("debugZeroPressure", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(simDriver, zeroP);
-                    simDriver.GetType().GetField("debugZeroVelocity", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(simDriver, zeroV);
-                    simDriver.GetType().GetField("debugSkipAir", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(simDriver, skip);
+                    var zeroP = GUILayout.Toggle(simDriver.DebugZeroPressure, "Air: Zero Pressure");
+                    var zeroV = GUILayout.Toggle(simDriver.DebugZeroVelocity, "Air: Zero Velocity");
+                    var skip = GUILayout.Toggle(simDriver.DebugSkipAir, "Air: Skip Air Update");
+                    simDriver.DebugZeroPressure = zeroP;
+                    simDriver.DebugZeroVelocity = zeroV;
+                    simDriver.DebugSkipAir = skip;
                 }
             }
             if (logSink != null)

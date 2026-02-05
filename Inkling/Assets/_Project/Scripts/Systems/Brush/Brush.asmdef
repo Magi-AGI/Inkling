@@ -4,6 +4,7 @@
     "references": [
         "Magi.Inkling",
         "Magi.InkTools",
+        "Magi.InkTools.Simulation",
         "Unity.InputSystem"
     ],
     "includePlatforms": [],
