@@ -34,6 +34,7 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private bool showPressureToggle = false;
         [SerializeField] private AmbientHeatSystem ambientHeat;
         [SerializeField] private bool showAmbientHeatToggle = false;
+        [SerializeField] private bool showAirDebugToggles = false;
         [SerializeField] private bool showStats = true;
 
         private ISimulationReader sim;
@@ -136,6 +137,19 @@ namespace Magi.Inkling.Services.Diagnostics
             {
                 bool newRun = GUILayout.Toggle(ambientHeat.enabled && ambientHeat.isActiveAndEnabled, "Run Ambient Heat");
                 ambientHeat.enabled = newRun;
+            }
+            if (showAirDebugToggles)
+            {
+                var simDriver = FindAnyObjectByType<Magi.Inkling.Systems.SimulationLOD0.SimDriver>();
+                if (simDriver != null)
+                {
+                    var zeroP = GUILayout.Toggle(simDriver.debugZeroPressure, "Air: Zero Pressure");
+                    var zeroV = GUILayout.Toggle(simDriver.debugZeroVelocity, "Air: Zero Velocity");
+                    var skip = GUILayout.Toggle(simDriver.debugSkipAir, "Air: Skip Air Update");
+                    simDriver.GetType().GetField("debugZeroPressure", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(simDriver, zeroP);
+                    simDriver.GetType().GetField("debugZeroVelocity", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(simDriver, zeroV);
+                    simDriver.GetType().GetField("debugSkipAir", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(simDriver, skip);
+                }
             }
             if (logSink != null)
             {
