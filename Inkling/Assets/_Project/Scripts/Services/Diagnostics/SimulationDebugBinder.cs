@@ -16,6 +16,7 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private VelocityMaskRenderer maskRenderer;
         [SerializeField] private SplitVelocityRenderer splitRenderer;
         [SerializeField] private VelocityStatsSystem statsSystem;
+        [SerializeField] private PressureOverlayRenderer pressureRenderer;
 
         private ISimulationReader sim;
 
@@ -27,6 +28,7 @@ namespace Magi.Inkling.Services.Diagnostics
             if (maskRenderer == null) maskRenderer = FindAnyObjectByType<VelocityMaskRenderer>();
             if (splitRenderer == null) splitRenderer = FindAnyObjectByType<SplitVelocityRenderer>();
             if (statsSystem == null) statsSystem = FindAnyObjectByType<VelocityStatsSystem>();
+            if (pressureRenderer == null) pressureRenderer = FindAnyObjectByType<PressureOverlayRenderer>();
         }
 
         private void LateUpdate()
@@ -39,6 +41,7 @@ namespace Magi.Inkling.Services.Diagnostics
             arrowsRenderer?.SetVelocityTexture(velRT);
             maskRenderer?.SetVelocityTexture(velRT);
             splitRenderer?.SetVelocityTexture(velRT);
+            pressureRenderer?.SetVelocityTexture(velRT);
             if (statsSystem != null)
             {
                 statsSystem.enabled = true; // ensure Update runs

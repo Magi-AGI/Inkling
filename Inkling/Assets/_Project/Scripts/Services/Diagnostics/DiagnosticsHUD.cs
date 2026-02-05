@@ -30,6 +30,8 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private bool showMaskPreview = false;
         [SerializeField] private SplitVelocityRenderer splitRenderer;
         [SerializeField] private bool showSplitToggle = false;
+        [SerializeField] private PressureOverlayRenderer pressureRenderer;
+        [SerializeField] private bool showPressureToggle = false;
         [SerializeField] private bool showStats = true;
 
         private ISimulationReader sim;
@@ -53,6 +55,8 @@ namespace Magi.Inkling.Services.Diagnostics
                 velocityMask = FindAnyObjectByType<VelocityMaskRenderer>();
             if (splitRenderer == null)
                 splitRenderer = FindAnyObjectByType<SplitVelocityRenderer>();
+            if (pressureRenderer == null)
+                pressureRenderer = FindAnyObjectByType<PressureOverlayRenderer>();
         }
 
         private void Update()
@@ -113,6 +117,15 @@ namespace Magi.Inkling.Services.Diagnostics
                 if (showMaskPreview && splitRenderer.enabled && splitRenderer.Output != null)
                 {
                     GUILayout.Box(splitRenderer.Output, GUILayout.Width(128), GUILayout.Height(128));
+                }
+            }
+            if (showPressureToggle && pressureRenderer != null)
+            {
+                bool newRender = GUILayout.Toggle(pressureRenderer.enabled, "Render Pressure Overlay");
+                pressureRenderer.enabled = newRender;
+                if (showMaskPreview && pressureRenderer.enabled && pressureRenderer.Output != null)
+                {
+                    GUILayout.Box(pressureRenderer.Output, GUILayout.Width(128), GUILayout.Height(128));
                 }
             }
             if (logSink != null)
