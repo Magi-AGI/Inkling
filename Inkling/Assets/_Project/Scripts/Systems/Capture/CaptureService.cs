@@ -4,6 +4,7 @@ using UnityEngine.Rendering;
 using Magi.InkTools.Simulation;
 using Magi.UnityTools.Core;
 using Magi.UnityTools.Patterns;
+using Magi.UnityTools.Diagnostics;
 using Magi.Inkling.Services.Diagnostics;
 
 namespace Magi.Inkling.Systems.Capture
