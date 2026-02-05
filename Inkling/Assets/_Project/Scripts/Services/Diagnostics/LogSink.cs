@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
-using Magi.Inkling.Services.Core;
+using Magi.UnityTools.Diagnostics;
+using Magi.UnityTools.Patterns;
 
 namespace Magi.Inkling.Services.Diagnostics
 {
@@ -23,7 +24,7 @@ namespace Magi.Inkling.Services.Diagnostics
 
         public static void AddGlobal(string message)
         {
-            var sink = Magi.Inkling.Services.Core.ServiceLocator.Instance?.Resolve<ILogSink>();
+            var sink = ServiceLocator.Instance?.Resolve<ILogSink>();
             sink?.Add(message);
         }
 

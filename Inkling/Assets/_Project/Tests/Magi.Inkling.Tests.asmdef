@@ -6,7 +6,9 @@
     "Magi.Inkling.Gestures",
     "Magi.Inkling.Capture",
     "Magi.InkTools",
-    "Magi.InkTools.Simulation"
+    "Magi.InkTools.Simulation",
+    "Magi.InkTools.Services",
+    "Magi.UnityTools"
   ],
   "optionalUnityReferences": [
     "TestAssemblies"

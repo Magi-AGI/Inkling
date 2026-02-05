@@ -1,7 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using Magi.Inkling.Systems.SimulationLOD0;
-using Magi.Inkling.Services;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.Creatures
 {

@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
-using Magi.Inkling.Services;
-using Magi.Inkling.Services.Core;
+using Magi.InkTools.Simulation;
+using Magi.UnityTools.Patterns;
 using Magi.Inkling.Services.Diagnostics;
 using Magi.InkTools.ITUMS;
 

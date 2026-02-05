@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 using Magi.UnityTools.Core;
-using Magi.Inkling.Services;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {

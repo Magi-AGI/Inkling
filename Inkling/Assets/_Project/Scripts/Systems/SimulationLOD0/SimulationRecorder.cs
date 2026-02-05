@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
-using Magi.Inkling.Services;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {

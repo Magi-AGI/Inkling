@@ -1,6 +1,6 @@
 using UnityEngine;
-using Magi.Inkling.Services;
-using Magi.Inkling.Services.Core;
+using Magi.InkTools.Simulation;
+using Magi.UnityTools.Patterns;
 
 namespace Magi.Inkling.Systems.OpticalFlow
 {

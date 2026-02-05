@@ -4,7 +4,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using Magi.Inkling.Systems.Gestures;
-using Magi.Inkling.Services;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Tests.PlayMode
 {

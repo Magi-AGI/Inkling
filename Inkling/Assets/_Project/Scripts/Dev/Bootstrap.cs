@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using Magi.Inkling.Systems.SimulationLOD0;
-using Magi.Inkling.Services;
+using Magi.InkTools.Simulation;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif

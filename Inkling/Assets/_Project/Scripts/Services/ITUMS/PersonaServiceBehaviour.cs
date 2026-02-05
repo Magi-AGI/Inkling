@@ -1,6 +1,7 @@
 using UnityEngine;
 using Magi.InkTools.ITUMS;
-using Magi.Inkling.Services.Core;
+using Magi.UnityTools.Patterns;
+using Magi.UnityTools.Core;
 using Magi.Inkling.Services.Diagnostics;
 
 namespace Magi.Inkling.Services.ITUMS

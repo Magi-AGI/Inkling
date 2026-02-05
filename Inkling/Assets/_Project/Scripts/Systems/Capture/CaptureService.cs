@@ -1,8 +1,9 @@
 using System.IO;
 using UnityEngine;
 using UnityEngine.Rendering;
-using Magi.Inkling.Services;
-using Magi.Inkling.Services.Core;
+using Magi.InkTools.Simulation;
+using Magi.UnityTools.Core;
+using Magi.UnityTools.Patterns;
 using Magi.Inkling.Services.Diagnostics;
 
 namespace Magi.Inkling.Systems.Capture

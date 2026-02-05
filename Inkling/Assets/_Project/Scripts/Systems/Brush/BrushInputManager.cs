@@ -1,7 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
-using Magi.Inkling.Services;
-using Magi.Inkling.Services.Core;
+using Magi.UnityTools.Patterns;
 using Magi.InkTools.ITUMS;
 using Magi.Inkling.Services.ITUMS;
 using Magi.InkTools.Simulation;

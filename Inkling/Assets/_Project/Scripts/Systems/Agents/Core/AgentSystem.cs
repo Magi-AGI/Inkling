@@ -1,5 +1,5 @@
 using UnityEngine;
-using Magi.Inkling.Services;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.Agents
 {

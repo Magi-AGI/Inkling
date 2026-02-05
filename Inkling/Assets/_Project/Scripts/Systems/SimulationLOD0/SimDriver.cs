@@ -8,8 +8,7 @@ using Unity.Mathematics;
 using Debug = UnityEngine.Debug;
 using Magi.UnityTools.Core;
 using Magi.InkTools.Simulation;
-using Magi.Inkling.Services;
-using Magi.Inkling.Services.Core;
+using Magi.UnityTools.Patterns;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {

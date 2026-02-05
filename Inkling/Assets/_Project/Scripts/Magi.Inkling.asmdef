@@ -8,6 +8,7 @@
         "UnityEngine.UI",
         "Magi.InkTools",
         "Magi.InkTools.Simulation",
+        "Magi.InkTools.Services",
         "Magi.UnityTools"
     ],
     "includePlatforms": [],
