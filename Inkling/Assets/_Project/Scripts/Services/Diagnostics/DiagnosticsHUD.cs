@@ -28,6 +28,8 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private bool showArrowsToggle = true;
         [SerializeField] private bool showMaskToggle = true;
         [SerializeField] private bool showMaskPreview = false;
+        [SerializeField] private SplitVelocityRenderer splitRenderer;
+        [SerializeField] private bool showSplitToggle = false;
         [SerializeField] private bool showStats = true;
 
         private ISimulationReader sim;
@@ -49,6 +51,8 @@ namespace Magi.Inkling.Services.Diagnostics
                 velocityStats = FindAnyObjectByType<VelocityStatsSystem>();
             if (velocityMask == null)
                 velocityMask = FindAnyObjectByType<VelocityMaskRenderer>();
+            if (splitRenderer == null)
+                splitRenderer = FindAnyObjectByType<SplitVelocityRenderer>();
         }
 
         private void Update()
@@ -95,14 +99,20 @@ namespace Magi.Inkling.Services.Diagnostics
             {
                 bool newRender = GUILayout.Toggle(velocityMask.enabled, "Render Velocity Mask");
                 velocityMask.enabled = newRender;
-                if (showMaskPreview && velocityMask.enabled && velocityMask.enabled)
+                if (showMaskPreview && velocityMask.enabled)
                 {
-                    var rt = velocityMask ? velocityMask.GetType().GetField("maskOutput", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.GetValue(velocityMask) as RenderTexture : null;
+                    var rt = velocityMask.Output;
                     if (rt != null)
-                    {
-                        GUILayout.Label("Mask Preview:");
                         GUILayout.Box(rt, GUILayout.Width(128), GUILayout.Height(128));
-                    }
+                }
+            }
+            if (showSplitToggle && splitRenderer != null)
+            {
+                bool newRender = GUILayout.Toggle(splitRenderer.enabled, "Render Velocity Split (div/curl)");
+                splitRenderer.enabled = newRender;
+                if (showMaskPreview && splitRenderer.enabled && splitRenderer.Output != null)
+                {
+                    GUILayout.Box(splitRenderer.Output, GUILayout.Width(128), GUILayout.Height(128));
                 }
             }
             if (logSink != null)
