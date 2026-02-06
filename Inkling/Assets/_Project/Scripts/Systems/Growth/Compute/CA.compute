@@ -1,0 +1,9 @@
+// Placeholder compute shader for cellular automata (to be implemented)
+
+#pragma kernel Step
+
+RWTexture2D<float4> State;
+[numthreads(8,8,1)]
+void Step (uint3 id : SV_DispatchThreadID) {
+    // noop placeholder
+}
