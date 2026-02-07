@@ -5,17 +5,17 @@ using Magi.Inkling.Systems.Gestures;
 namespace Magi.Inkling.Systems.Gestures.Editor
 {
     /// <summary>
-    /// Utility to auto-assign GestureInputManager templates/action map from Configs folder.
+    /// Utility to auto-assign GestureInputController templates/action map from Configs folder.
     /// </summary>
     public static class GestureAutoAssign
     {
         [MenuItem("Inkling/Gestures/Auto-Assign Templates & Action Map")]
         public static void Assign()
         {
-            var manager = Object.FindAnyObjectByType<GestureInputManager>();
+            var manager = Object.FindAnyObjectByType<GestureInputController>();
             if (manager == null)
             {
-                Debug.LogWarning("GestureInputManager not found in scene.");
+                Debug.LogWarning("GestureInputController not found in scene.");
                 return;
             }
 

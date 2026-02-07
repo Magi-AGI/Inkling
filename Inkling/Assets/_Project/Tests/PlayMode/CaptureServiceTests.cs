@@ -57,6 +57,7 @@ namespace Magi.Inkling.Tests.PlayMode
             Directory.Delete(dir, true);
         }
 
+        // TODO: migrate to Helpers.StubSimulationReader
         private class StubReader : MonoBehaviour, Magi.InkTools.Simulation.ISimulationReader
         {
             public RenderTexture Texture;

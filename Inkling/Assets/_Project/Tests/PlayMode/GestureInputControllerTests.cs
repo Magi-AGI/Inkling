@@ -8,8 +8,9 @@ using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Tests.PlayMode
 {
-    public class GestureInputManagerTests
+    public class GestureInputControllerTests
     {
+        // TODO: migrate to Helpers.StubSimulationWriter
         private class StubWriter : MonoBehaviour, ISimulationWriter
         {
             public int densityCalls;
@@ -34,7 +35,7 @@ namespace Magi.Inkling.Tests.PlayMode
         {
             var go = new GameObject("GestureTest");
             var writer = go.AddComponent<StubWriter>();
-            var manager = go.AddComponent<GestureInputManager>();
+            var manager = go.AddComponent<GestureInputController>();
 
             // Inject private fields via reflection for test
             manager.GetType().GetField("simulationWriterSource", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(manager, writer);

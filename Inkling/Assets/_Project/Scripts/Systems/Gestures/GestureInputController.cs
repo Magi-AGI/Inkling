@@ -12,7 +12,7 @@ namespace Magi.Inkling.Systems.Gestures
     /// This is a simple single-pointer manager; multi-touch can be added later.
     /// </summary>
     [DefaultExecutionOrder(-41)]
-    public class GestureInputManager : MonoBehaviour, IService
+    public class GestureInputController : MonoBehaviour, IService
     {
         [Header("References")]
         [SerializeField] private MonoBehaviour simulationWriterSource; // ISimulationWriter
@@ -35,8 +35,8 @@ namespace Magi.Inkling.Systems.Gestures
 
             if (writer == null)
             {
-                Debug.LogWarning("[GestureInputManager] ISimulationWriter not assigned; disabling.");
-                Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("[GestureInputManager] ISimulationWriter not assigned; disabling.");
+                Debug.LogWarning("[GestureInputController] ISimulationWriter not assigned; disabling.");
+                Magi.Inkling.Services.Diagnostics.LogSink.AddGlobal("[GestureInputController] ISimulationWriter not assigned; disabling.");
                 enabled = false;
             }
 

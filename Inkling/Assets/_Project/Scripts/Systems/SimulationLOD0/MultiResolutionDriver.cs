@@ -18,7 +18,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool useAdaptiveResolution = false;
 
         [Header("References")]
-        [SerializeField] private SimDriver simDriverComponent;
+        [SerializeField] private MonoBehaviour simulationReaderSource;
         [SerializeField] private ComputeShader multiResCompute;
         [SerializeField] private Renderer displayRenderer;
 
@@ -45,22 +45,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void Start()
         {
-            if (simDriverComponent == null)
+            if (simulationReaderSource == null)
             {
-                simDriverComponent = GetComponent<SimDriver>();
-                if (simDriverComponent == null)
-                {
-                    Debug.LogError("[MultiResolutionDriver] No SimDriver found!");
-                    enabled = false;
-                    return;
-                }
+                simulationReaderSource = GetComponent<SimDriver>();
             }
 
-            // Initialize service interface for decoupled access
-            simReader = simDriverComponent.AsReader();
+            if (simulationReaderSource is ISimulationReader reader)
+            {
+                simReader = reader;
+            }
+            else
+            {
+                Debug.LogError("[MultiResolutionDriver] No ISimulationReader found!");
+                enabled = false;
+                return;
+            }
 
-            // Use the same compute shader as SimDriver
-            multiResCompute = simDriverComponent.fluidCompute;
             if (multiResCompute == null)
             {
                 Debug.LogWarning("[MultiResolutionDriver] No compute shader assigned. Multi-resolution disabled.");

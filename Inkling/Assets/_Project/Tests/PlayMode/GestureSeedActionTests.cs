@@ -10,6 +10,7 @@ namespace Magi.Inkling.Tests.PlayMode
 {
     public class GestureSeedActionTests
     {
+        // TODO: migrate to Helpers.StubSimulationWriter
         private class StubWriter : MonoBehaviour, ISimulationWriter
         {
             public int plantCalls;
@@ -41,7 +42,7 @@ namespace Magi.Inkling.Tests.PlayMode
         {
             var go = new GameObject("GestureSeedTest");
             var writer = go.AddComponent<StubWriter>();
-            var manager = go.AddComponent<GestureInputManager>();
+            var manager = go.AddComponent<GestureInputController>();
 
             // Inject fields
             manager.GetType().GetField("simulationWriterSource", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(manager, writer);

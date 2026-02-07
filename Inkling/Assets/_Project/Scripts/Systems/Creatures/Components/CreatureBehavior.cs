@@ -11,7 +11,6 @@ namespace Magi.Inkling.Systems.Creatures
     /// Works with TexturedInjector for movement and AnimatedCreature for animation.
     /// </summary>
     [AddComponentMenu("Inkling/Creatures/Creature Behavior")]
-    [RequireComponent(typeof(TexturedInjector))]
     public class CreatureBehavior : MonoBehaviour
     {
         [Header("Configuration")]
@@ -63,7 +62,7 @@ namespace Magi.Inkling.Systems.Creatures
 
             if (injector == null)
             {
-                Debug.LogError($"[CreatureBehavior] {gameObject.name}: TexturedInjector required.");
+                Debug.LogWarning($"[CreatureBehavior] {gameObject.name}: TexturedInjector not found. Creature movement disabled.");
                 enabled = false;
                 return;
             }

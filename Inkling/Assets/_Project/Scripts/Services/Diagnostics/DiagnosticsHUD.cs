@@ -130,15 +130,15 @@ namespace Magi.Inkling.Services.Diagnostics
             }
             if (showAirDebugToggles)
             {
-                var simDriver = FindAnyObjectByType<Magi.Inkling.Systems.SimulationLOD0.SimDriver>();
-                if (simDriver != null)
+                var simDebug = sim as Magi.Inkling.Systems.SimulationLOD0.ISimulationDebug;
+                if (simDebug != null)
                 {
-                    var zeroP = GUILayout.Toggle(simDriver.DebugZeroPressure, "Air: Zero Pressure");
-                    var zeroV = GUILayout.Toggle(simDriver.DebugZeroVelocity, "Air: Zero Velocity");
-                    var skip = GUILayout.Toggle(simDriver.DebugSkipAir, "Air: Skip Air Update");
-                    simDriver.DebugZeroPressure = zeroP;
-                    simDriver.DebugZeroVelocity = zeroV;
-                    simDriver.DebugSkipAir = skip;
+                    var zeroP = GUILayout.Toggle(simDebug.DebugZeroPressure, "Air: Zero Pressure");
+                    var zeroV = GUILayout.Toggle(simDebug.DebugZeroVelocity, "Air: Zero Velocity");
+                    var skip = GUILayout.Toggle(simDebug.DebugSkipAir, "Air: Skip Air Update");
+                    simDebug.DebugZeroPressure = zeroP;
+                    simDebug.DebugZeroVelocity = zeroV;
+                    simDebug.DebugSkipAir = skip;
                 }
             }
             if (logSink != null)

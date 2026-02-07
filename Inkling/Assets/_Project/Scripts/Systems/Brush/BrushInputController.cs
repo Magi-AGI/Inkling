@@ -13,7 +13,7 @@ namespace Magi.Inkling.Systems.Brush
     /// This is a scaffold for Phase 7B; stroke smoothing/gestures will be layered on later.
     /// </summary>
     [DefaultExecutionOrder(-40)]
-    public class BrushInputManager : MonoBehaviour
+    public class BrushInputController : MonoBehaviour
     {
         [Header("References")]
         [SerializeField] private MonoBehaviour simulationWriterSource; // ISimulationWriter provider (e.g., SimDriver)
@@ -56,7 +56,7 @@ namespace Magi.Inkling.Systems.Brush
 
             if (writer == null)
             {
-                Debug.LogWarning("[BrushInputManager] ISimulationWriter not assigned; brush input disabled.");
+                Debug.LogWarning("[BrushInputController] ISimulationWriter not assigned; brush input disabled.");
                 enabled = false;
             }
 
@@ -149,7 +149,7 @@ namespace Magi.Inkling.Systems.Brush
 
             if (config.verboseLogging)
             {
-                Debug.Log($"[BrushInputManager] Inject {(mirror ? "(mirror)" : "(primary)")} uv={uv} color={color}");
+                Debug.Log($"[BrushInputController] Inject {(mirror ? "(mirror)" : "(primary)")} uv={uv} color={color}");
             }
         }
 
@@ -199,7 +199,7 @@ namespace Magi.Inkling.Systems.Brush
                     personaForceScale = 1f;
                     break;
             }
-            itumsLogger?.LogAdaptiveResponse("brush_scaling", current, personaDensityScale, "BrushInputManager");
+            itumsLogger?.LogAdaptiveResponse("brush_scaling", current, personaDensityScale, "BrushInputController");
         }
 
         private void OnDestroy()

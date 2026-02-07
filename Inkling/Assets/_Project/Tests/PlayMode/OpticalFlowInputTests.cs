@@ -9,6 +9,7 @@ namespace Magi.Inkling.Tests.PlayMode
 {
     public class OpticalFlowInputTests
     {
+        // TODO: migrate to Helpers.StubSimulationWriter
         private class StubWriter : MonoBehaviour, ISimulationWriter
         {
             public int forceCalls;

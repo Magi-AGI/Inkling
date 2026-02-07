@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
@@ -12,7 +11,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     public class TexturedInjector : MonoBehaviour
     {
         [Header("Injection Settings")]
-        [SerializeField] private SimDriver simDriverComponent;
+        [SerializeField] private MonoBehaviour simulationServiceSource;
 
         // Cached service interfaces for decoupled access
         private ISimulationWriter simWriter;
@@ -31,7 +30,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool enableBlackMaskClearing = false; // If false, skip obstacle/black masking to avoid flicker
 
         [Header("Movement")]
-        [SerializeField] private bool autonomous = true;
         [SerializeField] private float moveSpeed = 0.1f;
 #pragma warning disable 0414 // Field assigned but never used - reserved for future rotation feature
         [SerializeField] private float rotationSpeed = 45f;
@@ -62,25 +60,28 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             useLinearColorSpace = QualitySettings.activeColorSpace == ColorSpace.Linear;
             _ = alphaThreshold; // silence unused-field warning (inspector-tunable)
 
-            if (simDriverComponent == null)
+            if (simulationServiceSource == null)
             {
-                Debug.LogError("[TexturedInjector] SimDriver reference is required. Please assign it in the Inspector.");
+                Debug.LogError("[TexturedInjector] Simulation service source is required. Please assign it in the Inspector.");
                 enabled = false;
                 return;
             }
 
             // Initialize service interfaces for decoupled access
-            simWriter = simDriverComponent.AsWriter();
-            simReader = simDriverComponent.AsReader();
-
-            // Start at random position if autonomous
-            if (autonomous)
+            simWriter = simulationServiceSource as ISimulationWriter;
+            simReader = simulationServiceSource as ISimulationReader;
+            if (simWriter == null)
             {
-                position = new Vector2(
-                    Random.Range(0.2f, 0.8f),
-                    Random.Range(0.2f, 0.8f)
-                );
+                Debug.LogError("[TexturedInjector] Assigned source does not implement ISimulationWriter.");
+                enabled = false;
+                return;
             }
+
+            // Start at random position
+            position = new Vector2(
+                Random.Range(0.2f, 0.8f),
+                Random.Range(0.2f, 0.8f)
+            );
 
             previousPosition = position;
 
@@ -157,20 +158,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (simWriter == null) return;
             if (!maskValid) return;
 
-            // Update movement
-            if (autonomous)
-            {
-                UpdateAutonomousMovement();
-            }
-            else
-            {
-                UpdatePlayerControlled();
-            }
+            // Update autonomous movement
+            UpdateAutonomousMovement();
 
             // Inject at intervals
             if (Time.time >= nextInjectionTime)
             {
-                bool shouldInject = injectWhileMoving || autonomous;
+                bool shouldInject = injectWhileMoving;
 
                 if (shouldInject)
                 {
@@ -206,22 +200,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 velocity.y = -velocity.y;
                 position.y = Mathf.Clamp(position.y, 0.1f, movementBounds.y);
-            }
-        }
-
-        private void UpdatePlayerControlled()
-        {
-            // Use mouse position for player control
-            if (Mouse.current != null)
-            {
-                Vector2 mousePos = Mouse.current.position.ReadValue();
-                Vector2 targetUV = new Vector2(
-                    Mathf.Clamp01(mousePos.x / Screen.width),
-                    Mathf.Clamp01(mousePos.y / Screen.height)
-                );
-
-                // Smoothly move towards mouse
-                position = Vector2.Lerp(position, targetUV, moveSpeed * 10f * Time.deltaTime);
             }
         }
 
