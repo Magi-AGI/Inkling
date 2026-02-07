@@ -20,16 +20,24 @@ namespace Magi.Inkling.Services.Diagnostics
         [SerializeField] private bool showPersona = true;
         [Header("Debug Visuals")]
         [SerializeField] private TracerSystem tracerSystem;
+#if INKTOOLS_DEBUG
         [SerializeField] private VelocityArrowsRenderer arrowsRenderer;
+#endif
         [SerializeField] private VelocityStatsSystem velocityStats;
+#if INKTOOLS_DEBUG
         [SerializeField] private VelocityMaskRenderer velocityMask;
+#endif
         [SerializeField] private bool showTracerToggle = true;
         [SerializeField] private bool showArrowsToggle = true;
         [SerializeField] private bool showMaskToggle = true;
         [SerializeField] private bool showMaskPreview = false;
+#if INKTOOLS_DEBUG
         [SerializeField] private SplitVelocityRenderer splitRenderer;
+#endif
         [SerializeField] private bool showSplitToggle = false;
+#if INKTOOLS_DEBUG
         [SerializeField] private PressureOverlayRenderer pressureRenderer;
+#endif
         [SerializeField] private bool showPressureToggle = false;
         [SerializeField] private bool showAirDebugToggles = false;
         [SerializeField] private bool showStats = true;
@@ -47,16 +55,20 @@ namespace Magi.Inkling.Services.Diagnostics
                 personaService = ServiceLocator.Instance?.Resolve<IPersonaService>();
             if (tracerSystem == null)
                 tracerSystem = FindAnyObjectByType<TracerSystem>();
+#if INKTOOLS_DEBUG
             if (arrowsRenderer == null)
                 arrowsRenderer = FindAnyObjectByType<VelocityArrowsRenderer>();
+#endif
             if (velocityStats == null)
                 velocityStats = FindAnyObjectByType<VelocityStatsSystem>();
+#if INKTOOLS_DEBUG
             if (velocityMask == null)
                 velocityMask = FindAnyObjectByType<VelocityMaskRenderer>();
             if (splitRenderer == null)
                 splitRenderer = FindAnyObjectByType<SplitVelocityRenderer>();
             if (pressureRenderer == null)
                 pressureRenderer = FindAnyObjectByType<PressureOverlayRenderer>();
+#endif
         }
 
         private void Update()
@@ -94,6 +106,7 @@ namespace Magi.Inkling.Services.Diagnostics
                 bool newRender = GUILayout.Toggle(tracerSystem.enabled && tracerSystem.isActiveAndEnabled, "Render Tracers");
                 tracerSystem.enabled = newRender;
             }
+#if INKTOOLS_DEBUG
             if (showArrowsToggle && arrowsRenderer != null)
             {
                 bool newRender = GUILayout.Toggle(arrowsRenderer.enabled, "Render Velocity Arrows");
@@ -128,6 +141,7 @@ namespace Magi.Inkling.Services.Diagnostics
                     GUILayout.Box(pressureRenderer.Output, GUILayout.Width(128), GUILayout.Height(128));
                 }
             }
+#endif
             if (showAirDebugToggles)
             {
                 var simDebug = sim as Magi.Inkling.Systems.SimulationLOD0.ISimulationDebug;

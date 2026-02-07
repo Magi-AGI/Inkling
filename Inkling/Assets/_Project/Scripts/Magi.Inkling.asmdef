@@ -9,6 +9,7 @@
         "Magi.InkTools",
         "Magi.InkTools.Simulation",
         "Magi.InkTools.Services",
+        "Magi.InkTools.Debug",
         "Magi.UnityTools"
     ],
     "includePlatforms": [],
