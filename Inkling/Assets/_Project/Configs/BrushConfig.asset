@@ -9,11 +9,15 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 5e30e801d7d49e143b4138f56b66811a, type: 3}
+  m_Script: {fileID: 11500000, guid: 6e62030ef93c85b40942828bca4282ec, type: 3}
   m_Name: BrushConfig
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Brush.BrushConfig
   brushRadiusUv: 0.02
   densityMultiplier: 1
-  forceMultiplier: 80
+  forceMultiplier: 1
+  minDistanceUv: 0.005
+  enableMirror: 0
+  mirrorAxisX: 0.5
+  mirrorInvertForceX: 1
   stampTexture: {fileID: 0}
   verboseLogging: 0
