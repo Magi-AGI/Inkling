@@ -1,212 +1,109 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
-using Magi.UnityTools.Patterns;
-using Magi.InkTools.ITUMS;
-using Magi.Inkling.Services.ITUMS;
 using Magi.InkTools.Simulation;
+using Magi.Inkling.Systems.SimulationLOD0;
 
 namespace Magi.Inkling.Systems.Brush
 {
     /// <summary>
-    /// Minimal brush input manager.
-    /// Reads pointer input, injects density and optional force into the simulation via ISimulationWriter.
-    /// This is a scaffold for Phase 7B; stroke smoothing/gestures will be layered on later.
+    /// Handles manual ink injection via mouse/touch/pen using robust UV mapping.
     /// </summary>
-    [DefaultExecutionOrder(-40)]
     public class BrushInputController : MonoBehaviour
     {
-        [Header("References")]
-        [SerializeField] private MonoBehaviour simulationWriterSource; // ISimulationWriter provider (e.g., SimDriver)
+        [Header("Configuration")]
         [SerializeField] private BrushConfig config;
-        [Tooltip("Optional renderer used to map screen position to simulation UV (e.g., display quad). If null, falls back to screen-normalized UV.")]
+
+        [Header("Mapping")]
         [SerializeField] private Renderer targetRenderer;
-        [Tooltip("Camera used for screen-to-world mapping when targetRenderer is set. Defaults to Camera.main.")]
         [SerializeField] private Camera inputCamera;
-        [Header("ITUMS Telemetry")]
-        [SerializeField] private bool emitPersonaTelemetry = true;
-        [Header("Persona Response")]
-        [SerializeField] private float quietDensityScale = 0.75f;
-        [SerializeField] private float aggressiveDensityScale = 1.5f;
-        [SerializeField] private float quietForceScale = 0.75f;
-        [SerializeField] private float aggressiveForceScale = 1.5f;
-        [Header("ITUMS Logger (optional)")]
-        [SerializeField] private ITUMSEventLogger itumsLogger;
-        [Header("Force Debug (optional)")]
-        [SerializeField] private bool drawForcesToDebugRT = false;
-        [SerializeField] private ForceDrawer forceDrawer;
-        [SerializeField] private RenderTexture forceDebugTarget;
-        [Header("Force Drawer Routing")]
-        [SerializeField] private bool useForceDrawerForGameplay = false;
-        [SerializeField] private float forceDrawerStrength = 1f;
-        [SerializeField] private float forceDrawerFalloff = 2f;
 
-        private ISimulationWriter writer;
-        private Vector2 lastPrimaryUv;
-        private bool hasLastPrimary;
-        private Vector2 lastMirrorUv;
-        private bool hasLastMirror;
-        private IPersonaService personaService;
-        private float personaDensityScale = 1f;
-        private float personaForceScale = 1f;
+        private ISimulationWriter simWriter;
+        private SimDriver simDriver;
+        private bool isInjecting;
+        private Vector2 lastUv;
+        private bool hasLast;
 
-        private void Awake()
+        private void Start()
         {
-            if (simulationWriterSource is ISimulationWriter w)
-                writer = w;
-
-            if (writer == null)
+            simDriver = FindFirstObjectByType<SimDriver>();
+            if (simDriver != null)
             {
-                Debug.LogWarning("[BrushInputController] ISimulationWriter not assigned; brush input disabled.");
-                enabled = false;
+                simWriter = simDriver.AsWriter();
             }
 
             if (config == null)
             {
                 config = ScriptableObject.CreateInstance<BrushConfig>();
-            }
-
-            if (emitPersonaTelemetry)
-            {
-                personaService = ServiceLocator.Instance?.Resolve<IPersonaService>();
-                if (itumsLogger == null)
-                {
-                    itumsLogger = ServiceLocator.Instance?.Resolve<ITUMSEventLogger>();
-                }
-                if (personaService != null)
-                {
-                    personaService.OnPersonaChanged += HandlePersonaChanged;
-                }
+                Debug.LogWarning("[BrushInputController] No BrushConfig assigned, using defaults.");
             }
         }
 
         private void Update()
         {
-            if (Mouse.current == null || writer == null) return;
+            if (simWriter == null || Mouse.current == null) return;
 
-            var mouse = Mouse.current;
-            if (!mouse.leftButton.isPressed)
+            bool wasInjecting = isInjecting;
+            isInjecting = Mouse.current.leftButton.isPressed;
+
+            if (isInjecting)
             {
-                if (emitPersonaTelemetry && personaService != null)
+                Vector2 screenPos = Mouse.current.position.ReadValue();
+                var cam = inputCamera != null ? inputCamera : Camera.main;
+                
+                Vector2 uv = SimulationUvUtility.ComputeUv(screenPos, targetRenderer, cam, lastUv);
+                
+                // If we just started or moved significantly, inject
+                if (!wasInjecting || Vector2.Distance(uv, lastUv) > 0.005f || !hasLast)
                 {
-                    personaService.RecordIdle(Time.deltaTime);
-                }
-                hasLastPrimary = false;
-                hasLastMirror = false;
-                return;
-            }
-
-            Vector2 uv = ComputeUv(mouse.position.ReadValue());
-            if (emitPersonaTelemetry && personaService != null && hasLastPrimary)
-            {
-                float speed = Vector2.Distance(uv, lastPrimaryUv) / Mathf.Max(Time.deltaTime, 0.0001f);
-                personaService.RecordStrokeSpeed(speed);
-            }
-            if (emitPersonaTelemetry && itumsLogger != null && hasLastPrimary)
-            {
-                float speed = Vector2.Distance(uv, lastPrimaryUv) / Mathf.Max(Time.deltaTime, 0.0001f);
-                itumsLogger.LogStrokeSample(lastPrimaryUv, uv, speed, mirror: false);
-            }
-
-            InjectStrokePair(uv);
-        }
-
-        private void InjectStrokePair(Vector2 uv)
-        {
-            InjectStrokeSingle(uv, ref lastPrimaryUv, ref hasLastPrimary, mirror: false);
-
-            if (config.enableMirror)
-            {
-                float mirroredX = config.mirrorAxisX + (config.mirrorAxisX - uv.x);
-                var uvMirror = new Vector2(Mathf.Clamp01(mirroredX), uv.y);
-                InjectStrokeSingle(uvMirror, ref lastMirrorUv, ref hasLastMirror, mirror: true);
-            }
-        }
-
-        private void InjectStrokeSingle(Vector2 uv, ref Vector2 lastUv, ref bool hasLast, bool mirror)
-        {
-            // Min-distance gating
-            if (hasLast && config.minDistanceUv > 0f && Vector2.Distance(uv, lastUv) < config.minDistanceUv)
-                return;
-
-            var color = Color.white * (config.densityMultiplier * personaDensityScale);
-            writer.InjectDensity(uv, color, 0); // default ink channel; higher-level gesture/action maps will override
-
-            if (hasLast)
-            {
-                Vector2 delta = (uv - lastUv) * config.forceMultiplier * personaForceScale;
-                if (mirror && config.mirrorInvertForceX)
-                    delta.x = -delta.x;
-                writer.InjectForce(uv, delta);
-
-                if (forceDrawer != null && forceDebugTarget != null && (drawForcesToDebugRT || useForceDrawerForGameplay))
-                {
-                    forceDrawer.DrawPoint(forceDebugTarget, uv, delta, radius: config.brushRadiusUv, strength: forceDrawerStrength, falloff: forceDrawerFalloff);
+                    PerformInjection(uv, false);
+                    if (config.enableMirror)
+                    {
+                        float mirroredX = config.mirrorAxisX + (config.mirrorAxisX - uv.x);
+                        PerformInjection(new Vector2(Mathf.Clamp01(mirroredX), uv.y), true);
+                    }
+                    lastUv = uv;
+                    hasLast = true;
                 }
             }
-
-            hasLast = true;
-            lastUv = uv;
-
-            if (config.verboseLogging)
+            else
             {
-                Debug.Log($"[BrushInputController] Inject {(mirror ? "(mirror)" : "(primary)")} uv={uv} color={color}");
+                hasLast = false;
             }
         }
 
-        private Vector2 ComputeUv(Vector2 screenPos)
+        private void PerformInjection(Vector2 uv, bool mirror)
         {
-            if (targetRenderer == null)
+            int inkType = simDriver != null ? simDriver.CurrentInkType : 0;
+            Color color = GetInkKeyColor(inkType);
+            
+            simWriter.InjectDensity(uv, color, inkType);
+            
+            // Add some force in the direction of movement
+            if (hasLast && !mirror)
             {
-                return new Vector2(
-                    Mathf.Clamp01(screenPos.x / Screen.width),
-                    Mathf.Clamp01(screenPos.y / Screen.height));
+                Vector2 force = (uv - lastUv) * config.forceMultiplier;
+                if (force.sqrMagnitude > 0.00001f)
+                {
+                    simWriter.InjectForce(uv, force);
+                }
             }
-
-            var cam = inputCamera != null ? inputCamera : Camera.main;
-            if (cam == null)
-            {
-                return new Vector2(
-                    Mathf.Clamp01(screenPos.x / Screen.width),
-                    Mathf.Clamp01(screenPos.y / Screen.height));
-            }
-
-            Ray ray = cam.ScreenPointToRay(screenPos);
-            Plane plane = new Plane(targetRenderer.transform.forward, targetRenderer.transform.position);
-            if (!plane.Raycast(ray, out float dist))
-                return Vector2.zero;
-
-            Vector3 hit = ray.GetPoint(dist);
-            Bounds b = targetRenderer.bounds;
-            float u = Mathf.InverseLerp(b.min.x, b.max.x, hit.x);
-            float v = Mathf.InverseLerp(b.min.y, b.max.y, hit.y);
-            return new Vector2(Mathf.Clamp01(u), Mathf.Clamp01(v));
         }
 
-        private void HandlePersonaChanged(Persona prev, Persona current, float quietScore, float avgStroke)
+        private static Color GetInkKeyColor(int inkTypeIndex)
         {
-            switch (current)
+            switch (Mathf.Clamp(inkTypeIndex, 0, 9))
             {
-                case Persona.Quiet:
-                    personaDensityScale = quietDensityScale;
-                    personaForceScale = quietForceScale;
-                    break;
-                case Persona.Aggressive:
-                    personaDensityScale = aggressiveDensityScale;
-                    personaForceScale = aggressiveForceScale;
-                    break;
-                default:
-                    personaDensityScale = 1f;
-                    personaForceScale = 1f;
-                    break;
-            }
-            itumsLogger?.LogAdaptiveResponse("brush_scaling", current, personaDensityScale, "BrushInputController");
-        }
-
-        private void OnDestroy()
-        {
-            if (personaService != null)
-            {
-                personaService.OnPersonaChanged -= HandlePersonaChanged;
+                case 0: return new Color(1f, 0f, 0f, 1f); // Fire
+                case 1: return new Color(0f, 0f, 1f, 1f); // Water
+                case 2: return new Color(0f, 1f, 0f, 1f); // PlantSeeded
+                case 3: return new Color(0f, 0.5f, 0f, 1f); // PlantGrown
+                case 4: return new Color(0.49f, 0.49f, 0.49f, 1f); // Steam
+                case 5: return new Color(1f, 0.5f, 1f, 1f); // Glitter
+                case 6: return new Color(0.1f, 0.1f, 0.1f, 1f); // BlackBody
+                case 7: return new Color(1f, 1f, 0f, 1f); // ElectricitySeeded
+                case 8: return new Color(0.5f, 0.5f, 0f, 1f); // ElectricityGrown
+                case 9: return new Color(0f, 1f, 1f, 1f); // Ice
+                default: return Color.red;
             }
         }
     }

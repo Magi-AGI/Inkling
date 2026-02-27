@@ -42,6 +42,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool addVelocityTrail = true;
         [SerializeField] private float velocityScale = 50f;
 
+        /// <summary>
+        /// When true, autonomous wandering is suppressed so an external controller
+        /// (e.g. PlayerCharacterController) can drive position via SetPosition().
+        /// </summary>
+        public bool ExternallyControlled { get; set; }
+
         // State
         private Vector2 position = new Vector2(0.5f, 0.5f); // UV position
         private Vector2 velocity = Vector2.zero;
@@ -141,6 +147,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 RenderTexture.active = previous;
                 RenderTexture.ReleaseTemporary(tmp);
 
+                // If we're using texture-driven colors, treat near-black pixels as transparent.
+                // This prevents opaque black mask backgrounds from flooding BlackBody ink.
+                if (!enableBlackMaskClearing && blackLuminanceThreshold > 0f)
+                {
+                    FilterNearBlackPixels(stampTexture, blackLuminanceThreshold);
+                }
+
                 maskValid = true;
                 Debug.Log($"[TexturedInjector] Mask '{injectionMask.name}' loaded successfully ({actualMaskWidth}x{actualMaskHeight})");
             }
@@ -153,13 +166,44 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
         }
 
+        private static void FilterNearBlackPixels(Texture2D tex, float luminanceThreshold)
+        {
+            if (tex == null) return;
+
+            var pixels = tex.GetPixels32();
+            bool changed = false;
+
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                Color32 c = pixels[i];
+                if (c.a == 0) continue;
+
+                float r = c.r / 255f;
+                float g = c.g / 255f;
+                float b = c.b / 255f;
+                float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+
+                if (lum <= luminanceThreshold)
+                {
+                    pixels[i] = new Color32(c.r, c.g, c.b, 0);
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                tex.SetPixels32(pixels);
+                tex.Apply(false, false);
+            }
+        }
+
         private void Update()
         {
             if (simWriter == null) return;
             if (!maskValid) return;
 
-            // Update autonomous movement
-            UpdateAutonomousMovement();
+            // Update autonomous movement (skipped when driven externally)
+            if (!ExternallyControlled) UpdateAutonomousMovement();
 
             // Inject at intervals
             if (Time.time >= nextInjectionTime)
@@ -295,6 +339,24 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public void SetVelocity(Vector2 vel)
         {
             velocity = vel;
+        }
+
+        /// <summary>
+        /// Force stamp color routing to use a specific override color.
+        /// Useful for player-controlled ink type switching.
+        /// </summary>
+        public void SetInkOverrideColor(Color color)
+        {
+            useTextureColors = false;
+            inkColorOverride = color;
+        }
+
+        /// <summary>
+        /// Switch between texture-color stamping and override-color stamping.
+        /// </summary>
+        public void SetUseTextureColors(bool value)
+        {
+            useTextureColors = value;
         }
 
         public Vector2 GetPosition() => position;

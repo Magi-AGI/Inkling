@@ -15,7 +15,7 @@ MonoBehaviour:
   inkType: 9
   displayName: Ice
   debugColor: {r: 0, g: 1, b: 1, a: 1}
-  inputKeyColor: {r: 0.5, g: 0.9, b: 1, a: 1}
+  inputKeyColor: {r: 0, g: 1, b: 1, a: 1}
   colorMatchTolerance: 0.3
   dissipation: 0.99999
   viscosity: 1
@@ -23,3 +23,6 @@ MonoBehaviour:
   interactionThreshold: 0.1
   advectionWeight: 0
   pressureWeight: 1
+  enableClearing: 0
+  clearingThreshold: 0.5
+  clearingRate: 0.05

@@ -15,9 +15,14 @@ MonoBehaviour:
   inkType: 8
   displayName: ElectricityGrown
   debugColor: {r: 0.5019608, g: 0.5019608, b: 0, a: 1}
+  inputKeyColor: {r: 0.5019608, g: 0.5019608, b: 0, a: 1}
+  colorMatchTolerance: 0.3
   dissipation: 0.95
   viscosity: 0.01
   vorticity: 2
   interactionThreshold: 0.1
   advectionWeight: 1
   pressureWeight: 1
+  enableClearing: 0
+  clearingThreshold: 0.5
+  clearingRate: 0.05

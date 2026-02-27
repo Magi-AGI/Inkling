@@ -375,7 +375,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (sw != null) AdvectionMs = (float)sw.Elapsed.TotalMilliseconds;
 
             // 2. Diffusion
-            if (ctx.Viscosity > 0.001f && ctx.DiffusionIterations > 0)
+            if (ctx.Viscosity > 0f && ctx.DiffusionIterations > 0)
             {
                 if (sw != null) sw.Restart();
 

@@ -15,11 +15,14 @@ MonoBehaviour:
   inkType: 1
   displayName: Water
   debugColor: {r: 0, g: 0, b: 1, a: 1}
-  inputKeyColor: {r: 0, g: 0.5, b: 1, a: 1}
+  inputKeyColor: {r: 0, g: 0, b: 1, a: 1}
   colorMatchTolerance: 0.35
   dissipation: 0.99998
-  viscosity: 0.7
-  vorticity: 0.8
+  viscosity: 0.08
+  vorticity: 1.2
   interactionThreshold: 0.1
   advectionWeight: 1
   pressureWeight: 1
+  enableClearing: 0
+  clearingThreshold: 0.5
+  clearingRate: 0.05

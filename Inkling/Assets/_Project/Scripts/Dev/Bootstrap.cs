@@ -8,6 +8,7 @@ using UnityEditor;
 
 namespace Magi.Inkling.Dev
 {
+    [DefaultExecutionOrder(100)]
     public class Bootstrap : MonoBehaviour
     {
         [Header("RenderTextures")]
@@ -24,6 +25,7 @@ namespace Magi.Inkling.Dev
         private SimulationRecorder recorder;
         private SimDriver simDriver;
         private ISimulationReader simReader;
+        private bool loggedDisplayTextureError;
 
         [Header("Direct References (Required to avoid Resources.Load)")]
         public ComputeShader fluidComputeShader;
@@ -32,10 +34,11 @@ namespace Magi.Inkling.Dev
         {
             SetupRenderTextures();
             SetupSimDriver();
-            SetupUI(GetDisplayTexture());
+            // Bind UI to hi-res target immediately; Update() will blit simulation output into it.
+            SetupUI(hiResRT);
             // Optionally keep pattern generator for fallback
             // SetupPatternGenerator(hiResRT);
-            SetupRecorder(GetDisplayTexture(), loResRT);
+            SetupRecorder(hiResRT, loResRT);
             Debug.Log("[Bootstrap] Scene wired with fluid simulation. Press Space to capture (new Input System).");
         }
 
@@ -158,8 +161,19 @@ namespace Magi.Inkling.Dev
             // Use SimDriver output if available, otherwise fall back to hiResRT
             if (simReader != null)
             {
-                var tex = simReader.GetDisplayTexture();
-                if (tex != null) return tex;
+                try
+                {
+                    var tex = simReader.GetDisplayTexture();
+                    if (tex != null) return tex;
+                }
+                catch (System.Exception ex)
+                {
+                    if (!loggedDisplayTextureError)
+                    {
+                        loggedDisplayTextureError = true;
+                        Debug.LogWarning($"[Bootstrap] Failed to fetch SimDriver display texture in early frame ({ex.GetType().Name}). Falling back to bootstrap RT.");
+                    }
+                }
             }
             return hiResRT;
         }

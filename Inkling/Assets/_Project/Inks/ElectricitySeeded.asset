@@ -15,9 +15,14 @@ MonoBehaviour:
   inkType: 7
   displayName: ElectricitySeeded
   debugColor: {r: 1, g: 1, b: 0, a: 1}
+  inputKeyColor: {r: 1, g: 1, b: 0, a: 1}
+  colorMatchTolerance: 0.3
   dissipation: 0.95
   viscosity: 0.01
   vorticity: 2
   interactionThreshold: 0.1
   advectionWeight: 1
   pressureWeight: 1
+  enableClearing: 0
+  clearingThreshold: 0.5
+  clearingRate: 0.05

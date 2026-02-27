@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using Magi.UnityTools.Core;
 using Magi.InkTools;
 using Magi.InkTools.Simulation;
@@ -100,7 +101,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private AffinityGroup[] affinityGroups;
 
         [Header("Black Body Ink (Fallback)")]
-        [SerializeField] private bool enableBlackBodyClearingFallback = true;
+        [SerializeField] private bool enableBlackBodyClearingFallback = false;
         [Range(0f, 1f)]
         [SerializeField] private float blackBodyThresholdFallback = 0.5f;
         [Range(0f, 0.2f)]
@@ -116,6 +117,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Update Rate")]
         [SerializeField] private int simulationUpdateRate = 0;
+
+        [Header("Runtime Selection")]
+        [SerializeField] private int currentInkType = 0;
+
+        public int CurrentInkType { get => currentInkType; set => currentInkType = Mathf.Clamp(value, 0, 9); }
 
         // ── Modules ─────────────────────────────────────────────────────────
         private SimulationContext ctx;
@@ -253,6 +259,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (measurePerformance) stopwatch.Restart();
 
             SyncContextFromFields();
+            UpdateHotkeys();
 
             // Simulation update rate throttling
             simRanThisFrame = false;
@@ -449,21 +456,29 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         public RenderTexture GetDensityTexture()
         {
+            if (ctx == null) return null;
             if (ctx.UseParticleRenderPass && ctx.DisplayRT != null) return ctx.DisplayRT;
             if (ctx.Density != null && !ctx.UseParticleDisplay) return ctx.Density.Read;
             return null;
         }
 
-        public RenderTexture GetVelocityTexture() => ctx.Velocity?.Read;
-        public RenderTexture GetDisplayTexture() => ctx.DisplayRT;
-        public RenderTexture GetObstacleTexture() => ctx.Obstacles;
-        public ComputeBuffer GetParticleBuffer() => ctx.ParticlesBuffer?[ctx.ParticleReadIndex];
+        public RenderTexture GetVelocityTexture() => ctx?.Velocity?.Read;
+        public RenderTexture GetDisplayTexture() => ctx?.DisplayRT;
+        public RenderTexture GetObstacleTexture() => ctx?.Obstacles;
+
+        public ComputeBuffer GetParticleBuffer()
+        {
+            if (ctx?.ParticlesBuffer == null || ctx.ParticlesBuffer.Length == 0) return null;
+            int readIndex = Mathf.Clamp(ctx.ParticleReadIndex, 0, ctx.ParticlesBuffer.Length - 1);
+            return ctx.ParticlesBuffer[readIndex];
+        }
 
         public float GetLastFrameMs() => lastFrameMs;
         public (float advection, float diffusion, float pressure, float projection, float vorticity) GetDetailedTimings()
         {
+            if (fluidSolver == null) return (0f, 0f, 0f, 0f, 0f);
             return (fluidSolver.AdvectionMs, fluidSolver.DiffusionMs,
-                    fluidSolver.PressureMs, fluidSolver.ProjectionMs, fluidSolver.VorticityMs);
+                fluidSolver.PressureMs, fluidSolver.ProjectionMs, fluidSolver.VorticityMs);
         }
 
         // ── Service accessors ───────────────────────────────────────────────
@@ -471,6 +486,50 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public ISimulationService AsService() => this;
         public ISimulationReader AsReader() => this;
         public ISimulationWriter AsWriter() => this;
+
+        // ── Hotkeys ─────────────────────────────────────────────────────────
+
+        private void UpdateHotkeys()
+        {
+            int hotkey = GetInkHotkeyIndex();
+            if (hotkey >= 0)
+            {
+                currentInkType = hotkey;
+                Debug.Log($"[SimDriver] Switched to ink type: {currentInkType}");
+            }
+        }
+
+        private static int GetInkHotkeyIndex()
+        {
+            if (Keyboard.current != null)
+            {
+                if (Keyboard.current.digit1Key.wasPressedThisFrame || Keyboard.current.numpad1Key.wasPressedThisFrame) return 0;
+                if (Keyboard.current.digit2Key.wasPressedThisFrame || Keyboard.current.numpad2Key.wasPressedThisFrame) return 1;
+                if (Keyboard.current.digit3Key.wasPressedThisFrame || Keyboard.current.numpad3Key.wasPressedThisFrame) return 2;
+                if (Keyboard.current.digit4Key.wasPressedThisFrame || Keyboard.current.numpad4Key.wasPressedThisFrame) return 3;
+                if (Keyboard.current.digit5Key.wasPressedThisFrame || Keyboard.current.numpad5Key.wasPressedThisFrame) return 4;
+                if (Keyboard.current.digit6Key.wasPressedThisFrame || Keyboard.current.numpad6Key.wasPressedThisFrame) return 5;
+                if (Keyboard.current.digit7Key.wasPressedThisFrame || Keyboard.current.numpad7Key.wasPressedThisFrame) return 6;
+                if (Keyboard.current.digit8Key.wasPressedThisFrame || Keyboard.current.numpad8Key.wasPressedThisFrame) return 7;
+                if (Keyboard.current.digit9Key.wasPressedThisFrame || Keyboard.current.numpad9Key.wasPressedThisFrame) return 8;
+                if (Keyboard.current.digit0Key.wasPressedThisFrame || Keyboard.current.numpad0Key.wasPressedThisFrame) return 9;
+            }
+
+            #if ENABLE_LEGACY_INPUT_MANAGER
+            if (Input.GetKeyDown(KeyCode.Alpha1) || Input.GetKeyDown(KeyCode.Keypad1)) return 0;
+            if (Input.GetKeyDown(KeyCode.Alpha2) || Input.GetKeyDown(KeyCode.Keypad2)) return 1;
+            if (Input.GetKeyDown(KeyCode.Alpha3) || Input.GetKeyDown(KeyCode.Keypad3)) return 2;
+            if (Input.GetKeyDown(KeyCode.Alpha4) || Input.GetKeyDown(KeyCode.Keypad4)) return 3;
+            if (Input.GetKeyDown(KeyCode.Alpha5) || Input.GetKeyDown(KeyCode.Keypad5)) return 4;
+            if (Input.GetKeyDown(KeyCode.Alpha6) || Input.GetKeyDown(KeyCode.Keypad6)) return 5;
+            if (Input.GetKeyDown(KeyCode.Alpha7) || Input.GetKeyDown(KeyCode.Keypad7)) return 6;
+            if (Input.GetKeyDown(KeyCode.Alpha8) || Input.GetKeyDown(KeyCode.Keypad8)) return 7;
+            if (Input.GetKeyDown(KeyCode.Alpha9) || Input.GetKeyDown(KeyCode.Keypad9)) return 8;
+            if (Input.GetKeyDown(KeyCode.Alpha0) || Input.GetKeyDown(KeyCode.Keypad0)) return 9;
+            #endif
+
+            return -1;
+        }
 
         // ── Cleanup ─────────────────────────────────────────────────────────
 

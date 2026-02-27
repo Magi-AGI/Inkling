@@ -15,7 +15,7 @@ MonoBehaviour:
   inkType: 2
   displayName: PlantSeeded
   debugColor: {r: 0, g: 1, b: 0, a: 1}
-  inputKeyColor: {r: 0.2, g: 0.8, b: 0.2, a: 1}
+  inputKeyColor: {r: 0, g: 1, b: 0, a: 1}
   colorMatchTolerance: 0.35
   dissipation: 0.9999
   viscosity: 1
@@ -23,3 +23,6 @@ MonoBehaviour:
   interactionThreshold: 0.1
   advectionWeight: 0
   pressureWeight: 1
+  enableClearing: 0
+  clearingThreshold: 0.5
+  clearingRate: 0.05

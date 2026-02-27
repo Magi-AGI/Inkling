@@ -15,7 +15,7 @@ MonoBehaviour:
   inkType: 0
   displayName: Fire
   debugColor: {r: 1, g: 0, b: 0, a: 1}
-  inputKeyColor: {r: 1, g: 0.3, b: 0, a: 1}
+  inputKeyColor: {r: 1, g: 0, b: 0, a: 1}
   colorMatchTolerance: 0.35
   dissipation: 0.975
   viscosity: 0.05
@@ -23,3 +23,6 @@ MonoBehaviour:
   interactionThreshold: 0.1
   advectionWeight: 1
   pressureWeight: 2
+  enableClearing: 0
+  clearingThreshold: 0.5
+  clearingRate: 0.05
