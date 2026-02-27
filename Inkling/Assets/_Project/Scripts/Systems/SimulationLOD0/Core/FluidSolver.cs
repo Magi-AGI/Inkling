@@ -91,9 +91,21 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_DebugZeroVelocity", ctx.DebugZeroVelocity ? 1f : 0f);
             fc.SetFloat("_DebugSkipAir", ctx.DebugSkipAir ? 1f : 0f);
 
-            float dx = 1.0f / ctx.Resolution;
-            fc.SetFloat("_Alpha", dx * dx / (ctx.Viscosity * ctx.Timestep));
-            fc.SetFloat("_InverseBeta", 1.0f / (4.0f + dx * dx / (ctx.Viscosity * ctx.Timestep)));
+            float alpha = 0f;
+            float inverseBeta = 1f;
+            if (ctx.Viscosity > 0f && ctx.Timestep > 0f)
+            {
+                // Keep diffusion feel roughly resolution-independent by treating
+                // inspector viscosity as tuned for a 256 baseline grid.
+                float resScale = Mathf.Max(1f, ctx.Resolution / 256f);
+                float effectiveViscosity = ctx.Viscosity / (resScale * resScale);
+                float a = effectiveViscosity * ctx.Timestep * ctx.Resolution * ctx.Resolution;
+                alpha = a;
+                inverseBeta = 1f / (1f + 4f * a);
+            }
+
+            fc.SetFloat("_Alpha", alpha);
+            fc.SetFloat("_InverseBeta", inverseBeta);
 
             fc.SetVector("_ForcePosition", Vector2.zero);
             fc.SetVector("_ForceDirection", Vector2.zero);
@@ -158,16 +170,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_AdvectionIce", GetInkProp(InkTypeId.Ice, d => d.advectionWeight, 1.0f));
 
             // Pressure
-            fc.SetFloat("_PressureFire", GetInkProp(InkTypeId.Fire, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressureWater", GetInkProp(InkTypeId.Water, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressurePlantSeeded", GetInkProp(InkTypeId.PlantSeeded, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressurePlantGrown", GetInkProp(InkTypeId.PlantGrown, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressureSteam", GetInkProp(InkTypeId.Steam, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressureGlitter", GetInkProp(InkTypeId.Glitter, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressureBlackBody", GetInkProp(InkTypeId.BlackBody, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressureElectricitySeeded", GetInkProp(InkTypeId.ElectricitySeeded, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressureElectricityGrown", GetInkProp(InkTypeId.ElectricityGrown, d => d.pressureWeight, 1.0f));
-            fc.SetFloat("_PressureIce", GetInkProp(InkTypeId.Ice, d => d.pressureWeight, 1.0f));
+            fc.SetFloat("_PressureFire", GetClampedPressureWeight(InkTypeId.Fire, 1.0f));
+            fc.SetFloat("_PressureWater", GetClampedPressureWeight(InkTypeId.Water, 1.0f));
+            fc.SetFloat("_PressurePlantSeeded", GetClampedPressureWeight(InkTypeId.PlantSeeded, 1.0f));
+            fc.SetFloat("_PressurePlantGrown", GetClampedPressureWeight(InkTypeId.PlantGrown, 1.0f));
+            fc.SetFloat("_PressureSteam", GetClampedPressureWeight(InkTypeId.Steam, 1.0f));
+            fc.SetFloat("_PressureGlitter", GetClampedPressureWeight(InkTypeId.Glitter, 1.0f));
+            fc.SetFloat("_PressureBlackBody", GetClampedPressureWeight(InkTypeId.BlackBody, 1.0f));
+            fc.SetFloat("_PressureElectricitySeeded", GetClampedPressureWeight(InkTypeId.ElectricitySeeded, 1.0f));
+            fc.SetFloat("_PressureElectricityGrown", GetClampedPressureWeight(InkTypeId.ElectricityGrown, 1.0f));
+            fc.SetFloat("_PressureIce", GetClampedPressureWeight(InkTypeId.Ice, 1.0f));
         }
 
         private float GetInkProp(InkTypeId type, System.Func<InkTypeDef, float> getter, float defaultValue)
@@ -176,6 +188,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (ctx.InkDefinitions != null && idx < ctx.InkDefinitions.Length && ctx.InkDefinitions[idx] != null)
                 return getter(ctx.InkDefinitions[idx]);
             return defaultValue;
+        }
+
+        private float GetClampedPressureWeight(InkTypeId type, float defaultValue)
+        {
+            // Keep pressure weighting in a stable range so projection does not over-damp
+            // injected velocity (values > 1 can erase brush-driven motion quickly).
+            float raw = GetInkProp(type, d => d.pressureWeight, defaultValue);
+            return Mathf.Clamp(raw, 0.25f, 1.0f);
         }
 
         private float GetInkInteractionThreshold(InkTypeId type, float defaultValue)
@@ -390,29 +410,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 if (sw != null) DiffusionMs = (float)sw.Elapsed.TotalMilliseconds;
             }
 
-            // 3. Vorticity confinement
-            if (ctx.VorticityStrength > 0)
-            {
-                if (sw != null) sw.Restart();
-
-                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticity, "_VelocityRead", ctx.Velocity.Read);
-                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticity, "_VorticityMag", ctx.VorticityTex);
-                ctx.FluidCompute.Dispatch(ctx.FluidKernelVorticity, threadGroups, threadGroups, 1);
-
-                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticityConfinement, "_VelocityRead", ctx.Velocity.Read);
-                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticityConfinement, "_VelocityWrite", ctx.Velocity.Write);
-                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticityConfinement, "_VorticityMag", ctx.VorticityTex);
-                if (ctx.UseParticleSimulation && ctx.ParticlesBuffer != null && ctx.ParticlesBuffer[ctx.ParticleReadIndex] != null)
-                {
-                    ctx.FluidCompute.SetBuffer(ctx.FluidKernelVorticityConfinement, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
-                }
-                ctx.FluidCompute.Dispatch(ctx.FluidKernelVorticityConfinement, threadGroups, threadGroups, 1);
-                ctx.Velocity.Swap();
-
-                if (sw != null) VorticityMs = (float)sw.Elapsed.TotalMilliseconds;
-            }
-
-            // 4. Pressure projection
+            // 3. Pressure projection
             if (sw != null) sw.Restart();
 
             ctx.FluidCompute.SetTexture(ctx.FluidKernelDivergence, "_VelocityRead", ctx.Velocity.Read);
@@ -452,7 +450,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             if (sw != null) PressureMs = (float)sw.Elapsed.TotalMilliseconds;
 
-            // 5. Subtract gradient
+            // 4. Subtract gradient
             if (sw != null) sw.Restart();
 
             ctx.FluidCompute.SetTexture(ctx.FluidKernelSubtractGradient, "_VelocityRead", ctx.Velocity.Read);
@@ -461,7 +459,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.FluidCompute.Dispatch(ctx.FluidKernelSubtractGradient, threadGroups, threadGroups, 1);
             ctx.Velocity.Swap();
 
-            // 6. Obstacle boundaries
+            // 5. Obstacle boundaries
             if (ctx.FluidKernelApplyObstacleBoundary != 0)
             {
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelApplyObstacleBoundary, "_VelocityRead", ctx.Velocity.Read);
@@ -473,8 +471,44 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             if (sw != null) ProjectionMs = (float)sw.Elapsed.TotalMilliseconds;
 
+            // 6. Vorticity confinement
+            // Run this after projection so pressure solve doesn't immediately cancel the swirl impulse.
+            if (ctx.VorticityStrength > 0)
+            {
+                if (sw != null) sw.Restart();
+
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticity, "_VelocityRead", ctx.Velocity.Read);
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticity, "_VorticityMag", ctx.VorticityTex);
+                ctx.FluidCompute.Dispatch(ctx.FluidKernelVorticity, threadGroups, threadGroups, 1);
+
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticityConfinement, "_VelocityRead", ctx.Velocity.Read);
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticityConfinement, "_VelocityWrite", ctx.Velocity.Write);
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelVorticityConfinement, "_VorticityMag", ctx.VorticityTex);
+                if (ctx.UseParticleSimulation && ctx.ParticlesBuffer != null && ctx.ParticlesBuffer[ctx.ParticleReadIndex] != null)
+                {
+                    ctx.FluidCompute.SetBuffer(ctx.FluidKernelVorticityConfinement, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
+                }
+                ctx.FluidCompute.Dispatch(ctx.FluidKernelVorticityConfinement, threadGroups, threadGroups, 1);
+                ctx.Velocity.Swap();
+
+                // Re-apply obstacle boundary after adding confinement force.
+                if (ctx.FluidKernelApplyObstacleBoundary != 0)
+                {
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelApplyObstacleBoundary, "_VelocityRead", ctx.Velocity.Read);
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelApplyObstacleBoundary, "_VelocityWrite", ctx.Velocity.Write);
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelApplyObstacleBoundary, "_ObstacleRead", ctx.Obstacles);
+                    ctx.FluidCompute.Dispatch(ctx.FluidKernelApplyObstacleBoundary, threadGroups, threadGroups, 1);
+                    ctx.Velocity.Swap();
+                }
+
+                if (sw != null) VorticityMs = (float)sw.Elapsed.TotalMilliseconds;
+            }
+
             // 7. Channel splat
-            if (ctx.UseParticleSimulation && opQueue.ChannelSplatReady && ctx.ParticlesBuffer != null
+            bool canRenderParticleChannels = ctx.UseParticleDisplay
+                && ctx.UseParticleSimulation
+                && ctx.Resolution <= ctx.MaxParticleSimResolution;
+            if (canRenderParticleChannels && opQueue.ChannelSplatReady && ctx.ParticlesBuffer != null
                 && ctx.ChannelRT0 != null && ctx.ChannelRT1 != null && ctx.ChannelRT2 != null)
             {
                 ctx.ParticleChannelSplatCompute.SetInt("_Resolution", ctx.Resolution);

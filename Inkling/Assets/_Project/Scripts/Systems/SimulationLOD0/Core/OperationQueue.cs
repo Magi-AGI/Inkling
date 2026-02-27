@@ -645,6 +645,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         /// </summary>
         public bool DebugLogForces { get; set; }
         private int forceLogCounter;
+        private bool hasLoggedFirstForceInjection;
+        private bool hasLoggedClampedForceInjection;
 
         private void ProcessForceInjections(int threadGroups)
         {
@@ -654,16 +656,36 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 Vector2 pixelPos = f.position * ctx.Resolution;
 
-                // Scale force by resolution so inspector values feel consistent across grid sizes.
-                // Reference resolution 512: at 1024 forces are 2x, at 256 forces are 0.5x.
-                float resScale = ctx.Resolution / 512f;
-                float finalStrength = ctx.ForceStrength * f.force.magnitude * resScale;
+                // Convert UV-space force to pixel-space so forceStrength operates at
+                // intuitive values (1-5 range) and results are resolution-independent.
+                // Before this fix, force magnitudes of ~0.05 UV produced sub-pixel
+                // velocity (~0.02 px/frame displacement), making all dynamics invisible.
+                Vector2 pixelForce = f.force * ctx.Resolution;
+                float requestedStrength = ctx.ForceStrength * pixelForce.magnitude;
+                float finalStrength = Mathf.Min(requestedStrength, 500f);
+
+                if (!hasLoggedClampedForceInjection && requestedStrength > 500f)
+                {
+                    hasLoggedClampedForceInjection = true;
+                    Debug.LogWarning($"[ForceInjection] Strength clamped from {requestedStrength:F1} to 500. " +
+                        $"Lower SimDriver.forceStrength for less aggressive motion.");
+                }
+
+                if (!hasLoggedFirstForceInjection)
+                {
+                    hasLoggedFirstForceInjection = true;
+                    Debug.Log($"[ForceInjection] First force: pos={pixelPos}, dir={f.force.normalized:F3}, " +
+                        $"strength={finalStrength:F3} (base={ctx.ForceStrength}, " +
+                        $"uvMag={f.force.magnitude:F4}, pxMag={pixelForce.magnitude:F1}), " +
+                        $"radius={ctx.ForceRadius}");
+                }
 
                 if (DebugLogForces && forceLogCounter++ % 60 == 0)
                 {
                     Debug.Log($"[ForceInjection] pos={pixelPos}, dir={f.force.normalized:F3}, " +
-                        $"strength={finalStrength:F3} (base={ctx.ForceStrength}, mag={f.force.magnitude:F4}, " +
-                        $"resScale={resScale:F2}), radius={ctx.ForceRadius}");
+                        $"strength={finalStrength:F3} (base={ctx.ForceStrength}, " +
+                        $"uvMag={f.force.magnitude:F4}, pxMag={pixelForce.magnitude:F1}), " +
+                        $"radius={ctx.ForceRadius}");
                 }
 
                 ctx.FluidCompute.SetVector("_ForcePosition", pixelPos);

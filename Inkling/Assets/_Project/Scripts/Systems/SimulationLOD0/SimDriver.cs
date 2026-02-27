@@ -36,9 +36,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Simulation Parameters")]
         [SerializeField] private int resolution = 256;
         [SerializeField] private float viscosity = 0.0001f;
-        [SerializeField] private float vorticity = 5.0f;
+        [SerializeField] private float vorticity = 20.0f;
         [SerializeField] private float dissipation = 0.999f;
-        [SerializeField] private float velocityDissipation = 0.99f;
+        [SerializeField] private float velocityDissipation = 0.9995f;
         [SerializeField] private float timestep = 0.016f;
 
         [Header("Air Debug")]
@@ -60,14 +60,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public int Resolution => resolution;
 
         [Header("Solver Settings")]
-        [SerializeField] private int pressureIterations = 40;
-        [SerializeField] private int diffusionIterations = 4;
+        [SerializeField] private int pressureIterations = 10;
+        [SerializeField] private int diffusionIterations = 2;
         [SerializeField] private bool useRedBlackSolver = false;
 
         [Header("Injection")]
         [SerializeField] private float injectionForce = 100f;
-        [SerializeField] private float densityAmount = 10.0f;
-        [SerializeField] private float forceRadius = 40f;
+        [SerializeField] private float densityAmount = 0.3f;
+        [SerializeField] private float forceRadius = 56f;
         [SerializeField] private float forceStrength = 1.5f;
         [SerializeField] private bool useBatchedDensityInjection = true;
         [SerializeField] private ComputeShader batchedInjectionCompute;
@@ -264,7 +264,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 if (ctx.FluidKernelUpdateObstacles != 0)
                     fluidSolver.InitializeObstacles();
 
-                // Initial density seeds
+                // Seed initial density so there's something visible on startup.
                 InjectDensity(new Vector2(0.5f, 0.5f), Color.white, 0);
                 InjectDensity(new Vector2(0.3f, 0.7f), new Color(1f, 0.5f, 0f, 1f), 0);
                 InjectDensity(new Vector2(0.7f, 0.3f), new Color(0f, 0.5f, 1f, 1f), 0);
@@ -275,7 +275,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (locator != null)
                 locator.RegisterService(this);
 
-            Debug.Log($"[SimDriver] Initialized {resolution}x{resolution} simulation");
+            Debug.Log($"[SimDriver] Initialized {resolution}x{resolution} simulation | " +
+                      $"forceStrength={forceStrength}, radius={forceRadius}, " +
+                      $"pressureIter={pressureIterations}, diffusionIter={diffusionIterations}, " +
+                      $"vorticity={vorticity}, densityAmt={densityAmount}, " +
+                      $"redBlack={useRedBlackSolver}");
         }
 
         /// <summary>
@@ -351,12 +355,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             SyncContextFromFields();
             UpdateHotkeys();
 
-            // Debug: inject a circular force at center every frame to test pipeline
+            // Debug: inject a circular force at center every frame to test pipeline.
+            // The force vector (0.1, 0.05) in UV-space → ~100px at 1024 res → clearly visible flow.
             if (debugInjectTestForce && ctx.FluidCompute != null)
             {
-                // Inject rightward force at center — should produce visible density movement
-                InjectForce(new Vector2(0.5f, 0.5f), new Vector2(1f, 0f));
-                // Also inject density at center so there's something to move
+                InjectForce(new Vector2(0.5f, 0.5f), new Vector2(0.1f, 0.05f));
                 InjectDensity(new Vector2(0.5f, 0.5f), Color.red, 0);
             }
 
@@ -386,6 +389,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             operationQueue.DebugLogForces = debugLogForces;
             operationQueue.ProcessPending();
+
             var sw = measurePerformance ? stopwatch : null;
             fluidSolver.Step(sw);
         }
@@ -596,6 +600,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 currentInkType = hotkey;
                 Debug.Log($"[SimDriver] Switched to ink type: {currentInkType}");
+            }
+
+            // V key: toggle velocity display (shows raw velocity texture, bypasses gradient)
+            if (Keyboard.current != null && Keyboard.current.vKey.wasPressedThisFrame)
+            {
+                displayVelocity = !displayVelocity;
+                Debug.Log($"[SimDriver] displayVelocity = {displayVelocity}");
             }
         }
 

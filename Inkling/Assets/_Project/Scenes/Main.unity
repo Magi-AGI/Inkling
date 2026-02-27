@@ -163,8 +163,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 42b50f360ce194e4e80a50cac24089bf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Inkling.Dev::Inkling.Dev.Bootstrap
-  width: 512
-  height: 512
+  width: 1024
+  height: 1024
   loResScale: 2
   scenario: test01
   outputFolder: Captures
@@ -1326,18 +1326,18 @@ MonoBehaviour:
   fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
   resolution: 1024
   viscosity: 0.0001
-  vorticity: 6.5
+  vorticity: 20
   dissipation: 0.999
-  velocityDissipation: 0.996
+  velocityDissipation: 0.9995
   timestep: 0.016
   debugZeroPressure: 0
   debugZeroVelocity: 0
   debugSkipAir: 0
-  pressureIterations: 80
-  diffusionIterations: 10
-  useRedBlackSolver: 1
+  pressureIterations: 10
+  diffusionIterations: 2
+  useRedBlackSolver: 0
   injectionForce: 100
-  densityAmount: 10
+  densityAmount: 0.3
   forceRadius: 56
   forceStrength: 1.5
   useBatchedDensityInjection: 1
@@ -1388,6 +1388,8 @@ MonoBehaviour:
   particleChannelSplatCompute: {fileID: 7200000, guid: 2e75d1648379b174584d6d1a1c20b62c, type: 3}
   useParticleRenderPass: 0
   simulationUpdateRate: 0
+  debugInjectTestForce: 0
+  debugLogForces: 0
   currentInkType: 0
 --- !u!1 &1314578116
 GameObject:
