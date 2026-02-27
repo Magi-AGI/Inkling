@@ -491,7 +491,7 @@ MonoBehaviour:
   injectWhileMoving: 1
   injectionInterval: 0.033
   addVelocityTrail: 1
-  velocityScale: 50
+  velocityScale: 90
 --- !u!114 &273307173
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1326,18 +1326,18 @@ MonoBehaviour:
   fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
   resolution: 1024
   viscosity: 0.0001
-  vorticity: 5
+  vorticity: 6.5
   dissipation: 0.999
-  velocityDissipation: 0.99
+  velocityDissipation: 0.996
   timestep: 0.016
-  pressureIterations: 60
-  diffusionIterations: 8
+  pressureIterations: 80
+  diffusionIterations: 10
   useRedBlackSolver: 1
   autoInject: 0
   injectionForce: 100
   densityAmount: 10
-  forceRadius: 40
-  forceStrength: 50
+  forceRadius: 56
+  forceStrength: 75
   currentInkType: 0
   displayRenderer: {fileID: 1485820108}
   displayVelocity: 0
@@ -2977,7 +2977,7 @@ MonoBehaviour:
   injectWhileMoving: 1
   injectionInterval: 0.033
   addVelocityTrail: 1
-  velocityScale: 50
+  velocityScale: 90
 --- !u!114 &2100005003
 MonoBehaviour:
   m_ObjectHideFlags: 0

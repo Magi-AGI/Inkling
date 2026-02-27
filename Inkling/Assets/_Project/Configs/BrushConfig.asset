@@ -14,6 +14,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Brush.BrushConfig
   brushRadiusUv: 0.02
   densityMultiplier: 1
-  forceMultiplier: 50
+  forceMultiplier: 80
   stampTexture: {fileID: 0}
   verboseLogging: 0
