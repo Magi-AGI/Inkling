@@ -6,6 +6,9 @@ using Magi.UnityTools.Core;
 using Magi.InkTools;
 using Magi.InkTools.Simulation;
 using Magi.UnityTools.Patterns;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 using Debug = UnityEngine.Debug;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
@@ -18,6 +21,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     [DefaultExecutionOrder(50)]
     public class SimDriver : MonoBehaviour, ISimulationService, ISimulationDebug
     {
+        private static readonly string[] FluidComputeCandidatePaths =
+        {
+            "Packages/com.inktools.sim/Compute/Fluids.compute",
+            "Packages/com.inktools.sim/Runtime/Compute/Fluids.compute",
+            "Assets/_Project/Scripts/Simulation/Compute/Fluids.compute",
+            "Assets/_Project/Scripts/Systems/SimulationLOD0/Fluids.compute",
+        };
+
         // ── Compute Shaders ─────────────────────────────────────────────────
         [Header("Compute Shader")]
         [SerializeField] public ComputeShader fluidCompute;
@@ -50,14 +61,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Solver Settings")]
         [SerializeField] private int pressureIterations = 40;
-        [SerializeField] private int diffusionIterations = 0;
+        [SerializeField] private int diffusionIterations = 4;
         [SerializeField] private bool useRedBlackSolver = false;
 
         [Header("Injection")]
         [SerializeField] private float injectionForce = 100f;
         [SerializeField] private float densityAmount = 10.0f;
         [SerializeField] private float forceRadius = 40f;
-        [SerializeField] private float forceStrength = 50f;
+        [SerializeField] private float forceStrength = 1.5f;
         [SerializeField] private bool useBatchedDensityInjection = true;
         [SerializeField] private ComputeShader batchedInjectionCompute;
         [SerializeField] private bool useBatchedStamping = true;
@@ -118,6 +129,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Update Rate")]
         [SerializeField] private int simulationUpdateRate = 0;
 
+        [Header("Debug / Diagnostics")]
+        [Tooltip("Inject a constant circular force every frame to test the velocity pipeline. Enable displayVelocity to visualize.")]
+        [SerializeField] private bool debugInjectTestForce = false;
+        [Tooltip("Log force injection diagnostics every 60 frames.")]
+        [SerializeField] private bool debugLogForces = false;
+
         [Header("Runtime Selection")]
         [SerializeField] private int currentInkType = 0;
 
@@ -136,8 +153,61 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private float simAccumulator;
         private bool simRanThisFrame;
 
+        private static bool HasRequiredFluidKernels(ComputeShader shader)
+        {
+            if (shader == null) return false;
+
+            return shader.HasKernel("Advection")
+                && shader.HasKernel("Diffusion")
+                && shader.HasKernel("Divergence")
+                && shader.HasKernel("Pressure")
+                && shader.HasKernel("SubtractGradient")
+                && shader.HasKernel("Vorticity")
+                && shader.HasKernel("VorticityConfinement")
+                && shader.HasKernel("AddForce")
+                && shader.HasKernel("AddDensity")
+                && shader.HasKernel("Clear");
+        }
+
+        private ComputeShader ResolveFluidCompute()
+        {
+            if (HasRequiredFluidKernels(fluidCompute))
+                return fluidCompute;
+
+            if (fluidCompute != null)
+                Debug.LogWarning($"[SimDriver] Assigned compute shader '{fluidCompute.name}' is missing required fluid kernels.");
+
+            #if UNITY_EDITOR
+            foreach (string path in FluidComputeCandidatePaths)
+            {
+                var candidate = AssetDatabase.LoadAssetAtPath<ComputeShader>(path);
+                if (candidate == null) continue;
+
+                if (HasRequiredFluidKernels(candidate))
+                {
+                    Debug.Log($"[SimDriver] Auto-assigned Fluids.compute from '{path}'.");
+                    return candidate;
+                }
+
+                Debug.LogWarning($"[SimDriver] Candidate shader at '{path}' is missing required fluid kernels.");
+            }
+            #endif
+
+            var resourcesCandidate = Resources.Load<ComputeShader>("Fluids");
+            if (HasRequiredFluidKernels(resourcesCandidate))
+            {
+                Debug.Log("[SimDriver] Auto-assigned Fluids.compute from Resources/Fluids.");
+                return resourcesCandidate;
+            }
+
+            Debug.LogError("[SimDriver] No valid Fluids.compute found. Simulation will run in test/static mode.");
+            return fluidCompute;
+        }
+
         private void Start()
         {
+            fluidCompute = ResolveFluidCompute();
+
             ctx = new SimulationContext();
             resources = new SimulationResources();
 

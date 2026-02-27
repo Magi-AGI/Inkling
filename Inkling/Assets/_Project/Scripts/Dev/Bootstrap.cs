@@ -101,14 +101,21 @@ namespace Magi.Inkling.Dev
             {
                 Debug.Log($"[Bootstrap] Using existing SimDriver: {simDriver.gameObject.name}");
 
-                // Check if it has a compute shader assigned
-                if (simDriver.fluidCompute != null)
+                // Check if it has a valid fluid compute shader assigned
+                if (HasRequiredFluidKernels(simDriver.fluidCompute))
                 {
                     Debug.Log("[Bootstrap] SimDriver already has Fluids.compute shader assigned");
                 }
                 else
                 {
-                    Debug.LogWarning("[Bootstrap] Existing SimDriver found but no compute shader assigned");
+                    if (simDriver.fluidCompute == null)
+                    {
+                        Debug.LogWarning("[Bootstrap] Existing SimDriver found but no compute shader assigned");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Bootstrap] Existing SimDriver compute shader '{simDriver.fluidCompute.name}' is missing required kernels");
+                    }
                     TryLoadAndAssignComputeShader();
                 }
             }
@@ -133,27 +140,54 @@ namespace Magi.Inkling.Dev
             #if UNITY_EDITOR
             if (computeShader == null)
             {
-                // Try direct asset loading in editor only
-                computeShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
-                    "Packages/com.inktools.sim/Runtime/Compute/Fluids.compute");
-                if (computeShader == null)
+                string[] candidates =
                 {
-                    // Try the local project path
-                    computeShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(
-                        "Assets/_Project/Scripts/Simulation/Compute/Fluids.compute");
+                    "Packages/com.inktools.sim/Compute/Fluids.compute",
+                    "Packages/com.inktools.sim/Runtime/Compute/Fluids.compute",
+                    "Assets/_Project/Scripts/Simulation/Compute/Fluids.compute",
+                    "Assets/_Project/Scripts/Systems/SimulationLOD0/Fluids.compute",
+                };
+
+                foreach (string path in candidates)
+                {
+                    computeShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(path);
+                    if (computeShader != null && HasRequiredFluidKernels(computeShader))
+                    {
+                        break;
+                    }
                 }
             }
             #endif
 
-            if (computeShader != null)
+            if (computeShader != null && HasRequiredFluidKernels(computeShader))
             {
                 simDriver.fluidCompute = computeShader;
                 Debug.Log("[Bootstrap] Successfully loaded and assigned Fluids.compute shader");
+            }
+            else if (computeShader != null)
+            {
+                Debug.LogWarning($"[Bootstrap] Candidate compute shader '{computeShader.name}' is missing required fluid kernels.");
             }
             else
             {
                 Debug.LogWarning("[Bootstrap] Could not find Fluids.compute shader to assign. SimDriver will run in test pattern mode.");
             }
+        }
+
+        private static bool HasRequiredFluidKernels(ComputeShader shader)
+        {
+            if (shader == null) return false;
+
+            return shader.HasKernel("Advection")
+                && shader.HasKernel("Diffusion")
+                && shader.HasKernel("Divergence")
+                && shader.HasKernel("Pressure")
+                && shader.HasKernel("SubtractGradient")
+                && shader.HasKernel("Vorticity")
+                && shader.HasKernel("VorticityConfinement")
+                && shader.HasKernel("AddForce")
+                && shader.HasKernel("AddDensity")
+                && shader.HasKernel("Clear");
         }
 
         RenderTexture GetDisplayTexture()

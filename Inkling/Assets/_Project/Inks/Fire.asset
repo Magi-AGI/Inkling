@@ -19,7 +19,7 @@ MonoBehaviour:
   colorMatchTolerance: 0.35
   dissipation: 0.98
   viscosity: 0.07
-  vorticity: 2.8
+  vorticity: 2
   interactionThreshold: 0.1
   advectionWeight: 1
   pressureWeight: 2.5

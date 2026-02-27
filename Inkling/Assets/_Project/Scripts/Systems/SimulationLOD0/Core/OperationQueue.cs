@@ -142,21 +142,37 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             InitializeBatchedInjection();
         }
 
+        private static bool TryFindKernel(ComputeShader compute, string kernelName, out int kernel)
+        {
+            kernel = -1;
+            if (compute == null) return false;
+            if (!compute.HasKernel(kernelName)) return false;
+
+            try
+            {
+                kernel = compute.FindKernel(kernelName);
+                return kernel >= 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private void InitializeStampCompute()
         {
             // Stamp compute
             if (ctx.StampCompute != null)
             {
-                try
+                if (TryFindKernel(ctx.StampCompute, "StampDensity", out kernelStampDensity) &&
+                    TryFindKernel(ctx.StampCompute, "ClearBlackDensity", out kernelClearBlackDensity))
                 {
-                    kernelStampDensity = ctx.StampCompute.FindKernel("StampDensity");
-                    kernelClearBlackDensity = ctx.StampCompute.FindKernel("ClearBlackDensity");
                     stampComputeReady = true;
-                    Debug.Log("[SimDriver] Stamp compute shader ready – density stamps will use compute pipeline.");
+                    Debug.Log("[SimDriver] Stamp compute shader ready - density stamps will use compute pipeline.");
                 }
-                catch (System.Exception e)
+                else
                 {
-                    Debug.LogWarning($"[SimDriver] Stamp compute init failed ({e.Message}). Falling back to Blit-based stamps.");
+                    Debug.LogWarning("[SimDriver] Stamp compute init failed (missing StampDensity/ClearBlackDensity kernel). Falling back to Blit-based stamps.");
                     stampComputeReady = false;
                 }
             }
@@ -164,15 +180,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Stamp particles compute
             if (ctx.StampParticlesCompute != null)
             {
-                try
+                if (TryFindKernel(ctx.StampParticlesCompute, "StampParticles", out kernelStampParticles))
                 {
-                    kernelStampParticles = ctx.StampParticlesCompute.FindKernel("StampParticles");
                     stampParticlesComputeReady = true;
-                    Debug.Log("[SimDriver] Stamp particles compute shader ready – particle stamps will use GPU pipeline.");
+                    Debug.Log("[SimDriver] Stamp particles compute shader ready - particle stamps will use GPU pipeline.");
                 }
-                catch (System.Exception e)
+                else
                 {
-                    Debug.LogWarning($"[SimDriver] Stamp particles compute init failed ({e.Message}). Falling back to CPU particle stamps.");
+                    Debug.LogWarning("[SimDriver] Stamp particles compute init failed (missing StampParticles kernel). Falling back to CPU particle stamps.");
                     stampParticlesComputeReady = false;
                 }
             }
@@ -180,15 +195,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Channel splat compute
             if (ctx.ParticleChannelSplatCompute != null)
             {
-                try
+                if (TryFindKernel(ctx.ParticleChannelSplatCompute, "ChannelSplat", out kernelChannelSplat))
                 {
-                    kernelChannelSplat = ctx.ParticleChannelSplatCompute.FindKernel("ChannelSplat");
                     channelSplatReady = true;
-                    Debug.Log("[SimDriver] Channel splat compute shader ready – gradient rendering will use particle channel textures.");
+                    Debug.Log("[SimDriver] Channel splat compute shader ready - gradient rendering will use particle channel textures.");
                 }
-                catch (System.Exception e)
+                else
                 {
-                    Debug.LogWarning($"[SimDriver] Channel splat compute init failed ({e.Message}). Gradient rendering will fall back to density RT.");
+                    Debug.LogWarning("[SimDriver] Channel splat compute init failed (missing ChannelSplat kernel). Gradient rendering will fall back to density RT.");
                     channelSplatReady = false;
                 }
             }
@@ -196,15 +210,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Ink interactions compute
             if (ctx.InkInteractionsCompute != null)
             {
-                try
+                if (TryFindKernel(ctx.InkInteractionsCompute, "InkInteractions", out kernelInkInteractions))
                 {
-                    kernelInkInteractions = ctx.InkInteractionsCompute.FindKernel("InkInteractions");
                     inkInteractionsReady = true;
-                    Debug.Log("[SimDriver] Ink interactions compute shader ready – cellular automata reactions enabled.");
+                    Debug.Log("[SimDriver] Ink interactions compute shader ready - cellular automata reactions enabled.");
                 }
-                catch (System.Exception e)
+                else
                 {
-                    Debug.LogWarning($"[SimDriver] Ink interactions compute init failed ({e.Message}). Ink reactions disabled.");
+                    Debug.LogWarning("[SimDriver] Ink interactions compute init failed (missing InkInteractions kernel). Ink reactions disabled.");
                     inkInteractionsReady = false;
                 }
             }
@@ -212,33 +225,31 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Batched stamp compute
             if (ctx.BatchedStampCompute != null)
             {
-                try
+                if (TryFindKernel(ctx.BatchedStampCompute, "StampDensityBatched", out kernelStampDensityBatched) &&
+                    TryFindKernel(ctx.BatchedStampCompute, "StampParticlesBatched", out kernelStampParticlesBatched))
                 {
-                    kernelStampDensityBatched = ctx.BatchedStampCompute.FindKernel("StampDensityBatched");
-                    kernelStampParticlesBatched = ctx.BatchedStampCompute.FindKernel("StampParticlesBatched");
                     batchedStampReady = true;
                     Debug.Log("[SimDriver] Batched stamp compute ready.");
                 }
-                catch (System.Exception e)
+                else
                 {
                     batchedStampReady = false;
-                    Debug.LogWarning($"[SimDriver] Batched stamp compute init failed ({e.Message}).");
+                    Debug.LogWarning("[SimDriver] Batched stamp compute init failed (missing StampDensityBatched/StampParticlesBatched kernel). Falling back to non-batched stamping.");
                 }
             }
 
             // Batched mask compute
             if (ctx.BatchedMaskCompute != null)
             {
-                try
+                if (TryFindKernel(ctx.BatchedMaskCompute, "ClearMaskBatched", out kernelClearMaskBatched))
                 {
-                    kernelClearMaskBatched = ctx.BatchedMaskCompute.FindKernel("ClearMaskBatched");
                     batchedMaskReady = true;
                     Debug.Log("[SimDriver] Batched mask compute ready.");
                 }
-                catch (System.Exception e)
+                else
                 {
                     batchedMaskReady = false;
-                    Debug.LogWarning($"[SimDriver] Batched mask compute init failed ({e.Message}).");
+                    Debug.LogWarning("[SimDriver] Batched mask compute init failed (missing ClearMaskBatched kernel). Falling back to non-batched mask clears.");
                 }
             }
         }
@@ -247,21 +258,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             if (ctx.BatchedInjectionCompute != null)
             {
-                try
+                if (TryFindKernel(ctx.BatchedInjectionCompute, "AddDensityBatched", out kernelAddDensityBatched) &&
+                    TryFindKernel(ctx.BatchedInjectionCompute, "AddParticlesBatched", out kernelAddParticlesBatched))
                 {
-                    kernelAddDensityBatched = ctx.BatchedInjectionCompute.FindKernel("AddDensityBatched");
-                    kernelAddParticlesBatched = ctx.BatchedInjectionCompute.FindKernel("AddParticlesBatched");
                     batchedInjectionReady = true;
                     Debug.Log("[SimDriver] Batched injection compute ready (density + particles).");
                 }
-                catch (System.Exception e)
+                else
                 {
                     batchedInjectionReady = false;
-                    Debug.LogWarning($"[SimDriver] Batched injection compute init failed ({e.Message}). Falling back to per-injection dispatch.");
+                    Debug.LogWarning("[SimDriver] Batched injection compute init failed (missing AddDensityBatched/AddParticlesBatched kernel). Falling back to per-injection dispatch.");
                 }
             }
         }
-
         // ── Stamp material ──────────────────────────────────────────────────
 
         private void EnsureStampMaterial()
@@ -638,10 +647,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 Vector2 pixelPos = f.position * ctx.Resolution;
 
+                // Scale force by resolution so inspector values feel consistent across grid sizes.
+                // Reference resolution 512: at 1024 forces are 2x, at 256 forces are 0.5x.
+                float resScale = ctx.Resolution / 512f;
+
                 ctx.FluidCompute.SetVector("_ForcePosition", pixelPos);
                 ctx.FluidCompute.SetVector("_ForceDirection", f.force.normalized);
                 ctx.FluidCompute.SetFloat("_ForceRadius", ctx.ForceRadius);
-                ctx.FluidCompute.SetFloat("_ForceStrength", ctx.ForceStrength * f.force.magnitude);
+                ctx.FluidCompute.SetFloat("_ForceStrength", ctx.ForceStrength * f.force.magnitude * resScale);
                 ctx.FluidCompute.SetFloat("_DeltaTime", ctx.Timestep);
                 ctx.FluidCompute.SetVector("_SimulationSize", new Vector2(ctx.Resolution, ctx.Resolution));
 

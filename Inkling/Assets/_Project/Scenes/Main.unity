@@ -492,6 +492,21 @@ MonoBehaviour:
   injectionInterval: 0.033
   addVelocityTrail: 1
   velocityScale: 90
+--- !u!4 &273307172
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 273307170}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -9.68741, y: 0, z: -17.78803}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &273307173
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -509,21 +524,6 @@ MonoBehaviour:
   playerInkType: 0
   showDebugGizmos: 0
   logBehaviorChanges: 0
---- !u!4 &273307172
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 273307170}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -9.68741, y: 0, z: -17.78803}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &525871409
 GameObject:
   m_ObjectHideFlags: 0
@@ -1017,7 +1017,7 @@ MonoBehaviour:
   isCapturing: 0
   targetFrameCount: 100
   captureInterval: 0.033
-  simDriver: {fileID: 0}
+  simDriverComponent: {fileID: 0}
   viscosity: 0.01
   vorticity: 2
   dissipation: 0.98
@@ -1330,15 +1330,20 @@ MonoBehaviour:
   dissipation: 0.999
   velocityDissipation: 0.996
   timestep: 0.016
+  debugZeroPressure: 0
+  debugZeroVelocity: 0
+  debugSkipAir: 0
   pressureIterations: 80
   diffusionIterations: 10
   useRedBlackSolver: 1
-  autoInject: 0
   injectionForce: 100
   densityAmount: 10
   forceRadius: 56
-  forceStrength: 75
-  currentInkType: 0
+  forceStrength: 1.5
+  useBatchedDensityInjection: 1
+  batchedInjectionCompute: {fileID: 0}
+  useBatchedStamping: 1
+  useBatchedMasks: 1
   displayRenderer: {fileID: 1485820108}
   displayVelocity: 0
   useParticleDisplay: 0
@@ -1348,9 +1353,12 @@ MonoBehaviour:
   gradientMaterial: {fileID: 2100000, guid: 8fb7b721f0d7666468899181f1032e28, type: 2}
   measurePerformance: 1
   displayResolution: 0
+  displayResolutionScale: 1
   densityStampShader: {fileID: 4800000, guid: 8a8122c28f2b84949a817112ae252002, type: 3}
   stampCompute: {fileID: 7200000, guid: 8655b9b38e3613f42828276a2b65ae0a, type: 3}
   stampParticlesCompute: {fileID: 7200000, guid: ddd01a05f12b2bf46895c3592405baf8, type: 3}
+  batchedStampCompute: {fileID: 0}
+  batchedMaskCompute: {fileID: 0}
   useParticleSimulation: 1
   useParticleAdvection: 1
   useParticleDissipation: 1
@@ -1362,6 +1370,9 @@ MonoBehaviour:
   affinityGroups:
   - {fileID: 11400000, guid: da76efa99d9a5cf4aadca3f811d21554, type: 2}
   - {fileID: 11400000, guid: bb5975a015651cc47aab80f9ac703167, type: 2}
+  enableBlackBodyClearingFallback: 0
+  blackBodyThresholdFallback: 0.5
+  blackBodyClearingRateFallback: 0.05
   inkDefinitions:
   - {fileID: 11400000, guid: b95f0ee9596be374186a08a2bcba1023, type: 2}
   - {fileID: 11400000, guid: 2a479c9de68b35042b619687310e729a, type: 2}
@@ -1376,6 +1387,8 @@ MonoBehaviour:
   particleToColorCompute: {fileID: 7200000, guid: 0334aaf5539bd7649886292613ec7ad8, type: 3}
   particleChannelSplatCompute: {fileID: 7200000, guid: 2e75d1648379b174584d6d1a1c20b62c, type: 3}
   useParticleRenderPass: 0
+  simulationUpdateRate: 0
+  currentInkType: 0
 --- !u!1 &1314578116
 GameObject:
   m_ObjectHideFlags: 0
@@ -2646,6 +2659,7 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2100000000}
+  serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -2692,6 +2706,7 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2100001000}
+  serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -2711,11 +2726,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ede766a3bc1fbf841b757f4b69180cf8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Brush.BrushInputController
-  simulationWriterSource: {fileID: 1299845689}
   config: {fileID: 11400000, guid: 6b6ff938f4c34357bc7a85e18f0b2c11, type: 2}
   targetRenderer: {fileID: 1485820108}
   inputCamera: {fileID: 529788511}
-
 --- !u!1 &2100002000
 GameObject:
   m_ObjectHideFlags: 0
@@ -2741,6 +2754,7 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2100002000}
+  serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -2786,6 +2800,7 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2100002003}
+  serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -2807,7 +2822,23 @@ MonoBehaviour:
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Services.Diagnostics.DiagnosticsHUD
   show: 0
   textColor: {r: 1, g: 1, b: 1, a: 1}
-
+  logSink: {fileID: 0}
+  toggleKey: 290
+  showPersona: 1
+  tracerSystem: {fileID: 0}
+  arrowsRenderer: {fileID: 0}
+  velocityStats: {fileID: 0}
+  velocityMask: {fileID: 0}
+  showTracerToggle: 1
+  showArrowsToggle: 1
+  showMaskToggle: 1
+  showMaskPreview: 0
+  splitRenderer: {fileID: 0}
+  showSplitToggle: 0
+  pressureRenderer: {fileID: 0}
+  showPressureToggle: 0
+  showAirDebugToggles: 0
+  showStats: 1
 --- !u!114 &2100002006
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2846,6 +2877,7 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2100003000}
+  serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -2891,6 +2923,7 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2100004000}
+  serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -2942,6 +2975,7 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2100005000}
+  serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -2990,7 +3024,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7e33c9a46ad166e429c9f43843fd4ce4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Player.PlayerCharacterController
-  config: {fileID: 0}
   targetRenderer: {fileID: 1485820108}
   inputCamera: {fileID: 529788511}
 --- !u!1660057539 &9223372036854775807
