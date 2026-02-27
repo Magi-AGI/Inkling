@@ -45,6 +45,12 @@
 
 ### Development Workflow
 - **Simulation Tuning**: Adjust parameters (viscosity, vorticity, iterations) on the `SimDriver` component.
+- **Diagnostic Tools**: `SimDriver` includes two key debug flags:
+  - `debugInjectTestForce`: Injects a constant rightward force and red ink at the center. Use this to verify if the velocity-advection pipeline is functional independently of player input.
+  - `debugLogForces`: Logs force injection details to the console every 60 frames to verify that commands are reaching the GPU.
+- **Fluid Troubleshooting**:
+  - If ink "sits and dissipates" without moving, verify that `Fluids.compute` has been recompiled (touch the file with a comment). A common issue is $dt^2$ attenuation in the `AddForce` kernel.
+  - Enable `Display Velocity` on `SimDriver` to visualize the raw velocity field as color.
 - **Input Hardening**: Both `PlayerCharacterController` and `BrushInputController` support New Input System and legacy hotkeys (1-0/Numpad) for ink selection.
 - **Debug Assembly**: Many debug renderers are moved to a conditional `Magi.InkTools.Debug` assembly (use `INKTOOLS_DEBUG` define).
 - **Reference Deep Dives**: Phase 7F focused on **The-Powder-Toy** for GPU-friendly pressure/heat/air field adaptations and element registry patterns.

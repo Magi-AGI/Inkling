@@ -169,8 +169,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 && shader.HasKernel("Clear");
         }
 
+        #if UNITY_EDITOR
+        private static void ForceReimportCompute(ComputeShader shader)
+        {
+            if (shader == null) return;
+
+            string path = AssetDatabase.GetAssetPath(shader);
+            if (string.IsNullOrEmpty(path)) return;
+
+            AssetDatabase.ImportAsset(
+                path,
+                ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+        }
+        #endif
+
         private ComputeShader ResolveFluidCompute()
         {
+            #if UNITY_EDITOR
+            ForceReimportCompute(fluidCompute);
+            #endif
+
             if (HasRequiredFluidKernels(fluidCompute))
                 return fluidCompute;
 
@@ -182,6 +200,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 var candidate = AssetDatabase.LoadAssetAtPath<ComputeShader>(path);
                 if (candidate == null) continue;
+
+                ForceReimportCompute(candidate);
 
                 if (HasRequiredFluidKernels(candidate))
                 {
@@ -331,6 +351,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             SyncContextFromFields();
             UpdateHotkeys();
 
+            // Debug: inject a circular force at center every frame to test pipeline
+            if (debugInjectTestForce && ctx.FluidCompute != null)
+            {
+                // Inject rightward force at center — should produce visible density movement
+                InjectForce(new Vector2(0.5f, 0.5f), new Vector2(1f, 0f));
+                // Also inject density at center so there's something to move
+                InjectDensity(new Vector2(0.5f, 0.5f), Color.red, 0);
+            }
+
             // Simulation update rate throttling
             simRanThisFrame = false;
             simAccumulator += Time.deltaTime;
@@ -355,6 +384,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void SimulateFrame()
         {
+            operationQueue.DebugLogForces = debugLogForces;
             operationQueue.ProcessPending();
             var sw = measurePerformance ? stopwatch : null;
             fluidSolver.Step(sw);

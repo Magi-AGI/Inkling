@@ -151,7 +151,13 @@ namespace Magi.Inkling.Dev
                 foreach (string path in candidates)
                 {
                     computeShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(path);
-                    if (computeShader != null && HasRequiredFluidKernels(computeShader))
+                    if (computeShader == null) continue;
+
+                    UnityEditor.AssetDatabase.ImportAsset(
+                        path,
+                        ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+
+                    if (HasRequiredFluidKernels(computeShader))
                     {
                         break;
                     }

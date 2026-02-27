@@ -639,6 +639,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             pendingClearDensityMasks.Clear();
         }
 
+        /// <summary>
+        /// Enable to log force injection details every 60 frames.
+        /// Set from SimDriver.debugLogForces via reflection or direct access.
+        /// </summary>
+        public bool DebugLogForces { get; set; }
+        private int forceLogCounter;
+
         private void ProcessForceInjections(int threadGroups)
         {
             if (pendingForceInjections.Count == 0 || ctx.FluidCompute == null) return;
@@ -650,11 +657,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 // Scale force by resolution so inspector values feel consistent across grid sizes.
                 // Reference resolution 512: at 1024 forces are 2x, at 256 forces are 0.5x.
                 float resScale = ctx.Resolution / 512f;
+                float finalStrength = ctx.ForceStrength * f.force.magnitude * resScale;
+
+                if (DebugLogForces && forceLogCounter++ % 60 == 0)
+                {
+                    Debug.Log($"[ForceInjection] pos={pixelPos}, dir={f.force.normalized:F3}, " +
+                        $"strength={finalStrength:F3} (base={ctx.ForceStrength}, mag={f.force.magnitude:F4}, " +
+                        $"resScale={resScale:F2}), radius={ctx.ForceRadius}");
+                }
 
                 ctx.FluidCompute.SetVector("_ForcePosition", pixelPos);
                 ctx.FluidCompute.SetVector("_ForceDirection", f.force.normalized);
                 ctx.FluidCompute.SetFloat("_ForceRadius", ctx.ForceRadius);
-                ctx.FluidCompute.SetFloat("_ForceStrength", ctx.ForceStrength * f.force.magnitude * resScale);
+                ctx.FluidCompute.SetFloat("_ForceStrength", finalStrength);
                 ctx.FluidCompute.SetFloat("_DeltaTime", ctx.Timestep);
                 ctx.FluidCompute.SetVector("_SimulationSize", new Vector2(ctx.Resolution, ctx.Resolution));
 
