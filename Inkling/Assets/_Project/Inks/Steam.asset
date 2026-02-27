@@ -19,10 +19,12 @@ MonoBehaviour:
   colorMatchTolerance: 0.3
   dissipation: 0.99
   viscosity: 0.001
-  vorticity: 2.2
+  vorticity: 2
   interactionThreshold: 0.1
   advectionWeight: 1
   pressureWeight: 1
   enableClearing: 0
   clearingThreshold: 0.5
   clearingRate: 0.05
+  actsAsObstacle: 0
+  obstacleThreshold: 0.1

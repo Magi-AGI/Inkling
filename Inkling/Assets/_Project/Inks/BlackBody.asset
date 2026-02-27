@@ -18,8 +18,13 @@ MonoBehaviour:
   inputKeyColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}
   colorMatchTolerance: 0.2
   dissipation: 0.985
-  viscosity: 0.01
+  viscosity: 0.001
   vorticity: 0.1
   interactionThreshold: 0.1
-  advectionWeight: 1
+  advectionWeight: 0
   pressureWeight: 0.8
+  enableClearing: 1
+  clearingThreshold: 0.5
+  clearingRate: 0.05
+  actsAsObstacle: 1
+  obstacleThreshold: 0.1

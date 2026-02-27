@@ -48,7 +48,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         public void UpdateDisplay()
         {
+            bool canUseParticleChannels = CanUseParticleChannelRendering();
             RenderTexture sourceTexture;
+            RenderTexture particleFallbackRT = null;
 
             if (ctx.UseParticleRenderPass && ctx.ParticlesBuffer != null && ctx.ParticleToColorCompute != null)
             {
@@ -59,11 +61,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 sourceTexture = ctx.Velocity.Read;
             }
+            else if (ctx.UseGradientRendering && canUseParticleChannels)
+            {
+                // Particle-channel gradient mode does not need CPU readback.
+                // Avoid ConvertParticlesToTexture() (1M buffer GetData at 1024^2).
+                sourceTexture = ctx.Density != null ? ctx.Density.Read : ctx.DisplayRT;
+            }
+            else if (canUseParticleChannels)
+            {
+                // Channel splat active but gradient rendering off — use density as source,
+                // gradient shader will still read channel textures via _PARTICLEBUFFER_ON.
+                sourceTexture = ctx.Density != null ? ctx.Density.Read : ctx.DisplayRT;
+            }
             else
             {
-                sourceTexture = (!ctx.UseParticleDisplay && ctx.Density != null)
-                    ? ctx.Density.Read
-                    : ConvertParticlesToTexture();
+                // No channel rendering — use density directly (avoid CPU readback at 1024^2)
+                sourceTexture = ctx.Density != null ? ctx.Density.Read : ctx.DisplayRT;
             }
 
             // Composite creature ink for display only
@@ -106,9 +119,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (!loggedDisplayDiagnostic)
             {
                 loggedDisplayDiagnostic = true;
-                bool canSplat = CanUseParticleChannelRendering();
                 Debug.Log($"[SimDriver Display] gradient={ctx.UseGradientRendering}, " +
-                    $"canSplat={canSplat}, " +
+                    $"canSplat={canUseParticleChannels}, " +
                     $"source={sourceTexture?.name ?? "null"}");
 
                 if (ctx.GradientPreset != null && ctx.GradientMaterial != null)
@@ -158,7 +170,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 else
                     ctx.GradientMaterial.DisableKeyword("_SHOWCHANNELS_ON");
 
-                bool canUseParticleChannels = CanUseParticleChannelRendering();
                 if (!canUseParticleChannels
                     && ctx.UseParticleDisplay
                     && ctx.UseParticleSimulation
@@ -174,9 +185,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 {
                     ctx.GradientMaterial.EnableKeyword("_PARTICLEBUFFER_ON");
 
-                    var ch0 = ctx.ChannelRT0Down ?? ctx.ChannelRT0Mipped ?? ctx.ChannelRT0;
-                    var ch1 = ctx.ChannelRT1Down ?? ctx.ChannelRT1Mipped ?? ctx.ChannelRT1;
-                    var ch2 = ctx.ChannelRT2Down ?? ctx.ChannelRT2Mipped ?? ctx.ChannelRT2;
+                    // Use downsampled if available, otherwise UAV source directly
+                    // (mipped copies are only generated when display < sim resolution)
+                    var ch0 = ctx.ChannelRT0Down ?? ctx.ChannelRT0;
+                    var ch1 = ctx.ChannelRT1Down ?? ctx.ChannelRT1;
+                    var ch2 = ctx.ChannelRT2Down ?? ctx.ChannelRT2;
                     ctx.GradientMaterial.SetTexture("_Channels0", ch0);
                     ctx.GradientMaterial.SetTexture("_Channels1", ch1);
                     ctx.GradientMaterial.SetTexture("_Channels2", ch2);
@@ -204,6 +217,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (compositeRT != null)
             {
                 RenderTexture.ReleaseTemporary(compositeRT);
+            }
+
+            if (particleFallbackRT != null)
+            {
+                RenderTexture.ReleaseTemporary(particleFallbackRT);
             }
 
             if (ctx.CreatureInkBuffer != null)

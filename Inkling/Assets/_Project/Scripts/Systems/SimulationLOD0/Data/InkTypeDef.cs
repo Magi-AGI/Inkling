@@ -67,6 +67,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Range(0f, 0.2f)]
         public float clearingRate = 0.05f;
 
+        [Header("Obstacle Behavior")]
+        [Tooltip("When true, this ink acts as a velocity obstacle above the threshold concentration.")]
+        public bool actsAsObstacle = false;
+
+        [Tooltip("Minimum concentration for this ink to block velocity (0.01 = very sensitive, 1.0 = only at full saturation).")]
+        [Range(0.01f, 1f)]
+        public float obstacleThreshold = 0.1f;
+
         /// <summary>
         /// Returns the particle field index for GPU upload.
         /// </summary>

@@ -133,6 +133,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public int FluidKernelDissipateParticles;
         public int FluidKernelDiffuseParticles;
         public int FluidKernelAddParticlesGaussian;
+        public int FluidKernelInkToObstacles = -1;
 
         // ── Helpers ─────────────────────────────────────────────────────────
 

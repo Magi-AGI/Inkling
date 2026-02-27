@@ -1346,7 +1346,7 @@ MonoBehaviour:
   useBatchedMasks: 1
   displayRenderer: {fileID: 1485820108}
   displayVelocity: 0
-  useParticleDisplay: 0
+  useParticleDisplay: 1
   useCpuCreatureComposite: 0
   useGradientRendering: 1
   gradientPreset: {fileID: 11400000, guid: 82755fa6fa9f7a84d8c1df4c8cb7e343, type: 2}

@@ -65,6 +65,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 {
                     ctx.UseRedBlackSolver = false;
                 }
+
+                try
+                {
+                    ctx.FluidKernelInkToObstacles = ctx.FluidCompute.FindKernel("InkToObstacles");
+                }
+                catch
+                {
+                    ctx.FluidKernelInkToObstacles = -1;
+                }
             }
             catch (System.Exception)
             {
@@ -169,6 +178,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_AdvectionElectricityGrown", GetInkProp(InkTypeId.ElectricityGrown, d => d.advectionWeight, 1.0f));
             fc.SetFloat("_AdvectionIce", GetInkProp(InkTypeId.Ice, d => d.advectionWeight, 1.0f));
 
+            // Obstacle thresholds (0 = not an obstacle)
+            fc.SetFloat("_ObstacleThresholdFire", GetObstacleThreshold(InkTypeId.Fire));
+            fc.SetFloat("_ObstacleThresholdWater", GetObstacleThreshold(InkTypeId.Water));
+            fc.SetFloat("_ObstacleThresholdPlantSeeded", GetObstacleThreshold(InkTypeId.PlantSeeded));
+            fc.SetFloat("_ObstacleThresholdPlantGrown", GetObstacleThreshold(InkTypeId.PlantGrown));
+            fc.SetFloat("_ObstacleThresholdSteam", GetObstacleThreshold(InkTypeId.Steam));
+            fc.SetFloat("_ObstacleThresholdGlitter", GetObstacleThreshold(InkTypeId.Glitter));
+            fc.SetFloat("_ObstacleThresholdBlackBody", GetObstacleThreshold(InkTypeId.BlackBody));
+            fc.SetFloat("_ObstacleThresholdElectricitySeeded", GetObstacleThreshold(InkTypeId.ElectricitySeeded));
+            fc.SetFloat("_ObstacleThresholdElectricityGrown", GetObstacleThreshold(InkTypeId.ElectricityGrown));
+            fc.SetFloat("_ObstacleThresholdIce", GetObstacleThreshold(InkTypeId.Ice));
+
             // Pressure
             fc.SetFloat("_PressureFire", GetClampedPressureWeight(InkTypeId.Fire, 1.0f));
             fc.SetFloat("_PressureWater", GetClampedPressureWeight(InkTypeId.Water, 1.0f));
@@ -196,6 +217,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // injected velocity (values > 1 can erase brush-driven motion quickly).
             float raw = GetInkProp(type, d => d.pressureWeight, defaultValue);
             return Mathf.Clamp(raw, 0.25f, 1.0f);
+        }
+
+        private float GetObstacleThreshold(InkTypeId type)
+        {
+            int idx = (int)type;
+            if (ctx.InkDefinitions != null && idx < ctx.InkDefinitions.Length && ctx.InkDefinitions[idx] != null)
+            {
+                var def = ctx.InkDefinitions[idx];
+                return def.actsAsObstacle ? def.obstacleThreshold : 0f;
+            }
+            return 0f;
         }
 
         private float GetInkInteractionThreshold(InkTypeId type, float defaultValue)
@@ -281,6 +313,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 RenderTexture.active = ctx.CreatureInkBuffer;
                 GL.Clear(true, true, Color.clear);
                 RenderTexture.active = null;
+            }
+
+            // 0. Ink-to-obstacle pass (writes 1.0 into obstacle RT where solid inks exceed threshold)
+            if (ctx.FluidKernelInkToObstacles >= 0 && ctx.UseParticleSimulation
+                && ctx.ParticlesBuffer != null && ctx.Obstacles != null)
+            {
+                ctx.FluidCompute.SetBuffer(ctx.FluidKernelInkToObstacles, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelInkToObstacles, "_ObstacleWrite", ctx.Obstacles);
+                ctx.FluidCompute.Dispatch(ctx.FluidKernelInkToObstacles, threadGroups, threadGroups, 1);
             }
 
             // 1. Advection
@@ -519,14 +560,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 int splatGroups = Mathf.CeilToInt(ctx.Resolution / 8f);
                 ctx.ParticleChannelSplatCompute.Dispatch(opQueue.KernelChannelSplat, splatGroups, splatGroups, 1);
 
-                if (ctx.ChannelRT0Mipped != null && ctx.ChannelRT1Mipped != null && ctx.ChannelRT2Mipped != null)
+                // Only generate mipped copies when display is smaller than simulation
+                // (needs mipmaps for minification). At 1:1, read directly from UAV RTs.
+                bool needsMippedCopy = ctx.EffectiveDisplayRes < ctx.Resolution;
+                if (needsMippedCopy
+                    && ctx.ChannelRT0Mipped != null && ctx.ChannelRT1Mipped != null && ctx.ChannelRT2Mipped != null)
                 {
                     Graphics.Blit(ctx.ChannelRT0, ctx.ChannelRT0Mipped);
                     Graphics.Blit(ctx.ChannelRT1, ctx.ChannelRT1Mipped);
                     Graphics.Blit(ctx.ChannelRT2, ctx.ChannelRT2Mipped);
                 }
 
-                if (ctx.EffectiveDisplayRes < ctx.Resolution &&
+                if (needsMippedCopy &&
                     ctx.ChannelRT0Down != null && ctx.ChannelRT1Down != null && ctx.ChannelRT2Down != null)
                 {
                     Graphics.Blit(ctx.ChannelRT0Mipped ?? ctx.ChannelRT0, ctx.ChannelRT0Down);
