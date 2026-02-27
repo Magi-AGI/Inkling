@@ -51,9 +51,24 @@ namespace Magi.Inkling.Systems.Brush
                 var cam = inputCamera != null ? inputCamera : Camera.main;
                 
                 Vector2 uv = SimulationUvUtility.ComputeUv(screenPos, targetRenderer, cam, lastUv);
-                
-                // If we just started or moved significantly, inject
-                if (!wasInjecting || Vector2.Distance(uv, lastUv) > 0.005f || !hasLast)
+
+                // Force should be injected continuously while dragging so velocity
+                // remains responsive even when stamp spacing is coarse.
+                if (hasLast)
+                {
+                    Vector2 force = (uv - lastUv) * config.forceMultiplier;
+                    if (force.sqrMagnitude > 0.000001f)
+                    {
+                        simWriter.InjectForce(uv, force);
+                    }
+                }
+
+                bool shouldStamp = !wasInjecting
+                    || !hasLast
+                    || Vector2.Distance(uv, lastUv) > config.minDistanceUv;
+
+                // Stamp density at configurable spacing to avoid oversaturation.
+                if (shouldStamp)
                 {
                     PerformInjection(uv, false);
                     if (config.enableMirror)
@@ -77,16 +92,6 @@ namespace Magi.Inkling.Systems.Brush
             Color color = GetInkKeyColor(inkType);
             
             simWriter.InjectDensity(uv, color, inkType);
-            
-            // Add some force in the direction of movement
-            if (hasLast && !mirror)
-            {
-                Vector2 force = (uv - lastUv) * config.forceMultiplier;
-                if (force.sqrMagnitude > 0.00001f)
-                {
-                    simWriter.InjectForce(uv, force);
-                }
-            }
         }
 
         private static Color GetInkKeyColor(int inkTypeIndex)

@@ -14,6 +14,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     {
         private readonly SimulationContext ctx;
         private bool loggedDisplayDiagnostic;
+        private bool loggedParticleChannelFallback;
 
         /// <summary>
         /// Float-field mirror of iparticle for GPU buffer marshaling on platforms
@@ -32,6 +33,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public SimulationDisplay(SimulationContext context)
         {
             ctx = context;
+        }
+
+        private bool CanUseParticleChannelRendering()
+        {
+            return ctx.UseParticleDisplay
+                && ctx.UseParticleSimulation
+                && ctx.Resolution <= ctx.MaxParticleSimResolution
+                && ctx.ParticlesBuffer != null
+                && ctx.ChannelRT0 != null
+                && ctx.ChannelRT1 != null
+                && ctx.ChannelRT2 != null;
         }
 
         public void UpdateDisplay()
@@ -94,8 +106,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (!loggedDisplayDiagnostic)
             {
                 loggedDisplayDiagnostic = true;
-                bool canSplat = ctx.UseParticleSimulation && ctx.ParticlesBuffer != null
-                    && ctx.ChannelRT0 != null && ctx.ChannelRT1 != null && ctx.ChannelRT2 != null;
+                bool canSplat = CanUseParticleChannelRendering();
                 Debug.Log($"[SimDriver Display] gradient={ctx.UseGradientRendering}, " +
                     $"canSplat={canSplat}, " +
                     $"source={sourceTexture?.name ?? "null"}");
@@ -147,7 +158,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 else
                     ctx.GradientMaterial.DisableKeyword("_SHOWCHANNELS_ON");
 
-                if (ctx.UseParticleSimulation && ctx.ChannelRT0 != null && ctx.ChannelRT1 != null && ctx.ChannelRT2 != null)
+                bool canUseParticleChannels = CanUseParticleChannelRendering();
+                if (!canUseParticleChannels
+                    && ctx.UseParticleDisplay
+                    && ctx.UseParticleSimulation
+                    && !loggedParticleChannelFallback)
+                {
+                    loggedParticleChannelFallback = true;
+                    Debug.LogWarning("[SimDriver Display] Falling back to density gradient path. " +
+                        "Particle channel rendering requires useParticleDisplay=true, valid channel textures, " +
+                        $"and resolution <= maxParticleSimResolution ({ctx.Resolution} <= {ctx.MaxParticleSimResolution}).");
+                }
+
+                if (canUseParticleChannels)
                 {
                     ctx.GradientMaterial.EnableKeyword("_PARTICLEBUFFER_ON");
 

@@ -17,12 +17,12 @@ MonoBehaviour:
   debugColor: {r: 1, g: 0, b: 0, a: 1}
   inputKeyColor: {r: 1, g: 0, b: 0, a: 1}
   colorMatchTolerance: 0.35
-  dissipation: 0.98
-  viscosity: 0.07
+  dissipation: 0.992
+  viscosity: 0.002
   vorticity: 2
   interactionThreshold: 0.1
   advectionWeight: 1
-  pressureWeight: 2.5
+  pressureWeight: 1
   enableClearing: 0
   clearingThreshold: 0.5
   clearingRate: 0.05

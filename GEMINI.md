@@ -50,6 +50,10 @@
   - `debugLogForces`: Logs force injection details to the console every 60 frames to verify that commands are reaching the GPU.
 - **Fluid Troubleshooting**:
   - If ink "sits and dissipates" without moving, verify that `Fluids.compute` has been recompiled (touch the file with a comment). A common issue is $dt^2$ attenuation in the `AddForce` kernel.
+  - **Pressure Solver Bug**: In the `RedBlack` solver mode, `_Alpha` is currently being hardcoded to 0.0 and 1.0 in `FluidSolver.cs` during the two-pass dispatch. This likely overrides the correct resolution-dependent Alpha value needed for incompressibility, causing stagnant flow at high resolutions.
+  - **Injection Overwrite**: If multiple forces (Player + Creatures) are injected in one frame, ensure the velocity buffers are swapped after *each* dispatch, or use a batched kernel. Otherwise, the last injection will overwrite all previous ones in that frame.
+  - If the screen is black or motion isn't visible despite forces being injected, check the `SimDriver` display path. Gradient rendering may be incorrectly defaulting to particle channels.
+  - **Particle vs. Density**: Particle-channel rendering (`_PARTICLEBUFFER_ON`) only activates if `Use Particle Display` is true AND simulation resolution ≤ `Max Particle Sim Resolution`. Otherwise, it falls back to the density-gradient path.
   - Enable `Display Velocity` on `SimDriver` to visualize the raw velocity field as color.
 - **Input Hardening**: Both `PlayerCharacterController` and `BrushInputController` support New Input System and legacy hotkeys (1-0/Numpad) for ink selection.
 - **Debug Assembly**: Many debug renderers are moved to a conditional `Magi.InkTools.Debug` assembly (use `INKTOOLS_DEBUG` define).

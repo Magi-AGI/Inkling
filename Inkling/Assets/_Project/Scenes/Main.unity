@@ -462,7 +462,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &273307171
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1326,7 +1326,7 @@ MonoBehaviour:
   fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
   resolution: 1024
   viscosity: 0.0001
-  vorticity: 20
+  vorticity: 0.05
   dissipation: 0.999
   velocityDissipation: 0.9995
   timestep: 0.016
@@ -1336,7 +1336,7 @@ MonoBehaviour:
   pressureIterations: 10
   diffusionIterations: 2
   useRedBlackSolver: 0
-  injectionForce: 100
+  injectionForce: 1
   densityAmount: 0.3
   forceRadius: 56
   forceStrength: 1.5
@@ -2969,7 +2969,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &2100005001
 Transform:
   m_ObjectHideFlags: 0

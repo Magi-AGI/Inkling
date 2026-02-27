@@ -291,7 +291,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (addVelocityTrail)
             {
                 Vector2 movementVelocity = (position - previousPosition) * velocityScale;
-                if (movementVelocity.magnitude > 0.1f)
+                if (movementVelocity.magnitude > 0.01f)
                 {
                     simWriter.InjectForce(uvPosition, movementVelocity);
                 }

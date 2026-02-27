@@ -20,7 +20,7 @@ namespace Magi.Inkling.Systems.Brush
 
         [Tooltip("Force multiplier for velocity injection when dragging.")]
         [Range(0f, 200f)]
-        public float forceMultiplier = 50f;
+        public float forceMultiplier = 1f;
 
         [Header("Sampling / Mirror")]
         [Tooltip("Skip injections when the cursor moves less than this UV distance (0-1). Prevents oversampling while dragging.")]
