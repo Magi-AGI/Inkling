@@ -9,7 +9,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4a8eb6a56c914d43ac37c1a1d231a8c9, type: 3}
+  m_Script: {fileID: 11500000, guid: 1fc695e571dd2b34cbbce82c01e87f5d, type: 3}
   m_Name: GestureTemplate_Circle
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Gestures.GestureTemplate
   templateName: Circle

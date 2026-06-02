@@ -9,7 +9,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 112e0a3c1cf9441f91ac23df06c7c0b4, type: 3}
+  m_Script: {fileID: 11500000, guid: 0182e9b61f184fe41a363cf4cd0e16ac, type: 3}
   m_Name: CaptureConfig
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Capture.CaptureConfig
   outputPath: ""

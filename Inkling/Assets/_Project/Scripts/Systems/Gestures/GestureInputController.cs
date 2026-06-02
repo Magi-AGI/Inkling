@@ -23,6 +23,8 @@ namespace Magi.Inkling.Systems.Gestures
         [Tooltip("Minimum score to accept a gesture match (0-1).")]
         [Range(0f, 1f)]
         [SerializeField] private float minScore = 0.3f;
+        [Tooltip("Use right mouse button for gestures so left mouse can be dedicated to brush painting.")]
+        [SerializeField] private bool useRightMouseButton = true;
 
         private ISimulationWriter writer;
         private readonly List<Vector2> stroke = new();
@@ -49,7 +51,9 @@ namespace Magi.Inkling.Systems.Gestures
             if (Mouse.current == null || writer == null) return;
 
             var mouse = Mouse.current;
-            if (mouse.leftButton.wasPressedThisFrame)
+            var triggerButton = useRightMouseButton ? mouse.rightButton : mouse.leftButton;
+
+            if (triggerButton.wasPressedThisFrame)
             {
                 stroke.Clear();
                 collecting = true;
@@ -63,7 +67,7 @@ namespace Magi.Inkling.Systems.Gestures
                 stroke.Add(uv);
             }
 
-            if (mouse.leftButton.wasReleasedThisFrame && collecting)
+            if (triggerButton.wasReleasedThisFrame && collecting)
             {
                 collecting = false;
                 RecognizeAndDispatch();
