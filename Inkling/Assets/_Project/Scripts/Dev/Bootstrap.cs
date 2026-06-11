@@ -1,0 +1,238 @@
+using UnityEngine;
+using UnityEngine.UI;
+using Magi.Inkling.Systems.SimulationLOD0;
+using Magi.InkTools.Simulation;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
+namespace Magi.Inkling.Dev
+{
+    [DefaultExecutionOrder(100)]
+    public class Bootstrap : MonoBehaviour
+    {
+        [Header("RenderTextures")]
+        public int width = 512;
+        public int height = 512;
+        [Tooltip("Lo-res is hi-res divided by this scale")] public int loResScale = 2;
+
+        [Header("Capture")] public string scenario = "test01";
+        public string outputFolder = "Captures";
+
+        private RenderTexture hiResRT;
+        private RenderTexture loResRT;
+        private TestPatternGenerator pattern;
+        private SimulationRecorder recorder;
+        private SimDriver simDriver;
+        private ISimulationReader simReader;
+        private bool loggedDisplayTextureError;
+
+        [Header("Direct References (Required to avoid Resources.Load)")]
+        public ComputeShader fluidComputeShader;
+
+        void Start()
+        {
+            SetupRenderTextures();
+            SetupSimDriver();
+            // Bind UI to hi-res target immediately; Update() will blit simulation output into it.
+            SetupUI(hiResRT);
+            // Optionally keep pattern generator for fallback
+            // SetupPatternGenerator(hiResRT);
+            SetupRecorder(hiResRT, loResRT);
+            Debug.Log("[Bootstrap] Scene wired with fluid simulation. Press Space to capture (new Input System).");
+        }
+
+        void Update()
+        {
+            // Blit simulation output to our render textures
+            var displayTex = GetDisplayTexture();
+            if (displayTex != null)
+            {
+                if (hiResRT != null)
+                    Graphics.Blit(displayTex, hiResRT);
+                if (hiResRT != null && loResRT != null)
+                    Graphics.Blit(hiResRT, loResRT);
+            }
+        }
+
+        void SetupRenderTextures()
+        {
+            hiResRT = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32) { name = "HiResRT" };
+            hiResRT.Create();
+            int lw = Mathf.Max(1, width / Mathf.Max(1, loResScale));
+            int lh = Mathf.Max(1, height / Mathf.Max(1, loResScale));
+            loResRT = new RenderTexture(lw, lh, 0, RenderTextureFormat.ARGB32) { name = "LoResRT" };
+            loResRT.Create();
+        }
+
+        void SetupUI(RenderTexture rt)
+        {
+            var canvas = FindFirstObjectByType<Canvas>();
+            if (canvas == null)
+            {
+                var go = new GameObject("Canvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+                canvas = go.GetComponent<Canvas>();
+                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+                var scaler = go.GetComponent<CanvasScaler>();
+                scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            }
+            var riGO = new GameObject("Output", typeof(RawImage));
+            riGO.transform.SetParent(canvas.transform, false);
+            var ri = riGO.GetComponent<RawImage>();
+            ri.texture = rt;
+            var rtRect = ri.GetComponent<RectTransform>();
+            rtRect.anchorMin = Vector2.zero; rtRect.anchorMax = Vector2.one;
+            rtRect.offsetMin = Vector2.zero; rtRect.offsetMax = Vector2.zero;
+        }
+
+        void SetupPatternGenerator(RenderTexture target)
+        {
+            var go = new GameObject("TestPattern");
+            pattern = go.AddComponent<TestPatternGenerator>();
+            pattern.target = target;
+        }
+
+        void SetupSimDriver()
+        {
+            // First, look for an existing SimDriver in the scene
+            simDriver = FindFirstObjectByType<SimDriver>();
+
+            if (simDriver != null)
+            {
+                Debug.Log($"[Bootstrap] Using existing SimDriver: {simDriver.gameObject.name}");
+
+                // Check if it has a valid fluid compute shader assigned
+                if (HasRequiredFluidKernels(simDriver.fluidCompute))
+                {
+                    Debug.Log("[Bootstrap] SimDriver already has Fluids.compute shader assigned");
+                }
+                else
+                {
+                    if (simDriver.fluidCompute == null)
+                    {
+                        Debug.LogWarning("[Bootstrap] Existing SimDriver found but no compute shader assigned");
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[Bootstrap] Existing SimDriver compute shader '{simDriver.fluidCompute.name}' is missing required kernels");
+                    }
+                    TryLoadAndAssignComputeShader();
+                }
+            }
+            else
+            {
+                // No existing SimDriver, create a new one
+                Debug.Log("[Bootstrap] No existing SimDriver found, creating new one");
+                var go = new GameObject("SimDriver");
+                simDriver = go.AddComponent<SimDriver>();
+                TryLoadAndAssignComputeShader();
+            }
+
+            // Initialize service interface for decoupled access
+            simReader = simDriver.AsReader();
+        }
+
+        void TryLoadAndAssignComputeShader()
+        {
+            // Use the directly assigned compute shader
+            var computeShader = fluidComputeShader;
+
+            #if UNITY_EDITOR
+            if (computeShader == null)
+            {
+                string[] candidates =
+                {
+                    "Packages/com.inktools.sim/Compute/Fluids.compute",
+                    "Packages/com.inktools.sim/Runtime/Compute/Fluids.compute",
+                    "Assets/_Project/Scripts/Simulation/Compute/Fluids.compute",
+                    "Assets/_Project/Scripts/Systems/SimulationLOD0/Fluids.compute",
+                };
+
+                foreach (string path in candidates)
+                {
+                    computeShader = UnityEditor.AssetDatabase.LoadAssetAtPath<ComputeShader>(path);
+                    if (computeShader == null) continue;
+
+                    UnityEditor.AssetDatabase.ImportAsset(
+                        path,
+                        ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+
+                    if (HasRequiredFluidKernels(computeShader))
+                    {
+                        break;
+                    }
+                }
+            }
+            #endif
+
+            if (computeShader != null && HasRequiredFluidKernels(computeShader))
+            {
+                simDriver.fluidCompute = computeShader;
+                Debug.Log("[Bootstrap] Successfully loaded and assigned Fluids.compute shader");
+            }
+            else if (computeShader != null)
+            {
+                Debug.LogWarning($"[Bootstrap] Candidate compute shader '{computeShader.name}' is missing required fluid kernels.");
+            }
+            else
+            {
+                Debug.LogWarning("[Bootstrap] Could not find Fluids.compute shader to assign. SimDriver will run in test pattern mode.");
+            }
+        }
+
+        private static bool HasRequiredFluidKernels(ComputeShader shader)
+        {
+            if (shader == null) return false;
+
+            return shader.HasKernel("Advection")
+                && shader.HasKernel("Diffusion")
+                && shader.HasKernel("Divergence")
+                && shader.HasKernel("Pressure")
+                && shader.HasKernel("SubtractGradient")
+                && shader.HasKernel("Vorticity")
+                && shader.HasKernel("VorticityConfinement")
+                && shader.HasKernel("AddForce")
+                && shader.HasKernel("AddDensity")
+                && shader.HasKernel("Clear");
+        }
+
+        RenderTexture GetDisplayTexture()
+        {
+            // Use SimDriver output if available, otherwise fall back to hiResRT
+            if (simReader != null)
+            {
+                try
+                {
+                    var tex = simReader.GetDisplayTexture();
+                    if (tex != null) return tex;
+                }
+                catch (System.Exception ex)
+                {
+                    if (!loggedDisplayTextureError)
+                    {
+                        loggedDisplayTextureError = true;
+                        Debug.LogWarning($"[Bootstrap] Failed to fetch SimDriver display texture in early frame ({ex.GetType().Name}). Falling back to bootstrap RT.");
+                    }
+                }
+            }
+            return hiResRT;
+        }
+
+        void SetupRecorder(RenderTexture hi, RenderTexture lo)
+        {
+            var go = new GameObject("Recorder");
+            recorder = go.AddComponent<SimulationRecorder>();
+            recorder.hiRes = hi;
+            recorder.loResPhysics = lo;
+            recorder.outputFolder = outputFolder;
+            recorder.BeginScenario(scenario);
+
+            var driver = go.AddComponent<CaptureDriver>();
+            driver.recorder = recorder;
+            driver.scenario = scenario;
+        }
+    }
+}
+
+
+

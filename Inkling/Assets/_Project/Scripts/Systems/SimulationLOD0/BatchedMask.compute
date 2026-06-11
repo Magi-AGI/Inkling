@@ -1,0 +1,46 @@
+#pragma kernel ClearMaskBatched
+
+RWTexture2D<float4> _DensityRead;
+RWTexture2D<float4> _DensityWrite;
+
+StructuredBuffer<float4> _MaskPayloadA; // center.xy, sizeUV.xy
+StructuredBuffer<float4> _MaskPayloadB; // alphaThreshold, blackLumThreshold, unused, unused
+int _MaskCount;
+float2 _Resolution;
+
+Texture2D<float4> _MaskTex;
+SamplerState sampler_MaskTex;
+
+float Luminance(float3 c)
+{
+    return dot(c, float3(0.299, 0.587, 0.114));
+}
+
+[numthreads(8,8,1)]
+void ClearMaskBatched(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution.x || id.y >= (uint)_Resolution.y) return;
+
+    float2 uv = (float2(id.xy) + 0.5) / _Resolution;
+    float4 baseCol = _DensityRead[id.xy];
+    float4 outCol = baseCol;
+
+    [loop]
+    for (int i = 0; i < _MaskCount; i++)
+    {
+        float4 a = _MaskPayloadA[i]; // center.xy size.xy
+        float4 b = _MaskPayloadB[i]; // alphaThresh, blackLumThresh
+        float2 rel = (uv - a.xy) / a.zw + 0.5;
+        if (rel.x < 0 || rel.x > 1 || rel.y < 0 || rel.y > 1) continue;
+
+        float4 mask = _MaskTex.SampleLevel(sampler_MaskTex, rel, 0);
+        if (mask.a < b.x) continue;
+        if (Luminance(mask.rgb) < b.y)
+        {
+            outCol = float4(0,0,0,0);
+            break; // once cleared, we can exit early
+        }
+    }
+
+    _DensityWrite[id.xy] = outCol;
+}

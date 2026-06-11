@@ -1,0 +1,85 @@
+// Renders iparticle buffers to an RGBA texture encoding per-ink intensities.
+// The final colorization is expected to happen in a separate gradient shader
+// (e.g., InkGradientRenderer), which interprets RGB as fire/water/metal
+// concentrations and samples gradient textures accordingly.
+
+#pragma kernel ParticleToColor
+
+// Use the shared type definitions from InkTools (X-macro style) so that
+// iparticle matches exactly between C# and HLSL.
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+StructuredBuffer<iparticle> _ParticlesRead;
+RWTexture2D<float4> _Output;
+
+int _Resolution;
+float _GlobalBrightness;
+
+[numthreads(8, 8, 1)]
+void ParticleToColor(uint3 id : SV_DispatchThreadID)
+{
+    if ((int)id.x >= _Resolution || (int)id.y >= _Resolution)
+        return;
+
+    uint res = (uint)_Resolution;
+    uint index = id.y * res + id.x;
+    iparticle p = _ParticlesRead[index];
+
+    float3 color = 0;
+    float alpha = 0;
+
+    // Fire intensity -> R channel
+    float fireIntensity = max(p.fire, 0.0);
+
+    // Water intensity -> G channel (includes some plant and steam contribution)
+    float plantSeeded = p.plantSeeded;
+    float plantGrown  = p.plantGrown;
+    float plantTotal  = plantSeeded + plantGrown;
+    float plant       = plantTotal;
+
+    float waterIntensity = max(p.water, 0.0);
+
+    if (plantTotal > 0.0)
+    {
+        // Lifetime proxy: grown fraction modulates contribution
+        float plantLife = saturate(plantGrown / plantTotal);
+        waterIntensity += plant * 0.5 * plantLife;
+    }
+
+    waterIntensity += max(p.steam, 0.0) * 0.3;
+
+    // Metal/Electric intensity -> B channel (electricity + dust)
+    // Electricity: use seeded vs grown ratio as lifetime proxy for intensity
+    float electricitySeeded = p.electricitySeeded;
+    float electricityGrown  = p.electricityGrown;
+    float electricityTotal  = electricitySeeded + electricityGrown;
+    float electricity       = electricityTotal;
+    float metalIntensity    = 0.0;
+
+    if (electricityTotal > 0.0)
+    {
+        float life = saturate(electricityGrown / electricityTotal);
+        metalIntensity += electricity * life;
+    }
+
+    // Glitter/dust contributes to metal channel slightly
+    float dust = max(p.glitter, 0.0);
+    metalIntensity += dust * 0.3;
+
+    // Pack into RGB: R=fire, G=water, B=metal/electric
+    color.r = fireIntensity;
+    color.g = waterIntensity;
+    color.b = metalIntensity;
+
+    // Black/body intensity from particle
+    float blackIntensity = max(p.blackBody, 0.0);
+
+    // Alpha carries black/body intensity so the gradient pass can treat it as an override
+    alpha = blackIntensity;
+
+    // Apply simple global brightness scaling
+    color *= _GlobalBrightness;
+
+    _Output[int2(id.xy)] = float4(color, saturate(alpha));
+}

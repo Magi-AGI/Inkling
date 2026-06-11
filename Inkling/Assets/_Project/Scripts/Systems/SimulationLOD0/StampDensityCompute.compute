@@ -1,0 +1,106 @@
+// Compute-shader replacement for the Blit-based StampDensity.shader.
+// Keeps ALL density operations on the compute pipeline, eliminating
+// Graphics.Blit → ComputeShader.Dispatch cross-queue transitions that
+// cause missing DX12 resource barriers and frame-to-frame flickering.
+
+#pragma kernel StampDensity
+#pragma kernel ClearBlackDensity
+
+// ── Shared declarations ─────────────────────────────────────────────
+
+RWTexture2D<float4> _DensityRead;
+RWTexture2D<float4> _DensityWrite;
+
+Texture2D<float4>   _StampTex;
+SamplerState         sampler_StampTex;
+
+float2 _StampCenter;       // UV centre (0-1)
+float2 _StampSize;         // UV extent (stampWidth/resolution, stampHeight/resolution)
+float  _AlphaThreshold;
+float  _DensityMul;
+float  _UseOverride;
+float4 _OverrideColor;
+float  _BlackLumThreshold;
+float2 _Resolution;
+
+// ── StampDensity ────────────────────────────────────────────────────
+// Additive stamp: reads _DensityRead, adds stamp colour, writes _DensityWrite.
+// Equivalent to StampDensity.shader mode 0 but runs entirely on the
+// compute queue so DX12 never needs a graphics→compute barrier on
+// the density ping-pong buffers.
+
+[numthreads(8, 8, 1)]
+void StampDensity(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution.x || id.y >= (uint)_Resolution.y)
+        return;
+
+    float2 uv = (float2(id.xy) + 0.5) / _Resolution;
+
+    // Map screen UV into stamp-local UV (0-1)
+    float2 rel = (uv - _StampCenter) / _StampSize + 0.5;
+
+    float4 current = _DensityRead[id.xy];
+
+    // Outside stamp region → pass through
+    if (rel.x < 0.0 || rel.x > 1.0 || rel.y < 0.0 || rel.y > 1.0)
+    {
+        _DensityWrite[id.xy] = current;
+        return;
+    }
+
+    float4 stamp = _StampTex.SampleLevel(sampler_StampTex, rel, 0);
+
+    if (stamp.a < _AlphaThreshold)
+    {
+        _DensityWrite[id.xy] = current;
+        return;
+    }
+
+    // Colour override or texture colour
+    if (_UseOverride > 0.5)
+    {
+        stamp.rgb = _OverrideColor.rgb * stamp.a;
+        stamp.a   = _OverrideColor.a   * stamp.a;
+    }
+    else
+    {
+        stamp.rgb *= _DensityMul;
+        stamp.a   *= _DensityMul;
+    }
+
+    _DensityWrite[id.xy] = current + stamp;
+}
+
+// ── ClearBlackDensity ───────────────────────────────────────────────
+// Zeroes density where the stamp mask is "black" (luminance < threshold).
+// Equivalent to StampDensity.shader mode 1.
+
+[numthreads(8, 8, 1)]
+void ClearBlackDensity(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution.x || id.y >= (uint)_Resolution.y)
+        return;
+
+    float2 uv = (float2(id.xy) + 0.5) / _Resolution;
+    float2 rel = (uv - _StampCenter) / _StampSize + 0.5;
+
+    float4 current = _DensityRead[id.xy];
+
+    if (rel.x < 0.0 || rel.x > 1.0 || rel.y < 0.0 || rel.y > 1.0)
+    {
+        _DensityWrite[id.xy] = current;
+        return;
+    }
+
+    float4 stamp = _StampTex.SampleLevel(sampler_StampTex, rel, 0);
+
+    if (stamp.a < _AlphaThreshold)
+    {
+        _DensityWrite[id.xy] = current;
+        return;
+    }
+
+    float lum = dot(stamp.rgb, float3(0.299, 0.587, 0.114));
+    _DensityWrite[id.xy] = (lum < _BlackLumThreshold) ? float4(0, 0, 0, 0) : current;
+}

@@ -1,0 +1,43 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2d0ba0a12922b904a801f6fee7da2b53, type: 3}
+  m_Name: OrganicGroup
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.AffinityGroup
+  groupName: OrganicGroup
+  inks:
+  - {fileID: 11400000, guid: b95f0ee9596be374186a08a2bcba1023, type: 2}
+  - {fileID: 11400000, guid: 2a479c9de68b35042b619687310e729a, type: 2}
+  - {fileID: 11400000, guid: 4ecdf3669256ff74586c1fdd5e58f38b, type: 2}
+  - {fileID: 11400000, guid: 085dfe8b59bc3a54286508756ca46cf9, type: 2}
+  productMatrix:
+    e00: 0
+    e01: 1
+    e02: 1
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: -0.001
+    e20: 0
+    e21: -1
+    e22: 0
+    e23: 0.001
+    e30: 0
+    e31: 0
+    e32: -1
+    e33: 0
+  productCol4: {x: 0, y: -0.001, z: 0.001, w: 0}
+  productCol5: {x: 0, y: 0, z: 0, w: 0}
+  reactionRateMultiplier: 10
+  selfWeight: 1
+  cardinalWeight: 1
+  diagonalWeight: 0.707

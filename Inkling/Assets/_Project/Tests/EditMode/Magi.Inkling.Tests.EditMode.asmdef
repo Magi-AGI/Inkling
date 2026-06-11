@@ -1,0 +1,28 @@
+{
+    "name": "Magi.Inkling.Tests.EditMode",
+    "rootNamespace": "Magi.Inkling.Tests",
+    "references": [
+        "Magi.Inkling",
+        "Magi.Inkling.Gestures",
+        "Magi.Inkling.Capture",
+        "Magi.Inkling.Tests",
+        "Magi.InkTools",
+        "Magi.InkTools.Simulation",
+        "Magi.InkTools.Services",
+        "Magi.UnityTools"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

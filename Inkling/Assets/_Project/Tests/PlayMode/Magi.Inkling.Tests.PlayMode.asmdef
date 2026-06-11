@@ -1,0 +1,26 @@
+{
+    "name": "Magi.Inkling.Tests.PlayMode",
+    "rootNamespace": "Magi.Inkling.Tests",
+    "references": [
+        "Magi.Inkling",
+        "Magi.Inkling.Gestures",
+        "Magi.Inkling.Capture",
+        "Magi.Inkling.Tests",
+        "Magi.InkTools",
+        "Magi.InkTools.Simulation",
+        "Magi.InkTools.Services",
+        "Magi.UnityTools"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

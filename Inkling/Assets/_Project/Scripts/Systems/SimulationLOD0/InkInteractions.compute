@@ -1,0 +1,244 @@
+// InkInteractions.compute
+// Matrix-kernel cellular automata for ink reactions.
+// Runs after advection, before display.
+//
+// Determinism: Always sample neighbors from Read buffer; apply deltas once
+// to Write at the end. Avoids race conditions.
+
+#pragma kernel InkInteractions
+
+// Include iparticle struct definition (X-macro file)
+#define ifloat float
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+// Ink type indices come from _InkIndices at runtime (set by AffinityGroup).
+// No HLSL defines needed - C# InkTypeId enum is the source of truth.
+
+// Buffers
+StructuredBuffer<iparticle> _ParticlesRead;
+RWStructuredBuffer<iparticle> _ParticlesWrite;
+
+// Simulation parameters
+int _Resolution;
+float _DeltaTime;
+int _DebugMode;  // 0=normal, 1=test mode (boost fire when plant present)
+
+// Black body ink clearing parameters
+float _BlackBodyThreshold;    // Activation threshold (default 0.5)
+float _BlackBodyClearingRate; // Rate at which other inks are cleared (default 0.05)
+int _EnableBlackBodyClearing; // Toggle for black body clearing (0=off, 1=on)
+
+// Affinity group data (MVP: single group, hardcoded thermal)
+// Future: StructuredBuffer<GPUAffinityGroup> _AffinityGroups; int _NumGroups;
+int4 _InkIndices;       // Which iparticle fields map to slots 0-3
+float4x4 _ProductMatrix;   // Product reactions columns 0-3: 0×1, 0×2, 0×3, 1×2
+float4 _ProductCol4;       // Product reactions column 4: 1×3
+float4 _ProductCol5;       // Product reactions column 5: 2×3
+float3 _Weights;        // self, cardinal, diagonal
+float _RateMultiplier;  // Global multiplier for reaction rates (default ~10 for visible effects)
+float4 _InteractionThresholds;  // Per-ink minimum concentration for reactions (matches _InkIndices order)
+
+// Helper: Extract ink value by field index (0-9)
+float GetInkByIndex(iparticle p, int idx)
+{
+    switch (idx)
+    {
+        case 0: return p.fire;
+        case 1: return p.water;
+        case 2: return p.plantSeeded;
+        case 3: return p.plantGrown;
+        case 4: return p.steam;
+        case 5: return p.glitter;
+        case 6: return p.blackBody;
+        case 7: return p.electricitySeeded;
+        case 8: return p.electricityGrown;
+        case 9: return p.ice;
+        default: return 0;
+    }
+}
+
+// Helper: Set ink value by field index (0-9)
+void SetInkByIndex(inout iparticle p, int idx, float value)
+{
+    switch (idx)
+    {
+        case 0: p.fire = value; break;
+        case 1: p.water = value; break;
+        case 2: p.plantSeeded = value; break;
+        case 3: p.plantGrown = value; break;
+        case 4: p.steam = value; break;
+        case 5: p.glitter = value; break;
+        case 6: p.blackBody = value; break;
+        case 7: p.electricitySeeded = value; break;
+        case 8: p.electricityGrown = value; break;
+        case 9: p.ice = value; break;
+    }
+}
+
+// Helper: Extract 4 inks for this group
+float4 ExtractGroupInks(iparticle p, int4 indices)
+{
+    return float4(
+        GetInkByIndex(p, indices.x),
+        GetInkByIndex(p, indices.y),
+        GetInkByIndex(p, indices.z),
+        GetInkByIndex(p, indices.w)
+    );
+}
+
+// Helper: Sample particle at position (clamped to bounds)
+iparticle SampleParticle(int2 pos)
+{
+    pos = clamp(pos, int2(0, 0), int2(_Resolution - 1, _Resolution - 1));
+    return _ParticlesRead[pos.y * _Resolution + pos.x];
+}
+
+// Helper: Clamp deltas per-channel so we don't consume more than available
+// Returns clamped delta (not a global scale - each channel is clamped independently)
+float4 ClampConsumption(float4 rawDelta, float4 available)
+{
+    float4 result = rawDelta;
+
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        // If delta is negative (consuming), clamp to available amount
+        if (rawDelta[i] < 0)
+        {
+            result[i] = max(rawDelta[i], -available[i]);
+        }
+    }
+
+    return result;
+}
+
+[numthreads(8, 8, 1)]
+void InkInteractions(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution || id.y >= (uint)_Resolution)
+        return;
+
+    uint idx = id.y * _Resolution + id.x;
+    int2 pos = int2(id.xy);
+
+    // Read current particle (from Read buffer)
+    iparticle p = _ParticlesRead[idx];
+
+    // Debug mode: simple hardcoded test to verify shader is running
+    if (_DebugMode == 1)
+    {
+        // If plant > 0.1, convert some to fire (very obvious effect)
+        if (p.plantSeeded > 0.1)
+        {
+            p.fire = saturate(p.fire + 0.1);
+            p.plantSeeded = saturate(p.plantSeeded - 0.05);
+        }
+        _ParticlesWrite[idx] = p;
+        return;
+    }
+
+    // Sample self
+    float4 selfInks = ExtractGroupInks(p, _InkIndices);
+
+    // Sample cardinal neighbors (up, down, left, right)
+    float4 cardinalSum = float4(0, 0, 0, 0);
+    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(0, 1)), _InkIndices);
+    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(0, -1)), _InkIndices);
+    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(1, 0)), _InkIndices);
+    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(-1, 0)), _InkIndices);
+
+    // Sample diagonal neighbors (corners)
+    float4 diagonalSum = float4(0, 0, 0, 0);
+    diagonalSum += ExtractGroupInks(SampleParticle(pos + int2(1, 1)), _InkIndices);
+    diagonalSum += ExtractGroupInks(SampleParticle(pos + int2(1, -1)), _InkIndices);
+    diagonalSum += ExtractGroupInks(SampleParticle(pos + int2(-1, 1)), _InkIndices);
+    diagonalSum += ExtractGroupInks(SampleParticle(pos + int2(-1, -1)), _InkIndices);
+
+    // Weighted adjacency
+    float4 adjacency = selfInks * _Weights.x
+                     + cardinalSum * _Weights.y
+                     + diagonalSum * _Weights.z;
+
+    // Compute pairwise products for conjunctive reactions (A + B → C)
+    // For 4 inks (0,1,2,3), there are 6 pairwise products:
+    // products0: 0×1, 0×2, 0×3, 1×2  (columns 0-3 of product matrix)
+    // products1: 1×3, 2×3            (columns 4-5, stored in _ProductCol4/5)
+    float4 products0 = float4(
+        adjacency.x * adjacency.y,  // 0×1 (e.g., fire×water → steam)
+        adjacency.x * adjacency.z,  // 0×2
+        adjacency.x * adjacency.w,  // 0×3 (e.g., fire×ice → water)
+        adjacency.y * adjacency.z   // 1×2
+    );
+    float2 products1 = float2(
+        adjacency.y * adjacency.w,  // 1×3
+        adjacency.z * adjacency.w   // 2×3
+    );
+
+    // Threshold gating per product term (both reactants must exceed their thresholds)
+    float t01 = max(_InteractionThresholds.x, _InteractionThresholds.y);
+    float t02 = max(_InteractionThresholds.x, _InteractionThresholds.z);
+    float t03 = max(_InteractionThresholds.x, _InteractionThresholds.w);
+    float t12 = max(_InteractionThresholds.y, _InteractionThresholds.z);
+    float t13 = max(_InteractionThresholds.y, _InteractionThresholds.w);
+    float t23 = max(_InteractionThresholds.z, _InteractionThresholds.w);
+
+    if (adjacency.x < t01 || adjacency.y < t01) products0.x = 0;
+    if (adjacency.x < t02 || adjacency.z < t02) products0.y = 0;
+    if (adjacency.x < t03 || adjacency.w < t03) products0.z = 0;
+    if (adjacency.y < t12 || adjacency.z < t12) products0.w = 0;
+    if (adjacency.y < t13 || adjacency.w < t13) products1.x = 0;
+    if (adjacency.z < t23 || adjacency.w < t23) products1.y = 0;
+
+    // Product reactions (conjunctive: A + B → C)
+    float4 productDelta = mul(_ProductMatrix, products0)
+                        + _ProductCol4 * products1.x
+                        + _ProductCol5 * products1.y;
+
+    // Reaction delta, scaled by dt and rate multiplier
+    float4 rawDelta = productDelta * _DeltaTime * _RateMultiplier;
+
+    // Per-channel conservation: clamp each channel's consumption to available amount.
+    float4 delta = ClampConsumption(rawDelta, selfInks);
+
+    // Note: AND-based reactions are handled by the product matrix automatically.
+    // When either reactant is zero, the product term is zero, so no reaction occurs.
+    // No explicit gating needed - the math handles it naturally.
+
+    // Per-step production clamp to avoid runaway growth
+    const float MAX_PRODUCTION_PER_STEP = 0.8;
+    delta = clamp(delta, float4(-1e6, -1e6, -1e6, -1e6), float4(MAX_PRODUCTION_PER_STEP, MAX_PRODUCTION_PER_STEP, MAX_PRODUCTION_PER_STEP, MAX_PRODUCTION_PER_STEP));
+
+    // Apply deltas back to particle
+    iparticle result = p;
+
+    [unroll]
+    for (int i = 0; i < 4; i++)
+    {
+        int fieldIdx = _InkIndices[i];
+        float currentVal = GetInkByIndex(result, fieldIdx);
+        float newVal = max(0.0, currentVal + delta[i]);  // Clamp to non-negative
+        SetInkByIndex(result, fieldIdx, newVal);
+    }
+
+    // ----- Black Body Ink Clearing -----
+    // When black body concentration exceeds threshold, it actively clears all other inks.
+    // Reference behavior: bb > 0.5 triggers -0.05 per tick drain on all 9 other ink types.
+    if (_EnableBlackBodyClearing > 0 && result.blackBody > _BlackBodyThreshold)
+    {
+        float clearAmount = _BlackBodyClearingRate;
+
+        // Clear all other ink types (indices 0-5, 7-9; skip 6 which is blackBody itself)
+        result.fire = max(0.0, result.fire - clearAmount);
+        result.water = max(0.0, result.water - clearAmount);
+        result.plantSeeded = max(0.0, result.plantSeeded - clearAmount);
+        result.plantGrown = max(0.0, result.plantGrown - clearAmount);
+        result.steam = max(0.0, result.steam - clearAmount);
+        result.glitter = max(0.0, result.glitter - clearAmount);
+        result.electricitySeeded = max(0.0, result.electricitySeeded - clearAmount);
+        result.electricityGrown = max(0.0, result.electricityGrown - clearAmount);
+        result.ice = max(0.0, result.ice - clearAmount);
+    }
+
+    // Write to output buffer
+    _ParticlesWrite[idx] = result;
+}

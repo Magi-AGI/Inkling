@@ -1,0 +1,121 @@
+// Obstacles.compute - GPU kernels for obstacle stamping
+// Stamps circle and triangle obstacles to the simulation obstacle texture
+
+#pragma kernel ClearObstacles
+#pragma kernel StampCircleObstacles
+#pragma kernel StampTriangleObstacles
+
+// ----- Structs -----
+
+struct CircleObstacle
+{
+    float2 center;  // UV position [0,1]
+    float radius;   // UV radius
+    uint flags;     // bit 0: active, bit 1: static
+};
+
+struct TriangleObstacle
+{
+    float2 v0;
+    float2 v1;
+    float2 v2;
+    uint flags;
+    uint padding;
+};
+
+// ----- Buffers -----
+
+RWTexture2D<float> _ObstaclesWrite;
+StructuredBuffer<CircleObstacle> _CircleObstacles;
+StructuredBuffer<TriangleObstacle> _TriangleObstacles;
+
+uint _CircleCount;
+uint _TriangleCount;
+uint _Resolution;
+
+// ----- Helper Functions -----
+
+bool IsCircleActive(CircleObstacle c) { return (c.flags & 1) != 0; }
+bool IsTriangleActive(TriangleObstacle t) { return (t.flags & 1) != 0; }
+
+// Point-in-circle test
+bool PointInCircle(float2 p, float2 center, float radius)
+{
+    float dist = length(p - center);
+    return dist <= radius;
+}
+
+// Point-in-triangle test using barycentric coordinates
+// Returns true if point p is inside triangle (v0, v1, v2)
+bool PointInTriangle(float2 p, float2 v0, float2 v1, float2 v2)
+{
+    float2 v0v1 = v1 - v0;
+    float2 v0v2 = v2 - v0;
+    float2 v0p = p - v0;
+
+    float dot00 = dot(v0v2, v0v2);
+    float dot01 = dot(v0v2, v0v1);
+    float dot02 = dot(v0v2, v0p);
+    float dot11 = dot(v0v1, v0v1);
+    float dot12 = dot(v0v1, v0p);
+
+    float invDenom = 1.0 / (dot00 * dot11 - dot01 * dot01);
+    float u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+    float v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+
+    return (u >= 0) && (v >= 0) && (u + v <= 1);
+}
+
+// ----- Kernels -----
+
+[numthreads(8, 8, 1)]
+void ClearObstacles(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Resolution || id.y >= _Resolution) return;
+
+    _ObstaclesWrite[id.xy] = 0.0;
+}
+
+[numthreads(8, 8, 1)]
+void StampCircleObstacles(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Resolution || id.y >= _Resolution) return;
+
+    // Convert pixel to UV
+    float2 uv = (float2(id.xy) + 0.5) / float(_Resolution);
+
+    // Check all circle obstacles
+    for (uint i = 0; i < _CircleCount; i++)
+    {
+        CircleObstacle c = _CircleObstacles[i];
+        if (!IsCircleActive(c)) continue;
+
+        if (PointInCircle(uv, c.center, c.radius))
+        {
+            _ObstaclesWrite[id.xy] = 1.0;
+            return; // Early out once obstacle found
+        }
+    }
+}
+
+[numthreads(8, 8, 1)]
+void StampTriangleObstacles(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Resolution || id.y >= _Resolution) return;
+
+    // Convert pixel to UV
+    float2 uv = (float2(id.xy) + 0.5) / float(_Resolution);
+
+    // Check all triangle obstacles
+    for (uint i = 0; i < _TriangleCount; i++)
+    {
+        TriangleObstacle t = _TriangleObstacles[i];
+        if (!IsTriangleActive(t)) continue;
+
+        if (PointInTriangle(uv, t.v0, t.v1, t.v2))
+        {
+            _ObstaclesWrite[id.xy] = 1.0;
+            return; // Early out once obstacle found
+        }
+    }
+}

@@ -1,0 +1,147 @@
+using UnityEngine;
+using Magi.UnityTools.Core;
+
+namespace Magi.Inkling.Systems.SimulationLOD0
+{
+    /// <summary>
+    /// Shared state container for all simulation modules.
+    /// Holds references to GPU resources, simulation parameters, compute shader refs,
+    /// feature flags, and helpers. No logic — just fields.
+    /// SimDriver populates this from its [SerializeField] values each frame.
+    /// </summary>
+    public class SimulationContext
+    {
+        // ── Render textures (ping-pong) ─────────────────────────────────────
+        public PingPongRenderTexture Velocity;
+        public PingPongRenderTexture Pressure;
+        public PingPongRenderTexture Density;
+
+        // ── Single render textures ──────────────────────────────────────────
+        public RenderTexture Divergence;
+        public RenderTexture VorticityTex;
+        public RenderTexture Obstacles;
+        public RenderTexture DisplayRT;
+        public RenderTexture GradientRT;
+        public RenderTexture CreatureInkBuffer;
+
+        // ── Channel textures (UAV + mipped + downsampled) ───────────────────
+        public RenderTexture ChannelRT0;
+        public RenderTexture ChannelRT1;
+        public RenderTexture ChannelRT2;
+        public RenderTexture ChannelRT0Mipped;
+        public RenderTexture ChannelRT1Mipped;
+        public RenderTexture ChannelRT2Mipped;
+        public RenderTexture ChannelRT0Down;
+        public RenderTexture ChannelRT1Down;
+        public RenderTexture ChannelRT2Down;
+
+        // ── Particle buffers ────────────────────────────────────────────────
+        public ComputeBuffer[] ParticlesBuffer;
+        public int ParticleReadIndex;
+        public int ParticleWriteIndex = 1;
+        public bool GpuPromotesHalf;
+        public int GpuParticleStride;
+
+        // ── Simulation parameters ───────────────────────────────────────────
+        public int Resolution;
+        public float Timestep;
+        public float Viscosity;
+        public float VorticityStrength;
+        public float Dissipation;
+        public float VelocityDissipation;
+        public int PressureIterations;
+        public int DiffusionIterations;
+        public bool UseRedBlackSolver;
+        public float InjectionForce;
+        public float DensityAmount;
+        public float ForceRadius;
+        public float ForceStrength;
+
+        // ── Display parameters ──────────────────────────────────────────────
+        public int EffectiveDisplayRes;
+        public bool DisplayVelocity;
+        public bool UseParticleDisplay;
+        public bool UseCpuCreatureComposite;
+        public bool UseGradientRendering;
+        public Renderer DisplayRenderer;
+        public Magi.Inkling.Systems.Rendering.InkGradientPreset GradientPreset;
+        public Material GradientMaterial;
+        public Material DensityStampMaterial;
+
+        // ── Compute shader refs ─────────────────────────────────────────────
+        public ComputeShader FluidCompute;
+        public ComputeShader StampCompute;
+        public ComputeShader StampParticlesCompute;
+        public ComputeShader BatchedStampCompute;
+        public ComputeShader BatchedMaskCompute;
+        public ComputeShader BatchedInjectionCompute;
+        public ComputeShader ParticleToColorCompute;
+        public ComputeShader ParticleChannelSplatCompute;
+        public ComputeShader InkInteractionsCompute;
+
+        // ── Particle simulation flags ───────────────────────────────────────
+        public bool UseParticleSimulation;
+        public bool UseParticleAdvection;
+        public bool UseParticleDissipation;
+        public bool UseParticleDiffusion;
+        public int MaxParticleSimResolution;
+        public bool UseParticleRenderPass;
+
+        // ── Injection flags ─────────────────────────────────────────────────
+        public bool UseBatchedDensityInjection;
+        public bool UseBatchedStamping;
+        public bool UseBatchedMasks;
+
+        // ── Ink interactions ────────────────────────────────────────────────
+        public bool UseInkInteractions;
+        public bool InkInteractionsDebugMode;
+        public AffinityGroup[] AffinityGroups;
+
+        // ── Ink definitions ─────────────────────────────────────────────────
+        public InkTypeDef[] InkDefinitions;
+
+        // ── Black body fallback ─────────────────────────────────────────────
+        public bool EnableBlackBodyClearingFallback;
+        public float BlackBodyThresholdFallback;
+        public float BlackBodyClearingRateFallback;
+
+        // ── Stamp shader ref ────────────────────────────────────────────────
+        public Shader DensityStampShader;
+
+        // ── Debug flags ─────────────────────────────────────────────────────
+        public bool DebugZeroPressure;
+        public bool DebugZeroVelocity;
+        public bool DebugSkipAir;
+        public bool MeasurePerformance;
+
+        // ── Fluid compute kernel indices ────────────────────────────────────
+        // Initialized by FluidSolver.InitializeKernels(), shared with OperationQueue
+        public int FluidKernelAdvection;
+        public int FluidKernelDiffusion;
+        public int FluidKernelDivergence;
+        public int FluidKernelPressure;
+        public int FluidKernelPressureRedBlack;
+        public int FluidKernelSubtractGradient;
+        public int FluidKernelVorticity;
+        public int FluidKernelVorticityConfinement;
+        public int FluidKernelAddForce;
+        public int FluidKernelAddDensity;
+        public int FluidKernelClear;
+        public int FluidKernelUpdateObstacles;
+        public int FluidKernelApplyObstacleBoundary;
+        public int FluidKernelAdvectParticles;
+        public int FluidKernelDissipateParticles;
+        public int FluidKernelDiffuseParticles;
+        public int FluidKernelAddParticlesGaussian;
+        public int FluidKernelInkToObstacles = -1;
+
+        // ── Helpers ─────────────────────────────────────────────────────────
+
+        public void SwapParticleBuffers()
+        {
+            int temp = ParticleReadIndex;
+            ParticleReadIndex = ParticleWriteIndex;
+            ParticleWriteIndex = temp;
+        }
+    }
+}

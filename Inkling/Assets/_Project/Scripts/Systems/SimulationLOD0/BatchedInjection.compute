@@ -1,0 +1,85 @@
+#pragma kernel AddDensityBatched
+#pragma kernel AddParticlesBatched
+
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+StructuredBuffer<float4> _Injections; // uv.xy, color.rg
+StructuredBuffer<float4> _Injections2; // color.b, inkIndex, padding
+int _InjectionCount;
+float _ForceRadius;
+float _DensityAmount;
+float2 _Resolution;
+
+RWTexture2D<float4> _DensityRead;
+RWTexture2D<float4> _DensityWrite;
+
+RWStructuredBuffer<iparticle> _ParticlesRead;
+RWStructuredBuffer<iparticle> _ParticlesWrite;
+
+float Falloff(float2 uv, float2 center)
+{
+    float dist = distance(uv, center);
+    return saturate(1.0 - dist / _ForceRadius);
+}
+
+[numthreads(8,8,1)]
+void AddDensityBatched(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution.x || id.y >= (uint)_Resolution.y) return;
+    float2 uv = (float2(id.xy) + 0.5) / _Resolution;
+    float4 baseCol = _DensityRead[id.xy];
+    float3 accum = baseCol.rgb;
+    float alpha = baseCol.a;
+
+    for (int i = 0; i < _InjectionCount; i++)
+    {
+        float4 a = _Injections[i]; // uv.xy, color.rg
+        float4 b = _Injections2[i]; // color.b, inkIndex, padding
+        float w = Falloff(uv, a.xy);
+        if (w <= 0) continue;
+        float3 color = float3(a.z, a.w, b.x);
+        accum += color * _DensityAmount * w;
+        alpha = max(alpha, _DensityAmount * w);
+    }
+
+    _DensityWrite[id.xy] = float4(accum, alpha);
+}
+
+void AddInkByIndex(inout iparticle p, int inkIdx, float amount)
+{
+    switch (inkIdx)
+    {
+        case 0: p.fire += (ifloat)amount; break;
+        case 1: p.water += (ifloat)amount; break;
+        case 2: p.plantSeeded += (ifloat)amount; break;
+        case 3: p.plantGrown += (ifloat)amount; break;
+        case 4: p.steam += (ifloat)amount; break;
+        case 5: p.glitter += (ifloat)amount; break;
+        case 6: p.blackBody += (ifloat)amount; break;
+        case 7: p.electricitySeeded += (ifloat)amount; break;
+        case 8: p.electricityGrown += (ifloat)amount; break;
+        case 9: p.ice += (ifloat)amount; break;
+    }
+}
+
+[numthreads(8,8,1)]
+void AddParticlesBatched(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution.x || id.y >= (uint)_Resolution.y) return;
+    float2 uv = (float2(id.xy) + 0.5) / _Resolution;
+    uint idx = id.y * (uint)_Resolution.x + id.x;
+    iparticle p = _ParticlesRead[idx];
+
+    for (int i = 0; i < _InjectionCount; i++)
+    {
+        float4 a = _Injections[i];
+        float4 b = _Injections2[i];
+        float w = Falloff(uv, a.xy);
+        if (w <= 0) continue;
+        float inkAmount = _DensityAmount * w;
+        int inkIndex = (int)round(b.y);
+        AddInkByIndex(p, inkIndex, inkAmount);
+    }
+
+    _ParticlesWrite[idx] = p;
+}

@@ -1,0 +1,101 @@
+using UnityEngine;
+
+namespace Magi.Inkling.Data
+{
+    /// <summary>
+    /// ScriptableObject defining an ink type with consolidated properties.
+    /// Combines ink simulation properties with input color mapping and visual configuration.
+    /// </summary>
+    /// <remarks>
+    /// This is designed as a future replacement for InkTypeDef + AffinityGroup concepts,
+    /// providing a single source of truth for ink configuration. InkTypeDef remains
+    /// for existing ink assets; InkDefinition is for new inks or migration.
+    /// </remarks>
+    [CreateAssetMenu(fileName = "NewInk", menuName = "Inkling/Ink Definition")]
+    public class InkDefinition : ScriptableObject
+    {
+        [Header("Identity")]
+        [Tooltip("Human-readable name for this ink.")]
+        public string displayName;
+
+        [Tooltip("Index mapping to iparticle struct field. Must be unique per ink.")]
+        [Range(0, 15)]
+        public int typeIndex;
+
+        [Header("Simulation Properties")]
+        [Tooltip("How fast this ink fades (0.9=fast, 0.999=slow, 1.0=never).")]
+        [Range(0f, 1f)]
+        public float dissipation = 0.995f;
+
+        [Tooltip("How much this ink spreads/diffuses (0=none, higher=more spread).")]
+        [Range(0f, 5f)]
+        public float viscosity = 1f;
+
+        [Tooltip("How much this ink contributes to swirl/vortex effects.")]
+        [Range(0f, 5f)]
+        public float vorticity = 0f;
+
+        [Tooltip("How strongly this ink is carried by the velocity field (0=static, 1=full).")]
+        [Range(0f, 5f)]
+        public float advectionWeight = 1f;
+
+        [Tooltip("How strongly this ink contributes to pressure/divergence.")]
+        [Range(0f, 5f)]
+        public float pressureWeight = 1f;
+
+        [Tooltip("Minimum concentration before this ink participates in reactions.")]
+        [Range(0f, 1f)]
+        public float interactionThreshold = 0.1f;
+
+        [Header("Special Behaviors")]
+        [Tooltip("Enable clearing behavior (this ink clears other inks when above threshold). Used for black body ink.")]
+        public bool enableClearing = false;
+
+        [Tooltip("Concentration threshold to activate clearing behavior.")]
+        [Range(0f, 1f)]
+        public float clearingThreshold = 0.5f;
+
+        [Tooltip("Rate at which other inks are cleared per tick when clearing is active.")]
+        [Range(0f, 0.2f)]
+        public float clearingRate = 0.05f;
+
+        [Header("Input Mapping")]
+        [Tooltip("Key color used to identify this ink when stamping from textures.")]
+        public Color inputKeyColor = Color.white;
+
+        [Tooltip("How close a stamp color must be to inputKeyColor to match (0=exact, 1=any).")]
+        [Range(0f, 1f)]
+        public float colorMatchTolerance = 0.3f;
+
+        [Header("Visual")]
+        [Tooltip("Debug visualization color for gizmos and inspector.")]
+        public Color debugColor = Color.white;
+
+        [Tooltip("Optional gradient texture for rendering this ink.")]
+        public Texture2D gradientTexture;
+
+        /// <summary>
+        /// Validates configuration and auto-populates display name if empty.
+        /// </summary>
+        private void OnValidate()
+        {
+            if (string.IsNullOrEmpty(displayName))
+            {
+                displayName = name;
+            }
+
+            // Warn on extreme values
+            if (dissipation < 0.9f)
+            {
+                Debug.LogWarning($"[InkDefinition] '{name}' has very low dissipation ({dissipation}). " +
+                    "Ink will fade very quickly.");
+            }
+
+            if (typeIndex < 0 || typeIndex > 15)
+            {
+                Debug.LogError($"[InkDefinition] '{name}' has invalid typeIndex {typeIndex}. " +
+                    "Must be 0-15 to fit in iparticle struct.");
+            }
+        }
+    }
+}

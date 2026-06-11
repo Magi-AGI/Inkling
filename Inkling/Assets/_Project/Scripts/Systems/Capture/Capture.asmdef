@@ -1,0 +1,18 @@
+{
+    "name": "Magi.Inkling.Capture",
+    "rootNamespace": "Magi.Inkling.Systems.Capture",
+    "references": [
+        "Magi.Inkling",
+        "Magi.InkTools.Simulation",
+        "Magi.UnityTools"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

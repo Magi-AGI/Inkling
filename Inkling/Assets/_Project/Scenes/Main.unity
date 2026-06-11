@@ -163,11 +163,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 42b50f360ce194e4e80a50cac24089bf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Inkling.Dev::Inkling.Dev.Bootstrap
-  width: 512
-  height: 512
+  width: 1024
+  height: 1024
   loResScale: 2
   scenario: test01
   outputFolder: Captures
+  fluidComputeShader: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
 --- !u!1 &57066474
 GameObject:
   m_ObjectHideFlags: 0
@@ -444,6 +445,85 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 220699601}
   m_CullTransparentMesh: 1
+--- !u!1 &273307170
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 273307172}
+  - component: {fileID: 273307171}
+  - component: {fileID: 273307173}
+  m_Layer: 0
+  m_Name: Inkling1
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 0
+--- !u!114 &273307171
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 273307170}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8a6fc1f4b5d0ec34390a649f9e1b6055, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.TexturedInjector
+  simulationServiceSource: {fileID: 1299845689}
+  injectionMask: {fileID: 2800000, guid: 5c6ec9fc2fc640f42bec7f06aa71891a, type: 3}
+  maskResolution: 64
+  maskTargetResolution: 64
+  useTextureColors: 1
+  inkColorOverride: {r: 1, g: 0.35, b: 0.05, a: 1}
+  densityMultiplier: 2
+  alphaThreshold: 0.1
+  blackLuminanceThreshold: 0.15
+  enableBlackMaskClearing: 0
+  moveSpeed: 0.1
+  rotationSpeed: 45
+  movementBounds: {x: 0.9, y: 0.9}
+  injectWhileMoving: 1
+  injectionInterval: 0.033
+  addVelocityTrail: 1
+  velocityScale: 90
+--- !u!4 &273307172
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 273307170}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -9.68741, y: 0, z: -17.78803}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &273307173
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 273307170}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: acdd715660bec5d4282fc264b6e9cd42, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  config: {fileID: 0}
+  playerTarget: {fileID: 0}
+  playerInkType: 0
+  showDebugGizmos: 0
+  logBehaviorChanges: 0
 --- !u!1 &525871409
 GameObject:
   m_ObjectHideFlags: 0
@@ -539,6 +619,7 @@ MonoBehaviour:
   m_VerticalAlignment: 512
   m_textAlignment: 65535
   m_characterSpacing: 0
+  m_characterHorizontalScale: 1
   m_wordSpacing: 0
   m_lineSpacing: 0
   m_lineSpacingMax: 0
@@ -685,6 +766,53 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 23c1ce4fb46143f46bc5cb5224c934f6, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.RenderPipelines.HighDefinition.Runtime::UnityEngine.Rendering.HighDefinition.HDAdditionalCameraData
+  m_Version: 9
+  m_ObsoleteRenderingPath: 0
+  m_ObsoleteFrameSettings:
+    overrides: 0
+    enableShadow: 0
+    enableContactShadows: 0
+    enableShadowMask: 0
+    enableSSR: 0
+    enableSSAO: 0
+    enableSubsurfaceScattering: 0
+    enableTransmission: 0
+    enableAtmosphericScattering: 0
+    enableVolumetrics: 0
+    enableReprojectionForVolumetrics: 0
+    enableLightLayers: 0
+    enableExposureControl: 1
+    diffuseGlobalDimmer: 0
+    specularGlobalDimmer: 0
+    shaderLitMode: 0
+    enableDepthPrepassWithDeferredRendering: 0
+    enableTransparentPrepass: 0
+    enableMotionVectors: 0
+    enableObjectMotionVectors: 0
+    enableDecals: 0
+    enableRoughRefraction: 0
+    enableTransparentPostpass: 0
+    enableDistortion: 0
+    enablePostprocess: 0
+    enableOpaqueObjects: 0
+    enableTransparentObjects: 0
+    enableRealtimePlanarReflection: 0
+    enableMSAA: 0
+    enableAsyncCompute: 0
+    runLightListAsync: 0
+    runSSRAsync: 0
+    runSSAOAsync: 0
+    runContactShadowsAsync: 0
+    runVolumeVoxelizationAsync: 0
+    lightLoopSettings:
+      overrides: 0
+      enableDeferredTileAndCluster: 0
+      enableComputeLightEvaluation: 0
+      enableComputeLightVariants: 0
+      enableComputeMaterialVariants: 0
+      enableFptlForForwardOpaque: 0
+      enableBigTilePrepass: 0
+      isFptlEnabled: 0
   clearColorMode: 0
   backgroundColorHDR: {r: 0.025, g: 0.07, b: 0.19, a: 0}
   clearDepth: 1
@@ -765,53 +893,6 @@ MonoBehaviour:
       data1: 0
       data2: 0
   defaultFrameSettings: 0
-  m_Version: 9
-  m_ObsoleteRenderingPath: 0
-  m_ObsoleteFrameSettings:
-    overrides: 0
-    enableShadow: 0
-    enableContactShadows: 0
-    enableShadowMask: 0
-    enableSSR: 0
-    enableSSAO: 0
-    enableSubsurfaceScattering: 0
-    enableTransmission: 0
-    enableAtmosphericScattering: 0
-    enableVolumetrics: 0
-    enableReprojectionForVolumetrics: 0
-    enableLightLayers: 0
-    enableExposureControl: 1
-    diffuseGlobalDimmer: 0
-    specularGlobalDimmer: 0
-    shaderLitMode: 0
-    enableDepthPrepassWithDeferredRendering: 0
-    enableTransparentPrepass: 0
-    enableMotionVectors: 0
-    enableObjectMotionVectors: 0
-    enableDecals: 0
-    enableRoughRefraction: 0
-    enableTransparentPostpass: 0
-    enableDistortion: 0
-    enablePostprocess: 0
-    enableOpaqueObjects: 0
-    enableTransparentObjects: 0
-    enableRealtimePlanarReflection: 0
-    enableMSAA: 0
-    enableAsyncCompute: 0
-    runLightListAsync: 0
-    runSSRAsync: 0
-    runSSAOAsync: 0
-    runContactShadowsAsync: 0
-    runVolumeVoxelizationAsync: 0
-    lightLoopSettings:
-      overrides: 0
-      enableDeferredTileAndCluster: 0
-      enableComputeLightEvaluation: 0
-      enableComputeLightVariants: 0
-      enableComputeMaterialVariants: 0
-      enableFptlForForwardOpaque: 0
-      enableBigTilePrepass: 0
-      isFptlEnabled: 0
 --- !u!1 &732563390
 GameObject:
   m_ObjectHideFlags: 0
@@ -927,7 +1008,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 63cefbfa91c7e5844992b184edde2d9b, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Magi.Inkling.Runtime::Magi.Inkling.Runtime.Systems.SimulationLOD0.SimulationRecorder
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Runtime.Systems.SimulationLOD0.SimulationRecorder
   outputFolder: Datasets/Captures
   scenarioName: scene01
   frameIndex: 0
@@ -936,7 +1017,7 @@ MonoBehaviour:
   isCapturing: 0
   targetFrameCount: 100
   captureInterval: 0.033
-  simDriver: {fileID: 1299845687}
+  simDriverComponent: {fileID: 0}
   viscosity: 0.01
   vorticity: 2
   dissipation: 0.98
@@ -1033,6 +1114,7 @@ Canvas:
   m_OverridePixelPerfect: 0
   m_SortingBucketNormalizedSize: 0
   m_VertexColorAlwaysGammaSpace: 0
+  m_UseReflectionProbes: 0
   m_AdditionalShaderChannelsFlag: 25
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
@@ -1059,54 +1141,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
---- !u!1 &1070086887
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1070086888}
-  - component: {fileID: 1070086889}
-  m_Layer: 0
-  m_Name: Inference
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1070086888
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1070086887}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1070086889
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1070086887}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 136125b63260697418d30cc5d6d0a336, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Inkling.Inference::Inkling.Systems.Inference.SentisRunner
-  onnxBytes: {fileID: 4900000, guid: 2fabaf81b1a3f6a48949beaa36437aa2, type: 3}
-  inputChannels: 4
-  outputChannels: 4
-  measureTiming: 1
 --- !u!1 &1076450974
 GameObject:
   m_ObjectHideFlags: 0
@@ -1255,44 +1289,14 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1299845688}
-  - component: {fileID: 1299845687}
+  - component: {fileID: 1299845689}
   m_Layer: 0
-  m_Name: SimulationDriver
+  m_Name: SimDriver
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1299845687
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1299845686}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d1287d2b938b49841921f5d42725fa39, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Magi.Inkling.Runtime::Magi.Inkling.Runtime.Systems.SimulationLOD0.SimDriver
-  fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
-  resolution: 256
-  viscosity: 0.01
-  vorticity: 2
-  dissipation: 0.98
-  velocityDissipation: 0.99
-  timestep: 0.016
-  pressureIterations: 20
-  diffusionIterations: 2
-  autoInject: 1
-  injectionForce: 100
-  densityAmount: 1
-  forceRadius: 20
-  forceStrength: 5
-  injectionColor: {r: 1, g: 1, b: 1, a: 1}
-  displayRenderer: {fileID: 0}
-  displayVelocity: 0
-  measurePerformance: 1
 --- !u!4 &1299845688
 Transform:
   m_ObjectHideFlags: 0
@@ -1308,6 +1312,86 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1299845689
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1299845686}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d1287d2b938b49841921f5d42725fa39, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.SimDriver
+  fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
+  resolution: 1024
+  viscosity: 0.0001
+  vorticity: 0.05
+  dissipation: 0.999
+  velocityDissipation: 0.9995
+  timestep: 0.016
+  debugZeroPressure: 0
+  debugZeroVelocity: 0
+  debugSkipAir: 0
+  pressureIterations: 10
+  diffusionIterations: 2
+  useRedBlackSolver: 0
+  injectionForce: 1
+  densityAmount: 0.3
+  forceRadius: 56
+  forceStrength: 1.5
+  useBatchedDensityInjection: 1
+  batchedInjectionCompute: {fileID: 0}
+  useBatchedStamping: 1
+  useBatchedMasks: 1
+  displayRenderer: {fileID: 1485820108}
+  displayVelocity: 0
+  useParticleDisplay: 1
+  useCpuCreatureComposite: 0
+  useGradientRendering: 1
+  gradientPreset: {fileID: 11400000, guid: 82755fa6fa9f7a84d8c1df4c8cb7e343, type: 2}
+  gradientMaterial: {fileID: 2100000, guid: 8fb7b721f0d7666468899181f1032e28, type: 2}
+  measurePerformance: 1
+  displayResolution: 0
+  displayResolutionScale: 1
+  densityStampShader: {fileID: 4800000, guid: 8a8122c28f2b84949a817112ae252002, type: 3}
+  stampCompute: {fileID: 7200000, guid: 8655b9b38e3613f42828276a2b65ae0a, type: 3}
+  stampParticlesCompute: {fileID: 7200000, guid: ddd01a05f12b2bf46895c3592405baf8, type: 3}
+  batchedStampCompute: {fileID: 0}
+  batchedMaskCompute: {fileID: 0}
+  useParticleSimulation: 1
+  useParticleAdvection: 1
+  useParticleDissipation: 1
+  useParticleDiffusion: 1
+  maxParticleSimResolution: 1024
+  inkInteractionsCompute: {fileID: 7200000, guid: aa92fa222fb65b04f87571b5ecc49a6f, type: 3}
+  useInkInteractions: 1
+  inkInteractionsDebugMode: 0
+  affinityGroups:
+  - {fileID: 11400000, guid: da76efa99d9a5cf4aadca3f811d21554, type: 2}
+  - {fileID: 11400000, guid: bb5975a015651cc47aab80f9ac703167, type: 2}
+  enableBlackBodyClearingFallback: 0
+  blackBodyThresholdFallback: 0.5
+  blackBodyClearingRateFallback: 0.05
+  inkDefinitions:
+  - {fileID: 11400000, guid: b95f0ee9596be374186a08a2bcba1023, type: 2}
+  - {fileID: 11400000, guid: 2a479c9de68b35042b619687310e729a, type: 2}
+  - {fileID: 11400000, guid: 4ecdf3669256ff74586c1fdd5e58f38b, type: 2}
+  - {fileID: 11400000, guid: 085dfe8b59bc3a54286508756ca46cf9, type: 2}
+  - {fileID: 11400000, guid: 84ea5c909487b764c934fad7c76e218d, type: 2}
+  - {fileID: 11400000, guid: f08898fb3f1ffb942a5b2615fb98c46e, type: 2}
+  - {fileID: 11400000, guid: 9f2e1f50c8d7bc14ea26fb284756ee68, type: 2}
+  - {fileID: 11400000, guid: 50ea6e5c4ac9a58459b4f3b7a083b114, type: 2}
+  - {fileID: 11400000, guid: 4f68a274df5e692418fe1a0fcd8e536c, type: 2}
+  - {fileID: 11400000, guid: 4d5cac36951b253469623e9d3dcf56dd, type: 2}
+  particleToColorCompute: {fileID: 7200000, guid: 0334aaf5539bd7649886292613ec7ad8, type: 3}
+  particleChannelSplatCompute: {fileID: 7200000, guid: 2e75d1648379b174584d6d1a1c20b62c, type: 3}
+  useParticleRenderPass: 0
+  simulationUpdateRate: 0
+  debugInjectTestForce: 0
+  debugLogForces: 0
+  currentInkType: 0
 --- !u!1 &1314578116
 GameObject:
   m_ObjectHideFlags: 0
@@ -1513,6 +1597,7 @@ MonoBehaviour:
   m_VerticalAlignment: 512
   m_textAlignment: 65535
   m_characterSpacing: 0
+  m_characterHorizontalScale: 1
   m_wordSpacing: 0
   m_lineSpacing: 0
   m_lineSpacingMax: 0
@@ -1627,6 +1712,7 @@ MeshRenderer:
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
 --- !u!4 &1485820109
 Transform:
@@ -1802,7 +1888,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1646552707
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1814,7 +1900,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 94c0d561c9f5e7c4ea5719af2cc26387, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Magi.Inkling.Runtime::Magi.Inkling.Runtime.Dev.TestPatternGenerator
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Runtime.Dev.TestPatternGenerator
   target: {fileID: 8400000, guid: 831ab56c2ef61cc4a8e6fb5c9cf23b3a, type: 2}
   animate: 1
   colorA: {r: 0.1, g: 0.6, b: 1, a: 1}
@@ -1860,14 +1946,14 @@ Light:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1748668264}
   m_Enabled: 1
-  serializedVersion: 11
+  serializedVersion: 13
   m_Type: 1
   m_Color: {r: 1, g: 0.95686275, b: 0.8392157, a: 1}
   m_Intensity: 100000
   m_Range: 10
   m_SpotAngle: 30
-  m_InnerSpotAngle: 21.80208
-  m_CookieSize: 10
+  m_InnerSpotAngle: 0
+  m_CookieSize2D: {x: 0.5, y: 0.5}
   m_Shadows:
     m_Type: 2
     m_Resolution: -1
@@ -1912,7 +1998,7 @@ Light:
   m_UseBoundingSphereOverride: 0
   m_UseViewFrustumForShadowCasterCull: 1
   m_ForceVisible: 0
-  m_ShadowRadius: 0
+  m_ShapeRadius: 0.025
   m_ShadowAngle: 0
   m_LightUnit: 2
   m_LuxAtDistance: 1
@@ -1951,7 +2037,16 @@ MonoBehaviour:
   m_LightUnit: 0
   m_LuxAtDistance: 1
   m_Intensity: 0
-  m_InnerSpotPercent: 0
+  m_InnerSpotPercent: -1
+  m_ShapeWidth: -1
+  m_ShapeHeight: -1
+  m_AspectRatio: 1
+  m_ShapeRadius: -1
+  m_Version: 15
+  m_ObsoleteShadowResolutionTier: 1
+  m_ObsoleteUseShadowQualitySettings: 0
+  m_ObsoleteCustomShadowResolution: 512
+  m_ObsoleteContactShadows: 0
   m_SpotIESCutoffPercent: 100
   m_LightDimmer: 1
   m_VolumetricDimmer: 1
@@ -1960,10 +2055,6 @@ MonoBehaviour:
   m_AffectDiffuse: 1
   m_AffectSpecular: 1
   m_NonLightmappedOnly: 0
-  m_ShapeWidth: 0.5
-  m_ShapeHeight: 0.5
-  m_AspectRatio: 1
-  m_ShapeRadius: 0.025
   m_SoftnessScale: 1
   m_UseCustomSpotLightShadowCone: 0
   m_CustomSpotLightShadowCone: 30
@@ -2001,7 +2092,6 @@ MonoBehaviour:
   m_FilterTracedShadow: 1
   m_FilterSizeTraced: 16
   m_SunLightConeAngle: 0.5
-  m_LightShadowRadius: 0.5
   m_SemiTransparentShadow: 0
   m_ColorShadow: 1
   m_DistanceBasedFiltering: 0
@@ -2069,11 +2159,6 @@ MonoBehaviour:
   m_AreaLightEmissiveMeshShadowCastingMode: 0
   m_AreaLightEmissiveMeshMotionVectorGenerationMode: 0
   m_AreaLightEmissiveMeshLayer: -1
-  m_Version: 13
-  m_ObsoleteShadowResolutionTier: 1
-  m_ObsoleteUseShadowQualitySettings: 0
-  m_ObsoleteCustomShadowResolution: 512
-  m_ObsoleteContactShadows: 0
 --- !u!1 &1829919815
 GameObject:
   m_ObjectHideFlags: 0
@@ -2418,7 +2503,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1985421571
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2552,13 +2637,407 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2095663013}
   m_CullTransparentMesh: 1
+--- !u!1 &2100000000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2100000001}
+  - component: {fileID: 2100000002}
+  m_Layer: 0
+  m_Name: GrowthSystem
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2100000001
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100000000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2100000002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100000000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b6ebff2448b32bd4e83cba9aab8337c5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  growthCompute: {fileID: 7200000, guid: 18ff748a13548804b99384957043a06b, type: 3}
+  config: {fileID: 11400000, guid: 9a9f2b6b5a5c4d3cb28f8c622aae2e75, type: 2}
+  simulationSource: {fileID: 1299845689}
+--- !u!1 &2100001000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2100001001}
+  - component: {fileID: 2100001002}
+  m_Layer: 0
+  m_Name: BrushInput
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2100001001
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100001000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2100001002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100001000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ede766a3bc1fbf841b757f4b69180cf8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Brush.BrushInputController
+  config: {fileID: 11400000, guid: 6b6ff938f4c34357bc7a85e18f0b2c11, type: 2}
+  targetRenderer: {fileID: 1485820108}
+  inputCamera: {fileID: 529788511}
+--- !u!1 &2100002000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2100002001}
+  - component: {fileID: 2100002002}
+  - component: {fileID: 2100002006}
+  m_Layer: 0
+  m_Name: ServiceLocator
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2100002001
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100002000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2100002002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100002000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 72266d9410697a3459a9a14ca3f5abcf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  services: []
+  autoDiscover: 1
+--- !u!1 &2100002003
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2100002004}
+  - component: {fileID: 2100002005}
+  m_Layer: 0
+  m_Name: DiagnosticsHUD
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2100002004
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100002003}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2100002005
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100002003}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e0c8f238c39c44899107ff634c7f0e58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Services.Diagnostics.DiagnosticsHUD
+  show: 0
+  textColor: {r: 1, g: 1, b: 1, a: 1}
+  logSink: {fileID: 0}
+  toggleKey: 290
+  showPersona: 1
+  tracerSystem: {fileID: 0}
+  arrowsRenderer: {fileID: 0}
+  velocityStats: {fileID: 0}
+  velocityMask: {fileID: 0}
+  showTracerToggle: 1
+  showArrowsToggle: 1
+  showMaskToggle: 1
+  showMaskPreview: 0
+  splitRenderer: {fileID: 0}
+  showSplitToggle: 0
+  pressureRenderer: {fileID: 0}
+  showPressureToggle: 0
+  showAirDebugToggles: 0
+  showStats: 1
+--- !u!114 &2100002006
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100002000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4e1be0f1e0c14b80a5cb7c3da65c1d17, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Services.Core.ServiceBootstrap
+  ensurePersonaService: 1
+  defaultPersonaConfig: {fileID: 0}
+--- !u!1 &2100003000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2100003001}
+  - component: {fileID: 2100003002}
+  m_Layer: 0
+  m_Name: CaptureService
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2100003001
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100003000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2100003002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100003000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a11ba7da0084c3642aa823738b39ebfb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  simulationReaderSource: {fileID: 1299845689}
+  config: {fileID: 11400000, guid: 4c8e5f0f734a4a42a8c9c9b3bc2f4156, type: 2}
+--- !u!1 &2100004000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2100004001}
+  - component: {fileID: 2100004002}
+  m_Layer: 0
+  m_Name: GestureInput
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 0
+--- !u!4 &2100004001
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100004000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2100004002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100004000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3c1cf5790f4f44fe9b2c1e4e9cd237f8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  simulationWriterSource: {fileID: 1299845689}
+  actionMap: {fileID: 11400000, guid: 9b97d5e1e0e74fcb9baf1c540f6bf94d, type: 2}
+  templates:
+  - {fileID: 11400000, guid: 4a8eb6a56c914d43ac37c1a1d231a8c9, type: 2}
+  - {fileID: 11400000, guid: 8f4c7d6cc14a4ea8be34b266ad747908, type: 2}
+  - {fileID: 11400000, guid: 7a8e0c2222d641e9a214ce8512ac3f5e, type: 2}
+  minScore: 0.3
+  useRightMouseButton: 1
+--- !u!1 &2100005000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2100005001}
+  - component: {fileID: 2100005002}
+  - component: {fileID: 2100005003}
+  m_Layer: 0
+  m_Name: Player
+  m_TagString: Player
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 0
+--- !u!4 &2100005001
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100005000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2100005002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100005000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8a6fc1f4b5d0ec34390a649f9e1b6055, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.TexturedInjector
+  simulationServiceSource: {fileID: 1299845689}
+  injectionMask: {fileID: 2800000, guid: 5c6ec9fc2fc640f42bec7f06aa71891a, type: 3}
+  maskResolution: 64
+  maskTargetResolution: 64
+  useTextureColors: 0
+  inkColorOverride: {r: 1, g: 0, b: 0, a: 1}
+  densityMultiplier: 2
+  alphaThreshold: 0.1
+  blackLuminanceThreshold: 0.15
+  enableBlackMaskClearing: 0
+  moveSpeed: 0
+  rotationSpeed: 45
+  movementBounds: {x: 0.9, y: 0.9}
+  injectWhileMoving: 1
+  injectionInterval: 0.033
+  addVelocityTrail: 1
+  velocityScale: 90
+--- !u!114 &2100005003
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2100005000}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7e33c9a46ad166e429c9f43843fd4ce4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Player.PlayerCharacterController
+  targetRenderer: {fileID: 1485820108}
+  inputCamera: {fileID: 529788511}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
+  - {fileID: 2100002001}
+  - {fileID: 2100002004}
+  - {fileID: 2100001001}
   - {fileID: 529788512}
   - {fileID: 1748668266}
-  - {fileID: 1070086888}
   - {fileID: 1107126955}
   - {fileID: 1314578117}
   - {fileID: 1052313593}
@@ -2568,3 +3047,8 @@ SceneRoots:
   - {fileID: 952377854}
   - {fileID: 1646552708}
   - {fileID: 1485820109}
+  - {fileID: 273307172}
+  - {fileID: 2100000001}
+  - {fileID: 2100003001}
+  - {fileID: 2100004001}
+  - {fileID: 2100005001}

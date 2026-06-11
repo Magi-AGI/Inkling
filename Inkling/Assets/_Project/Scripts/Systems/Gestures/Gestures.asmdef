@@ -1,0 +1,19 @@
+{
+    "name": "Magi.Inkling.Gestures",
+    "rootNamespace": "Magi.Inkling.Systems.Gestures",
+    "references": [
+        "Magi.Inkling",
+        "Magi.InkTools.Simulation",
+        "Magi.UnityTools",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

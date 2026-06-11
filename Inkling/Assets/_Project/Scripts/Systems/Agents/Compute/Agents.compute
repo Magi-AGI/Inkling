@@ -1,0 +1,203 @@
+// Agents.compute - GPU kernels for agent simulation with flocking and fluid advection
+// Part of Phase 5: Input & Agents for Inkling simulation
+
+#pragma kernel AgentFlocking
+#pragma kernel AgentUpdate
+#pragma kernel AgentSpawn
+
+#include "Include/AgentCommon.hlsl"
+
+// Agent buffers (ping-pong)
+StructuredBuffer<Agent> _AgentsRead;
+RWStructuredBuffer<Agent> _AgentsWrite;
+
+// Velocity field for advection (from simulation)
+Texture2D<float4> _VelocityRead;
+SamplerState sampler_VelocityRead;
+
+// Spawn parameters (set per-dispatch for AgentSpawn kernel)
+float2 _SpawnRegionMin;   // UV min of spawn region
+float2 _SpawnRegionMax;   // UV max of spawn region
+uint _SpawnStartIndex;    // First agent index to spawn
+uint _SpawnCount;         // Number of agents to spawn
+float _SpawnAdvectionWeight;
+float _SpawnFlockWeight;
+uint _SpawnFlags;         // Base flags (active + inkType + behaviorId)
+float2 _SpawnVelocity;    // Initial velocity for spawned agents
+
+// Hash function for pseudo-random spawning
+uint PCGHash(uint input)
+{
+    uint state = input * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// Random float in [0,1] from uint seed
+float RandomFloat(uint seed)
+{
+    return float(PCGHash(seed)) / 4294967295.0;
+}
+
+//=============================================================================
+// AgentFlocking Kernel
+// Computes alignment, cohesion, and separation forces for each agent.
+// O(n^2) brute-force neighbor search - optimize with spatial hash if needed.
+//=============================================================================
+[numthreads(AGENT_THREAD_GROUP_SIZE, 1, 1)]
+void AgentFlocking(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx >= _AgentCount) return;
+
+    Agent self = _AgentsRead[idx];
+
+    // Copy to output first (in case we early-exit)
+    _AgentsWrite[idx] = self;
+
+    if (!IsActive(self)) return;
+    if (self.flockWeight < 0.001) return; // Skip flocking if weight is zero
+
+    float2 alignment = float2(0, 0);
+    float2 cohesion = float2(0, 0);
+    float2 separation = float2(0, 0);
+    int neighborCount = 0;
+
+    // Brute-force neighbor search
+    // TODO: Optimize with spatial hash grid for 10000+ agents
+    for (uint i = 0; i < _AgentCount; i++)
+    {
+        if (i == idx) continue;
+
+        Agent other = _AgentsRead[i];
+        if (!IsActive(other)) continue;
+
+        float dist = distance(self.position, other.position);
+        if (dist < _NeighborRadius && dist > 0.0001)
+        {
+            // Alignment: match velocity direction of neighbors
+            alignment += other.velocity;
+
+            // Cohesion: move toward center of neighbors
+            cohesion += other.position;
+
+            // Separation: move away from nearby neighbors (inverse distance weighting)
+            separation += (self.position - other.position) / dist;
+
+            neighborCount++;
+        }
+    }
+
+    float2 flockForce = float2(0, 0);
+
+    if (neighborCount > 0)
+    {
+        float invCount = 1.0 / float(neighborCount);
+
+        // Alignment: steer toward average heading
+        float2 avgVel = alignment * invCount;
+        float2 alignSteer = SafeNormalize(avgVel) * _MaxSpeed - self.velocity;
+        alignSteer = ClampMagnitude(alignSteer, _MaxForce) * _AlignmentWeight;
+
+        // Cohesion: steer toward center of mass
+        float2 centerOfMass = cohesion * invCount;
+        float2 cohesionSteer = SafeNormalize(centerOfMass - self.position) * _MaxSpeed - self.velocity;
+        cohesionSteer = ClampMagnitude(cohesionSteer, _MaxForce) * _CohesionWeight;
+
+        // Separation: steer away from crowding
+        float2 sepSteer = SafeNormalize(separation) * _MaxSpeed - self.velocity;
+        sepSteer = ClampMagnitude(sepSteer, _MaxForce) * _SeparationWeight;
+
+        flockForce = alignSteer + cohesionSteer + sepSteer;
+    }
+
+    // Write flocking force to agent
+    Agent output = self;
+    output.flockForce = flockForce;
+    _AgentsWrite[idx] = output;
+}
+
+//=============================================================================
+// AgentUpdate Kernel
+// Advects agents using fluid velocity + flocking forces, integrates position.
+//=============================================================================
+[numthreads(AGENT_THREAD_GROUP_SIZE, 1, 1)]
+void AgentUpdate(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx >= _AgentCount) return;
+
+    Agent agent = _AgentsRead[idx];
+
+    // Copy to output first
+    _AgentsWrite[idx] = agent;
+
+    if (!IsActive(agent)) return;
+
+    // Sample fluid velocity at agent position (bilinear interpolation via sampler)
+    float2 uv = agent.position;
+    float2 fluidVel = _VelocityRead.SampleLevel(sampler_VelocityRead, uv, 0).xy;
+
+    // Convert fluid velocity from pixel/s to UV/s
+    // Velocity texture stores velocity in pixels, we need UV units
+    fluidVel /= _SimulationSize;
+
+    // Blend autonomous velocity with fluid advection
+    float2 autonomousVel = agent.velocity;
+    float2 advectedVel = lerp(autonomousVel, fluidVel, agent.advectionWeight);
+
+    // Apply flocking force
+    float2 finalVel = advectedVel + agent.flockForce * agent.flockWeight * _DeltaTime;
+
+    // Clamp to max speed
+    finalVel = ClampMagnitude(finalVel, _MaxSpeed);
+
+    // Integrate position
+    agent.position += finalVel * _DeltaTime;
+
+    // Boundary handling: clamp to [0,1] UV space
+    // TODO: Add wrap mode option
+    agent.position = saturate(agent.position);
+
+    // Store velocity for next frame (for momentum and alignment)
+    agent.velocity = finalVel;
+
+    // Clear flock force (will be recomputed next frame)
+    agent.flockForce = float2(0, 0);
+
+    _AgentsWrite[idx] = agent;
+}
+
+//=============================================================================
+// AgentSpawn Kernel
+// Spawns agents in a UV region with random positions.
+// Called from CPU with spawn parameters set per-batch.
+//=============================================================================
+[numthreads(AGENT_THREAD_GROUP_SIZE, 1, 1)]
+void AgentSpawn(uint3 id : SV_DispatchThreadID)
+{
+    uint localIdx = id.x;
+    if (localIdx >= _SpawnCount) return;
+
+    uint agentIdx = _SpawnStartIndex + localIdx;
+    if (agentIdx >= _AgentCount) return;
+
+    // Generate pseudo-random position within spawn region
+    uint seed = agentIdx * 1973 + _SpawnCount * 9277;
+    float rx = RandomFloat(seed);
+    float ry = RandomFloat(seed + 12345);
+
+    float2 pos;
+    pos.x = lerp(_SpawnRegionMin.x, _SpawnRegionMax.x, rx);
+    pos.y = lerp(_SpawnRegionMin.y, _SpawnRegionMax.y, ry);
+
+    Agent agent;
+    agent.position = pos;
+    agent.velocity = _SpawnVelocity;
+    agent.flockForce = float2(0, 0);
+    agent.advectionWeight = _SpawnAdvectionWeight;
+    agent.flockWeight = _SpawnFlockWeight;
+    agent.flags = _SpawnFlags;
+
+    _AgentsWrite[agentIdx] = agent;
+}
