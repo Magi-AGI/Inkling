@@ -256,12 +256,24 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (ctx.FluidCompute == null) return;
 
             int threadGroups = Mathf.CeilToInt(ctx.Resolution / 8f);
+            int k = ctx.FluidKernelClear;
 
-            ctx.FluidCompute.SetTexture(ctx.FluidKernelClear, "_VelocityWrite", ctx.Velocity.Write);
-            ctx.FluidCompute.SetTexture(ctx.FluidKernelClear, "_DensityWrite", ctx.Density.Write);
-            ctx.FluidCompute.SetTexture(ctx.FluidKernelClear, "_PressureWrite", ctx.Pressure.Write);
-            ctx.FluidCompute.SetTexture(ctx.FluidKernelClear, "_DivergenceWrite", ctx.Divergence);
-            ctx.FluidCompute.SetTexture(ctx.FluidKernelClear, "_VorticityMag", ctx.VorticityTex);
+            // Clear BOTH ping-pong buffers (read AND write). Clearing only Write leaves the
+            // stale Read buffer that the next Step() consumes — so a mid-run reset would inherit
+            // the previous scenario's velocity/density (which barely dissipates per-frame). Two
+            // passes zero both sides without needing a swap.
+            for (int pass = 0; pass < 2; pass++)
+            {
+                var vel = pass == 0 ? ctx.Velocity.Write : ctx.Velocity.Read;
+                var den = pass == 0 ? ctx.Density.Write : ctx.Density.Read;
+                var pre = pass == 0 ? ctx.Pressure.Write : ctx.Pressure.Read;
+                ctx.FluidCompute.SetTexture(k, "_VelocityWrite", vel);
+                ctx.FluidCompute.SetTexture(k, "_DensityWrite", den);
+                ctx.FluidCompute.SetTexture(k, "_PressureWrite", pre);
+                ctx.FluidCompute.SetTexture(k, "_DivergenceWrite", ctx.Divergence);
+                ctx.FluidCompute.SetTexture(k, "_VorticityMag", ctx.VorticityTex);
+                ctx.FluidCompute.Dispatch(k, threadGroups, threadGroups, 1);
+            }
 
             int particleCount = ctx.Resolution * ctx.Resolution;
             if (ctx.GpuPromotesHalf)
@@ -276,8 +288,6 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 ctx.ParticlesBuffer[ctx.ParticleReadIndex].SetData(zero);
                 ctx.ParticlesBuffer[ctx.ParticleWriteIndex].SetData(zero);
             }
-
-            ctx.FluidCompute.Dispatch(ctx.FluidKernelClear, threadGroups, threadGroups, 1);
         }
 
         public void InitializeObstacles()

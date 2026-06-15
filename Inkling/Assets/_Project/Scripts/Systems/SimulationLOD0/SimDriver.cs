@@ -357,7 +357,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             // Debug: inject a circular force at center every frame to test pipeline.
             // The force vector (0.1, 0.05) in UV-space → ~100px at 1024 res → clearly visible flow.
-            if (debugInjectTestForce && ctx.FluidCompute != null)
+            // Suppressed under ExternalStepControl so automated scenarios stay uncontaminated.
+            if (!ExternalStepControl && debugInjectTestForce && ctx.FluidCompute != null)
             {
                 InjectForce(new Vector2(0.5f, 0.5f), new Vector2(0.1f, 0.05f));
                 InjectDensity(new Vector2(0.5f, 0.5f), Color.red, 0);
@@ -365,14 +366,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             // Simulation update rate throttling
             simRanThisFrame = false;
-            simAccumulator += Time.deltaTime;
-            float targetStep = simulationUpdateRate > 0 ? 1f / simulationUpdateRate : 0f;
-            if (targetStep <= 0f || simAccumulator >= targetStep)
+            if (!ExternalStepControl)
             {
-                SimulateFrame();
-                simRanThisFrame = true;
-                if (targetStep > 0f)
-                    simAccumulator = Mathf.Max(0f, simAccumulator - targetStep);
+                simAccumulator += Time.deltaTime;
+                float targetStep = simulationUpdateRate > 0 ? 1f / simulationUpdateRate : 0f;
+                if (targetStep <= 0f || simAccumulator >= targetStep)
+                {
+                    SimulateFrame();
+                    simRanThisFrame = true;
+                    if (targetStep > 0f)
+                        simAccumulator = Mathf.Max(0f, simAccumulator - targetStep);
+                }
             }
 
             if (measurePerformance)
@@ -393,6 +397,50 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             var sw = measurePerformance ? stopwatch : null;
             fluidSolver.Step(sw);
         }
+
+        // ── Deterministic external control (automated scenario / dataset harness) ──
+        /// <summary>
+        /// When true, Update() does not auto-step the simulation. Call <see cref="StepSimulation"/>
+        /// to advance deterministically. Used by the scenario runner / training-data capture.
+        /// </summary>
+        public bool ExternalStepControl { get; set; }
+
+        /// <summary>Advances the simulation exactly one fixed-timestep frame (drains the op queue, runs the solver).</summary>
+        public void StepSimulation()
+        {
+            if (ctx == null || ctx.FluidCompute == null) return;
+            SyncContextFromFields();
+            SimulateFrame();
+        }
+
+        /// <summary>Clears all simulation state (density, velocity, pressure, particles) to zero.</summary>
+        public void ResetSimulation()
+        {
+            fluidSolver?.ClearAll();
+        }
+
+        /// <summary>Recomposites the display RT from the current sim state (call after manual stepping before capture).</summary>
+        public void RefreshDisplay()
+        {
+            display?.UpdateDisplay();
+        }
+
+        /// <summary>Sets a global solver tunable by name (for parameter sweeps / scenario runs). Applied on next sync.</summary>
+        public void SetTunable(string key, float value)
+        {
+            switch (key)
+            {
+                case "viscosity": viscosity = value; break;
+                case "vorticity": vorticity = value; break;
+                case "dissipation": dissipation = value; break;
+                case "velocityDissipation": velocityDissipation = value; break;
+                case "timestep": timestep = value; break;
+                default: Debug.LogWarning("[SimDriver] Unknown tunable: " + key); break;
+            }
+        }
+
+        /// <summary>Toggle the display between ink (gradient) and the raw velocity field. For scenario capture.</summary>
+        public void SetDisplayVelocity(bool value) => displayVelocity = value;
 
         // ── ISimulationWriter ───────────────────────────────────────────────
 

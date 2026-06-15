@@ -12,6 +12,7 @@
     "com.inktools.core": "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\Scripts\\Core",
     "com.inktools.sim": "file:..\\..\\..\\InkTools\\InkTools\\Assets\\_Project\\Scripts\\Simulation",
     "com.magi.unitytools": "file:..\\..\\..\\MagiUnityTools\\MagiUnityTools\\Assets\\_Project\\Scripts",
+    "com.unity.ai.assistant": "2.6.0-pre.1",
     "com.unity.burst": "1.8.28",
     "com.unity.collab-proxy": "2.11.4",
     "com.unity.collections": "6.4.0",

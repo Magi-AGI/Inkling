@@ -2,12 +2,12 @@
 
 ## What Is This Project?
 
-Inkling is a 2D life-simulation game built in **Unity 6** (6000.2.5f1). Players create and control ink-based creatures in a GPU-accelerated fluid world, solving puzzles and befriending other Inklings. The core technical challenge is real-time simulation and stylization of multi-layered interactive ink.
+Inkling is a 2D life-simulation game built in **Unity 6** (6000.4.1f1). Players create and control ink-based creatures in a GPU-accelerated fluid world, solving puzzles and befriending other Inklings. The core technical challenge is real-time simulation and stylization of multi-layered interactive ink.
 
 - **Platforms:** iOS / Android (mobile-first, validated on desktop)
 - **Target audience:** Women 25+, casual-to-mid-core
 - **Design pillars:** Mystery & wonder, emergent living world, comfort & befriending
-- **Branch:** `FirstPass` (primary development branch)
+- **Branch:** `main` (primary). `FirstPass` was merged into `main` via PR #2 on 2026-06-11; active work now happens on `main`.
 
 ## Repository Layout
 
@@ -168,13 +168,28 @@ The Main scene has been updated to include baseline runtime wiring:
 
 ### Phase 9 Progress
 1. **Player Avatar Control** — Complete (2026-02-09)
-2. **Spawning Loop** — Not started
-3. **Befriend Meter/Logic** — Not started
+2. **Fluid tuning & stabilization** — Ongoing. Force scaling, viscosity, damping at 1024². Needs 1-2 more passes (see Current Direction).
+3. **Ink-to-Obstacle system** — Landed (`69b6113`): solid inks (BlackBody/Ice/Plant) block fluid velocity; killed a 56MB/frame CPU readback. Considered a first pass, not final.
+4. **Particle display (all 10 ink channels)** — Enabled; inks not yet visually where we want them.
+5. **Gesture LMB/RMB split** — Committed (`2142f24`); RMB = gestures, LMB = brush painting.
+6. **Spawning Loop** — Not started (deprioritized; see direction below).
+7. **Befriend Meter/Logic** — Not started (much later).
 
-### Phase 9 Open Questions
-- Spawning: event-driven (gesture triggers) vs continuous (world-state threshold)?
-- Befriend: what metrics drive the meter? (proximity, ink type, duration, gesture?)
-- How does ITUMS persona interact with gameplay difficulty/progression?
+### Current Direction (2026-06-12)
+
+The near-term focus is **NOT** the gameplay loop (spawning/befriend). It is the **ink substrate itself** — fluids, and especially **cellular automata** — and how inks *compose* to form Inklings. The conceptual shift is to treat inks increasingly **as cellular automata** rather than primarily as particle systems / fluid dynamics.
+
+Active/upcoming workstreams in priority order:
+1. **Ink & fluid quality** — another pass or two on the ink-to-obstacle system, fluid tuning/stabilization, and the multi-channel particle display so all 10 inks read correctly.
+2. **Cellular-automata composition** — how ink CA layers combine to make an Inkling a coherent creature. Exploratory targets:
+   - **Musculature** — ink structures that let an Inkling move/ambulate.
+   - **Skeletonization** — deriving a natural skeleton/structure from the player's initial strokes/sketch of the creature.
+3. Gameplay-loop systems (spawning, befriend) come *after* the ink/CA substrate is solid.
+
+### Deferred / Decided (not active)
+- **Spawning** will be driven primarily by **world-state conditions**, not gesture triggers. Event-driven (gesture) spawning is a maybe-experiment, not expected in the final product. Revisit once inks are modeled more as CA.
+- **Befriend meter/logic** — wanted, but much later.
+- **ITUMS persona** — not a priority; wait until most of the rest of the design is settled.
 
 ## Testing
 

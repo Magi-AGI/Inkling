@@ -1326,7 +1326,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.SimDriver
   fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
   resolution: 1024
-  viscosity: 0.0001
+  viscosity: 0.002
   vorticity: 0.05
   dissipation: 0.999
   velocityDissipation: 0.9995

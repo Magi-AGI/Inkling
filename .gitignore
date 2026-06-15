@@ -133,6 +133,10 @@
 Inkling/TestResults/
 **/TestResults/*.xml
 
+# Inkling sim test / dataset captures (scenario runner + relay debug grabs)
+**/InkCaptures/
+Inkling/sim_*.png
+
 # Root OS/IDE ignores
 .idea/
 .vscode/
