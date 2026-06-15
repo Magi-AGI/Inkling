@@ -131,21 +131,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void SetInkProperties(ComputeShader fc)
         {
-            // Dissipation. InkTypeDef.dissipation is authored as a per-FRAME retention; the shader
-            // now expects per-SECOND retention and applies pow(value, frameDt). Convert here with the
-            // authoring step rate (1/Timestep) so pow(perSecond, Timestep) == the original per-frame
-            // value — i.e. deterministic/harness runs are byte-identical, only live play becomes
-            // frame-rate independent. (Rebalancing the values is a separate step.)
-            fc.SetFloat("_DissipationFire", PerSecond(GetInkProp(InkTypeId.Fire, d => d.dissipation, 0.995f)));
-            fc.SetFloat("_DissipationWater", PerSecond(GetInkProp(InkTypeId.Water, d => d.dissipation, 0.998f)));
-            fc.SetFloat("_DissipationPlantSeeded", PerSecond(GetInkProp(InkTypeId.PlantSeeded, d => d.dissipation, 0.997f)));
-            fc.SetFloat("_DissipationPlantGrown", PerSecond(GetInkProp(InkTypeId.PlantGrown, d => d.dissipation, 0.997f)));
-            fc.SetFloat("_DissipationSteam", PerSecond(GetInkProp(InkTypeId.Steam, d => d.dissipation, 0.990f)));
-            fc.SetFloat("_DissipationGlitter", PerSecond(GetInkProp(InkTypeId.Glitter, d => d.dissipation, 0.999f)));
-            fc.SetFloat("_DissipationBlackBody", PerSecond(GetInkProp(InkTypeId.BlackBody, d => d.dissipation, 0.5f)));
-            fc.SetFloat("_DissipationElectricitySeeded", PerSecond(GetInkProp(InkTypeId.ElectricitySeeded, d => d.dissipation, 0.985f)));
-            fc.SetFloat("_DissipationElectricityGrown", PerSecond(GetInkProp(InkTypeId.ElectricityGrown, d => d.dissipation, 0.985f)));
-            fc.SetFloat("_DissipationIce", PerSecond(GetInkProp(InkTypeId.Ice, d => d.dissipation, 0.996f)));
+            // Dissipation. InkTypeDef.dissipationHalfLife is the seconds-to-50% half-life; convert to
+            // per-second retention here. The shader applies pow(retention, frameDt), so the decay is
+            // frame-rate independent and reaches exactly 50% after halfLife real seconds.
+            fc.SetFloat("_DissipationFire", HalfLifeToPerSecond(GetInkProp(InkTypeId.Fire, d => d.dissipationHalfLife, 2.5f)));
+            fc.SetFloat("_DissipationWater", HalfLifeToPerSecond(GetInkProp(InkTypeId.Water, d => d.dissipationHalfLife, 25f)));
+            fc.SetFloat("_DissipationPlantSeeded", HalfLifeToPerSecond(GetInkProp(InkTypeId.PlantSeeded, d => d.dissipationHalfLife, 40f)));
+            fc.SetFloat("_DissipationPlantGrown", HalfLifeToPerSecond(GetInkProp(InkTypeId.PlantGrown, d => d.dissipationHalfLife, 60f)));
+            fc.SetFloat("_DissipationSteam", HalfLifeToPerSecond(GetInkProp(InkTypeId.Steam, d => d.dissipationHalfLife, 4f)));
+            fc.SetFloat("_DissipationGlitter", HalfLifeToPerSecond(GetInkProp(InkTypeId.Glitter, d => d.dissipationHalfLife, 12f)));
+            // BlackBody is intentionally fast-fading: it is re-stamped every frame so inklings read as
+            // rigid bodies (crisp shape that follows the stamp rather than smearing/advecting). Do NOT
+            // make it persistent like Plant/Ice. (To be revisited when plants/ice move to rigid bodies.)
+            fc.SetFloat("_DissipationBlackBody", HalfLifeToPerSecond(GetInkProp(InkTypeId.BlackBody, d => d.dissipationHalfLife, 0.75f)));
+            fc.SetFloat("_DissipationElectricitySeeded", HalfLifeToPerSecond(GetInkProp(InkTypeId.ElectricitySeeded, d => d.dissipationHalfLife, 2f)));
+            fc.SetFloat("_DissipationElectricityGrown", HalfLifeToPerSecond(GetInkProp(InkTypeId.ElectricityGrown, d => d.dissipationHalfLife, 2f)));
+            fc.SetFloat("_DissipationIce", HalfLifeToPerSecond(GetInkProp(InkTypeId.Ice, d => d.dissipationHalfLife, 45f)));
 
             // Viscosity
             fc.SetFloat("_ViscosityFire", GetInkProp(InkTypeId.Fire, d => d.viscosity, 0.05f));
@@ -217,15 +218,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         }
 
         /// <summary>
-        /// Converts a per-frame retention value (authored against the fixed Timestep) to per-second
-        /// retention, so the shader's pow(value, frameDt) reproduces the original per-frame decay
-        /// while being frame-rate independent. pow(PerSecond(v), Timestep) == v.
+        /// Converts a half-life (seconds to fade to 50%) into per-second retention for the shader,
+        /// which applies pow(retention, frameDt). After halfLife real seconds the value reaches 0.5,
+        /// independent of framerate. retention = 0.5^(1/halfLife).
         /// </summary>
-        private float PerSecond(float perFrame)
+        private static float HalfLifeToPerSecond(float halfLifeSeconds)
         {
-            perFrame = Mathf.Clamp(perFrame, 0f, 1f);
-            float stepsPerSecond = 1f / Mathf.Max(ctx.Timestep, 1e-4f);
-            return Mathf.Pow(perFrame, stepsPerSecond);
+            halfLifeSeconds = Mathf.Max(halfLifeSeconds, 1e-3f);
+            return Mathf.Pow(0.5f, 1f / halfLifeSeconds);
         }
 
         private float GetClampedPressureWeight(InkTypeId type, float defaultValue)

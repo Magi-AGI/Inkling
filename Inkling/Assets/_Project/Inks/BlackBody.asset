@@ -17,7 +17,7 @@ MonoBehaviour:
   debugColor: {r: 0, g: 0, b: 0, a: 1}
   inputKeyColor: {r: 0.1, g: 0.1, b: 0.1, a: 1}
   colorMatchTolerance: 0.2
-  dissipation: 0.985
+  dissipationHalfLife: 0.75
   viscosity: 0.001
   vorticity: 0.1
   interactionThreshold: 0.1
