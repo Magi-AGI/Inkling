@@ -105,13 +105,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             float alpha = 0f;
             float inverseBeta = 1f;
-            if (ctx.Viscosity > 0f && ctx.Timestep > 0f)
+            // dt-normalized: diffusion strength scales with the REAL frame dt (FrameDeltaTime), not the
+            // fixed solver timestep, so viscous smoothing-per-second is frame-rate independent. The
+            // implicit Jacobi form (inverseBeta = 1/(1+4a)) is unconditionally stable for any alpha;
+            // substepping keeps alpha (and thus the fixed-iteration solve error) small at low framerates.
+            // Byte-identical to the old fixed-timestep behavior when FrameDeltaTime == Timestep.
+            if (ctx.Viscosity > 0f && ctx.FrameDeltaTime > 0f)
             {
                 // Keep diffusion feel roughly resolution-independent by treating
                 // inspector viscosity as tuned for a 256 baseline grid.
                 float resScale = Mathf.Max(1f, ctx.Resolution / 256f);
                 float effectiveViscosity = ctx.Viscosity / (resScale * resScale);
-                float a = effectiveViscosity * ctx.Timestep * ctx.Resolution * ctx.Resolution;
+                float a = effectiveViscosity * ctx.FrameDeltaTime * ctx.Resolution * ctx.Resolution;
                 alpha = a;
                 inverseBeta = 1f / (1f + 4f * a);
             }

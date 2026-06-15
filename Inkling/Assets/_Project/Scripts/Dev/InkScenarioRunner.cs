@@ -39,6 +39,11 @@ namespace Magi.Inkling.Dev
         [Header("Sweep")]
         [SerializeField] private float[] viscositySweep = { 0.0001f, 0.0005f, 0.001f, 0.002f, 0.005f };
 
+        [Header("Transport DT test")]
+        [Tooltip("Viscosity used during the Transport DT test. 0 isolates advection; >0 also exercises " +
+                 "the dt-normalized diffusion path (stage 2). Captures get a _visc suffix when >0.")]
+        public float transportTestViscosity = 0f;
+
         private bool running;
 
         private void Start()
@@ -107,10 +112,11 @@ namespace Magi.Inkling.Dev
             // and scales linearly with advection-time — making the framerate dependence unambiguous.
             float prevVisc = sim.Viscosity, prevVort = sim.Vorticity, prevTs = sim.Timestep;
             float prevDiss = sim.Dissipation, prevVelDiss = sim.VelocityDissipation;
-            sim.SetTunable("viscosity", 0f);
+            sim.SetTunable("viscosity", transportTestViscosity); // 0 = isolate advection; >0 also tests diffusion
             sim.SetTunable("vorticity", 0f);
             sim.SetTunable("dissipation", 1f);
             sim.SetTunable("velocityDissipation", 1f);
+            string viscSuffix = transportTestViscosity > 0f ? "_visc" : "";
 
             // Stimulus: a fluid ink (water, advectionWeight 1) given a GENTLE rightward push so it
             // drifts a measurable distance while staying well inside the domain (no absorbing-boundary
@@ -154,8 +160,8 @@ namespace Magi.Inkling.Dev
                     if ((i & 15) == 15) { sim.RefreshDisplay(); yield return null; }
                 }
                 sim.RefreshDisplay(); yield return null;
-                CaptureTransport(sim, root, "transport_old_" + fc.tag, fixedDt, n, realTime);
-                Debug.Log("[InkScenarioRunner] captured transport_old_" + fc.tag + " (n=" + n + ", advTime=" + (n * fixedDt) + ")");
+                CaptureTransport(sim, root, "transport_old_" + fc.tag + viscSuffix, fixedDt, n, realTime);
+                Debug.Log("[InkScenarioRunner] captured transport_old_" + fc.tag + viscSuffix + " (n=" + n + ", advTime=" + (n * fixedDt) + ")");
 
                 // NEW: each step advects by the real frame dt, so advection-time == real time.
                 sim.ResetSimulation();
@@ -166,8 +172,8 @@ namespace Magi.Inkling.Dev
                     if ((i & 15) == 15) { sim.RefreshDisplay(); yield return null; }
                 }
                 sim.RefreshDisplay(); yield return null;
-                CaptureTransport(sim, root, "transport_new_" + fc.tag, realDt, n, realTime);
-                Debug.Log("[InkScenarioRunner] captured transport_new_" + fc.tag + " (n=" + n + ", advTime=" + (n * realDt) + ")");
+                CaptureTransport(sim, root, "transport_new_" + fc.tag + viscSuffix, realDt, n, realTime);
+                Debug.Log("[InkScenarioRunner] captured transport_new_" + fc.tag + viscSuffix + " (n=" + n + ", advTime=" + (n * realDt) + ")");
 
                 // NEWSUB: each frame's real dt is split into <= maxSubstepDt substeps (mirrors
                 // SimDriver.SimulateFrameSubstepped) so per-step Courant stays low even at 20 fps.
@@ -182,8 +188,8 @@ namespace Magi.Inkling.Dev
                     if ((i & 15) == 15) { sim.RefreshDisplay(); yield return null; }
                 }
                 sim.RefreshDisplay(); yield return null;
-                CaptureTransport(sim, root, "transport_newsub_" + fc.tag, subDt, n * sub, realTime);
-                Debug.Log("[InkScenarioRunner] captured transport_newsub_" + fc.tag + " (n=" + n + " x sub=" + sub + ", advTime=" + (n * realDt) + ")");
+                CaptureTransport(sim, root, "transport_newsub_" + fc.tag + viscSuffix, subDt, n * sub, realTime);
+                Debug.Log("[InkScenarioRunner] captured transport_newsub_" + fc.tag + viscSuffix + " (n=" + n + " x sub=" + sub + ", advTime=" + (n * realDt) + ")");
             }
 
             sim.SetTunable("viscosity", prevVisc);
