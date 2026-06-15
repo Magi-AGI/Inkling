@@ -1326,8 +1326,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.SimulationLOD0.SimDriver
   fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
   resolution: 1024
-  viscosity: 0.002
-  vorticity: 0.05
+  viscosity: 0.0007
+  vorticity: 0.5
   dissipation: 0.999
   velocityDissipation: 0.9995
   timestep: 0.016
@@ -1389,6 +1389,8 @@ MonoBehaviour:
   particleChannelSplatCompute: {fileID: 7200000, guid: 2e75d1648379b174584d6d1a1c20b62c, type: 3}
   useParticleRenderPass: 0
   simulationUpdateRate: 0
+  maxSubstepDt: 0.016
+  maxSubsteps: 8
   debugInjectTestForce: 0
   debugLogForces: 0
   currentInkType: 0

@@ -51,6 +51,14 @@ namespace Magi.Inkling.Dev
                  "reaches a bounded equilibrium instead of saturating the velocity clamp.")]
         public float transportTestVelocityDissipation = 1f;
 
+        [Header("Ink tuning pass")]
+        [Tooltip("Label tag for ink-tuning captures (tune_<tag>_fire/water_display.png).")]
+        public string tuningTag = "p0";
+        [Tooltip("Set true at runtime to capture fire+water under a directional push (vorticity active).")]
+        public bool runInkTuningRequested = false;
+        [Tooltip("Directional push strength for the ink-tuning pass.")]
+        public float tuningPush = 0.2f;
+
         private bool running;
 
         private void Start()
@@ -70,6 +78,59 @@ namespace Magi.Inkling.Dev
                 runTransportDtRequested = false;
                 TriggerTransportDt();
             }
+            if (runInkTuningRequested && !running)
+            {
+                runInkTuningRequested = false;
+                if (!running) StartCoroutine(RunInkTuningPass());
+            }
+        }
+
+        /// <summary>
+        /// Captures fire and water under a constant directional push with the scene's CURRENT global
+        /// solver params (viscosity/vorticity/velocityDissipation active — NOT zeroed). For iterating
+        /// on fire/water dynamics: set params via the SimDriver inspector/SerializedObject, set a
+        /// tuningTag, trigger, compare tune_<tag>_fire/water captures.
+        /// </summary>
+        private IEnumerator RunInkTuningPass()
+        {
+            running = true;
+            Application.runInBackground = true;
+
+            var sim = FindFirstObjectByType<SimDriver>();
+            if (sim == null) { Debug.LogError("[InkScenarioRunner] No SimDriver in scene."); running = false; yield break; }
+
+            int guard = 0;
+            while (sim.GetDisplayTexture() == null && guard++ < 300) yield return null;
+            if (sim.GetDisplayTexture() == null) { Debug.LogError("[InkScenarioRunner] Sim never became ready."); running = false; yield break; }
+
+            foreach (var inj in FindObjectsByType<TexturedInjector>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                inj.enabled = false;
+
+            string root = Path.GetFullPath(Path.Combine(Application.dataPath, "..", outputSubdir));
+            Directory.CreateDirectory(root);
+
+            bool prevExternal = sim.ExternalStepControl;
+            sim.ExternalStepControl = true;
+            sim.SetDisplayVelocity(false);
+
+            var inks = new (int idx, string name, Color col)[]
+            {
+                (0, "fire",  new Color(1f, 0f, 0f)),
+                (1, "water", new Color(0f, 0f, 1f)),
+            };
+            var push = new Vector2(tuningPush, 0f);
+            foreach (var ink in inks)
+            {
+                sim.ResetSimulation();
+                yield return RunStimulus(sim, push, ink.idx, ink.col);
+                Capture(sim, root, "tune_" + tuningTag + "_" + ink.name);
+                Debug.Log("[InkScenarioRunner] captured tune_" + tuningTag + "_" + ink.name
+                    + " (visc=" + sim.Viscosity + " vort=" + sim.Vorticity + " velDiss=" + sim.VelocityDissipation + ")");
+            }
+
+            sim.ExternalStepControl = prevExternal;
+            running = false;
+            Debug.Log("[InkScenarioRunner] INK TUNING DONE tag=" + tuningTag);
         }
 
         [ContextMenu("Run Scenarios")]
