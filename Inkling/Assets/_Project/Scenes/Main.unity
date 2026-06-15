@@ -1327,7 +1327,7 @@ MonoBehaviour:
   fluidCompute: {fileID: 7200000, guid: 36af48108e458854badb62fd1d4fdee1, type: 3}
   resolution: 1024
   viscosity: 0.0007
-  vorticity: 0.5
+  vorticity: 0.1
   dissipation: 0.999
   velocityDissipation: 0.9995
   timestep: 0.016
