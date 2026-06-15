@@ -45,6 +45,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // ── Simulation parameters ───────────────────────────────────────────
         public int Resolution;
         public float Timestep;
+        // Real-time seconds the current step represents (real frame dt in play, fixed Timestep
+        // under deterministic/external step control). Drives dt-normalized decays in the shader.
+        public float FrameDeltaTime;
         public float Viscosity;
         public float VorticityStrength;
         public float Dissipation;

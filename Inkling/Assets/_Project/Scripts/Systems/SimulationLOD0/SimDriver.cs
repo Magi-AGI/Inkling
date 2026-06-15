@@ -290,6 +290,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         {
             ctx.Resolution = resolution;
             ctx.Timestep = timestep;
+            // Real-time this step represents: fixed timestep under external/deterministic control
+            // (reproducible) or a fixed sim rate; otherwise the (clamped) real frame delta so
+            // dt-normalized decays stay frame-rate independent during live play.
+            ctx.FrameDeltaTime = ExternalStepControl ? timestep
+                : (simulationUpdateRate > 0 ? 1f / simulationUpdateRate : Mathf.Min(Time.deltaTime, 0.05f));
             ctx.Viscosity = viscosity;
             ctx.VorticityStrength = vorticity;
             ctx.Dissipation = dissipation;

@@ -92,6 +92,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             fc.SetInt("_Resolution", ctx.Resolution);
             fc.SetFloat("_DeltaTime", ctx.Timestep);
+            fc.SetFloat("_FrameDeltaTime", ctx.FrameDeltaTime);
             fc.SetFloat("_Viscosity", ctx.Viscosity);
             fc.SetFloat("_VorticityStrength", ctx.VorticityStrength);
             fc.SetFloat("_Dissipation", ctx.Dissipation);
@@ -130,17 +131,21 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private void SetInkProperties(ComputeShader fc)
         {
-            // Dissipation
-            fc.SetFloat("_DissipationFire", GetInkProp(InkTypeId.Fire, d => d.dissipation, 0.995f));
-            fc.SetFloat("_DissipationWater", GetInkProp(InkTypeId.Water, d => d.dissipation, 0.998f));
-            fc.SetFloat("_DissipationPlantSeeded", GetInkProp(InkTypeId.PlantSeeded, d => d.dissipation, 0.997f));
-            fc.SetFloat("_DissipationPlantGrown", GetInkProp(InkTypeId.PlantGrown, d => d.dissipation, 0.997f));
-            fc.SetFloat("_DissipationSteam", GetInkProp(InkTypeId.Steam, d => d.dissipation, 0.990f));
-            fc.SetFloat("_DissipationGlitter", GetInkProp(InkTypeId.Glitter, d => d.dissipation, 0.999f));
-            fc.SetFloat("_DissipationBlackBody", GetInkProp(InkTypeId.BlackBody, d => d.dissipation, 0.5f));
-            fc.SetFloat("_DissipationElectricitySeeded", GetInkProp(InkTypeId.ElectricitySeeded, d => d.dissipation, 0.985f));
-            fc.SetFloat("_DissipationElectricityGrown", GetInkProp(InkTypeId.ElectricityGrown, d => d.dissipation, 0.985f));
-            fc.SetFloat("_DissipationIce", GetInkProp(InkTypeId.Ice, d => d.dissipation, 0.996f));
+            // Dissipation. InkTypeDef.dissipation is authored as a per-FRAME retention; the shader
+            // now expects per-SECOND retention and applies pow(value, frameDt). Convert here with the
+            // authoring step rate (1/Timestep) so pow(perSecond, Timestep) == the original per-frame
+            // value — i.e. deterministic/harness runs are byte-identical, only live play becomes
+            // frame-rate independent. (Rebalancing the values is a separate step.)
+            fc.SetFloat("_DissipationFire", PerSecond(GetInkProp(InkTypeId.Fire, d => d.dissipation, 0.995f)));
+            fc.SetFloat("_DissipationWater", PerSecond(GetInkProp(InkTypeId.Water, d => d.dissipation, 0.998f)));
+            fc.SetFloat("_DissipationPlantSeeded", PerSecond(GetInkProp(InkTypeId.PlantSeeded, d => d.dissipation, 0.997f)));
+            fc.SetFloat("_DissipationPlantGrown", PerSecond(GetInkProp(InkTypeId.PlantGrown, d => d.dissipation, 0.997f)));
+            fc.SetFloat("_DissipationSteam", PerSecond(GetInkProp(InkTypeId.Steam, d => d.dissipation, 0.990f)));
+            fc.SetFloat("_DissipationGlitter", PerSecond(GetInkProp(InkTypeId.Glitter, d => d.dissipation, 0.999f)));
+            fc.SetFloat("_DissipationBlackBody", PerSecond(GetInkProp(InkTypeId.BlackBody, d => d.dissipation, 0.5f)));
+            fc.SetFloat("_DissipationElectricitySeeded", PerSecond(GetInkProp(InkTypeId.ElectricitySeeded, d => d.dissipation, 0.985f)));
+            fc.SetFloat("_DissipationElectricityGrown", PerSecond(GetInkProp(InkTypeId.ElectricityGrown, d => d.dissipation, 0.985f)));
+            fc.SetFloat("_DissipationIce", PerSecond(GetInkProp(InkTypeId.Ice, d => d.dissipation, 0.996f)));
 
             // Viscosity
             fc.SetFloat("_ViscosityFire", GetInkProp(InkTypeId.Fire, d => d.viscosity, 0.05f));
@@ -209,6 +214,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (ctx.InkDefinitions != null && idx < ctx.InkDefinitions.Length && ctx.InkDefinitions[idx] != null)
                 return getter(ctx.InkDefinitions[idx]);
             return defaultValue;
+        }
+
+        /// <summary>
+        /// Converts a per-frame retention value (authored against the fixed Timestep) to per-second
+        /// retention, so the shader's pow(value, frameDt) reproduces the original per-frame decay
+        /// while being frame-rate independent. pow(PerSecond(v), Timestep) == v.
+        /// </summary>
+        private float PerSecond(float perFrame)
+        {
+            perFrame = Mathf.Clamp(perFrame, 0f, 1f);
+            float stepsPerSecond = 1f / Mathf.Max(ctx.Timestep, 1e-4f);
+            return Mathf.Pow(perFrame, stepsPerSecond);
         }
 
         private float GetClampedPressureWeight(InkTypeId type, float defaultValue)
