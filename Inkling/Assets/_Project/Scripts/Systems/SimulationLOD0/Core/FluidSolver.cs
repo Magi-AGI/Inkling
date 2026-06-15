@@ -95,7 +95,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_FrameDeltaTime", ctx.FrameDeltaTime);
             fc.SetFloat("_Viscosity", ctx.Viscosity);
             fc.SetFloat("_VorticityStrength", ctx.VorticityStrength);
-            fc.SetFloat("_Dissipation", ctx.Dissipation);
+            // Global velocity/density damping is also a per-frame retention; convert to per-second so the
+            // dt-normalized advection shader makes it frame-rate independent. (Swapped per-pass below.)
+            fc.SetFloat("_Dissipation", PerFrameToPerSecond(ctx.Dissipation));
             fc.SetVector("_SimulationSize", new Vector2(ctx.Resolution, ctx.Resolution));
             fc.SetFloat("_DebugZeroPressure", ctx.DebugZeroPressure ? 1f : 0f);
             fc.SetFloat("_DebugZeroVelocity", ctx.DebugZeroVelocity ? 1f : 0f);
@@ -228,6 +230,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             return Mathf.Pow(0.5f, 1f / halfLifeSeconds);
         }
 
+        /// <summary>
+        /// Converts a per-frame retention (authored against the fixed Timestep) to per-second retention
+        /// for the dt-normalized shader. pow(PerFrameToPerSecond(v), Timestep) == v, so deterministic
+        /// runs are unchanged while live play becomes frame-rate independent.
+        /// </summary>
+        private float PerFrameToPerSecond(float perFrame)
+        {
+            perFrame = Mathf.Clamp01(perFrame);
+            return Mathf.Pow(perFrame, 1f / Mathf.Max(ctx.Timestep, 1e-4f));
+        }
+
         private float GetClampedPressureWeight(InkTypeId type, float defaultValue)
         {
             // Keep pressure weighting in a stable range so projection does not over-damp
@@ -358,7 +371,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvection, "_VelocityWrite", ctx.Velocity.Write);
             ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvection, "_QuantityRead", ctx.Velocity.Read);
             ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvection, "_QuantityWrite", ctx.Velocity.Write);
-            ctx.FluidCompute.SetFloat("_Dissipation", ctx.VelocityDissipation);
+            ctx.FluidCompute.SetFloat("_Dissipation", PerFrameToPerSecond(ctx.VelocityDissipation));
             ctx.FluidCompute.Dispatch(ctx.FluidKernelAdvection, threadGroups, threadGroups, 1);
             ctx.Velocity.Swap();
 
@@ -369,7 +382,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvection, "_VelocityWrite", ctx.Velocity.Write);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvection, "_QuantityRead", ctx.Density.Read);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvection, "_QuantityWrite", ctx.Density.Write);
-                ctx.FluidCompute.SetFloat("_Dissipation", ctx.Dissipation);
+                ctx.FluidCompute.SetFloat("_Dissipation", PerFrameToPerSecond(ctx.Dissipation));
                 ctx.FluidCompute.Dispatch(ctx.FluidKernelAdvection, threadGroups, threadGroups, 1);
                 ctx.Density.Swap();
             }
