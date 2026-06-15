@@ -129,6 +129,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Update Rate")]
         [SerializeField] private int simulationUpdateRate = 0;
 
+        [Header("Substepping (CFL stability)")]
+        [Tooltip("Max real seconds advanced by a single solver step. When a frame's real dt exceeds " +
+                 "this, the step is split into N equal substeps so per-step advection stays stable / " +
+                 "low-Courant at low framerates. <= 0 disables substepping (single step per frame).")]
+        [SerializeField] private float maxSubstepDt = 0.016f;
+        [Tooltip("Hard cap on substeps per frame, bounding worst-case cost on a hitched frame.")]
+        [SerializeField] private int maxSubsteps = 8;
+
         [Header("Debug / Diagnostics")]
         [Tooltip("Inject a constant circular force every frame to test the velocity pipeline. Enable displayVelocity to visualize.")]
         [SerializeField] private bool debugInjectTestForce = false;
@@ -377,7 +385,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 float targetStep = simulationUpdateRate > 0 ? 1f / simulationUpdateRate : 0f;
                 if (targetStep <= 0f || simAccumulator >= targetStep)
                 {
-                    SimulateFrame();
+                    // ctx.FrameDeltaTime was set in SyncContextFromFields to the clamped real frame
+                    // dt (or 1/rate). Substep it so per-step advection stays stable at low framerates.
+                    SimulateFrameSubstepped(ctx.FrameDeltaTime);
                     simRanThisFrame = true;
                     if (targetStep > 0f)
                         simAccumulator = Mathf.Max(0f, simAccumulator - targetStep);
@@ -401,6 +411,31 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             var sw = measurePerformance ? stopwatch : null;
             fluidSolver.Step(sw);
+        }
+
+        /// <summary>
+        /// Advances the sim by <paramref name="frameDt"/> real seconds, split into N ≤ maxSubsteps equal
+        /// substeps of ≤ maxSubstepDt each so per-step advection stays low-Courant at low framerates.
+        /// Queued injections are applied once at frame start; the dt-normalized decays compose exactly
+        /// (pow(r, frameDt/N)^N == pow(r, frameDt)).
+        /// </summary>
+        private void SimulateFrameSubstepped(float frameDt)
+        {
+            operationQueue.DebugLogForces = debugLogForces;
+            operationQueue.ProcessPending();
+
+            int n = 1;
+            if (maxSubstepDt > 0f && frameDt > maxSubstepDt)
+                n = Mathf.CeilToInt(frameDt / maxSubstepDt);
+            n = Mathf.Clamp(n, 1, Mathf.Max(1, maxSubsteps));
+
+            float subDt = frameDt / n;
+            var sw = measurePerformance ? stopwatch : null;
+            for (int i = 0; i < n; i++)
+            {
+                ctx.FrameDeltaTime = subDt;
+                fluidSolver.Step(sw);
+            }
         }
 
         // ── Deterministic external control (automated scenario / dataset harness) ──

@@ -127,14 +127,19 @@ namespace Magi.Inkling.Dev
             const int buildSteps = 20;   // density injected for this many steps (builds the blob)
             const int forceSteps = 4;    // force injected only for the first few steps (brief impulse)
             const float realTime = 1.0f; // real seconds of settling, held constant across framerates
+            const float maxSubstepDt = 0.016f; // mirrors SimDriver.maxSubstepDt for the substep variant
+            const int maxSubsteps = 8;
             sim.SetTunable("timestep", fixedDt);
 
             // Emulated framerates. Over the SAME real time, a higher framerate takes more (smaller) steps.
             var fpsCases = new (float fps, string tag)[] { (20f, "fps020"), (120f, "fps120") };
 
-            // For each framerate, run TWO variants over identical initial conditions:
-            //   OLD  = advect by the fixed timestep every step  (pre-fix behavior: framerate-dependent)
-            //   NEW  = advect by the real frame dt              (post-fix: framerate-independent)
+            // For each framerate, run THREE variants over identical initial conditions:
+            //   OLD    = advect by the fixed timestep every step (pre-fix: framerate-dependent)
+            //   NEW    = advect by the real frame dt             (post-fix: framerate-independent, but
+            //            coarse at low fps where the single step has a high Courant number)
+            //   NEWSUB = NEW with SimDriver-style substepping    (splits the frame dt to <= maxSubstepDt,
+            //            recovering low-Courant accuracy at low fps)
             foreach (var fc in fpsCases)
             {
                 int n = Mathf.Max(1, Mathf.RoundToInt(fc.fps * realTime));
@@ -163,6 +168,22 @@ namespace Magi.Inkling.Dev
                 sim.RefreshDisplay(); yield return null;
                 CaptureTransport(sim, root, "transport_new_" + fc.tag, realDt, n, realTime);
                 Debug.Log("[InkScenarioRunner] captured transport_new_" + fc.tag + " (n=" + n + ", advTime=" + (n * realDt) + ")");
+
+                // NEWSUB: each frame's real dt is split into <= maxSubstepDt substeps (mirrors
+                // SimDriver.SimulateFrameSubstepped) so per-step Courant stays low even at 20 fps.
+                int sub = (maxSubstepDt > 0f && realDt > maxSubstepDt) ? Mathf.CeilToInt(realDt / maxSubstepDt) : 1;
+                sub = Mathf.Clamp(sub, 1, maxSubsteps);
+                float subDt = realDt / sub;
+                sim.ResetSimulation();
+                yield return BuildInitialCondition(sim, injectPos, col, inkType, force, buildSteps, forceSteps, fixedDt);
+                for (int i = 0; i < n; i++)
+                {
+                    for (int s = 0; s < sub; s++) sim.StepSimulation(subDt);
+                    if ((i & 15) == 15) { sim.RefreshDisplay(); yield return null; }
+                }
+                sim.RefreshDisplay(); yield return null;
+                CaptureTransport(sim, root, "transport_newsub_" + fc.tag, subDt, n * sub, realTime);
+                Debug.Log("[InkScenarioRunner] captured transport_newsub_" + fc.tag + " (n=" + n + " x sub=" + sub + ", advTime=" + (n * realDt) + ")");
             }
 
             sim.SetTunable("viscosity", prevVisc);
