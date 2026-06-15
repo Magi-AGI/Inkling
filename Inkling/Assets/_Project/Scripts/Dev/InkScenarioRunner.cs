@@ -43,6 +43,13 @@ namespace Magi.Inkling.Dev
         [Tooltip("Viscosity used during the Transport DT test. 0 isolates advection; >0 also exercises " +
                  "the dt-normalized diffusion path (stage 2). Captures get a _visc suffix when >0.")]
         public float transportTestViscosity = 0f;
+        [Tooltip("Vorticity strength used during the Transport DT test. >0 exercises the dt-normalized " +
+                 "vorticity-confinement impulse (stage 4). Captures get a _vort suffix when >0.")]
+        public float transportTestVorticity = 0f;
+        [Tooltip("Per-frame velocity retention during the Transport DT test. 1 = no damping (clean " +
+                 "advection drift). Use <1 for vorticity tests so the energy-pumping confinement " +
+                 "reaches a bounded equilibrium instead of saturating the velocity clamp.")]
+        public float transportTestVelocityDissipation = 1f;
 
         private bool running;
 
@@ -112,11 +119,12 @@ namespace Magi.Inkling.Dev
             // and scales linearly with advection-time — making the framerate dependence unambiguous.
             float prevVisc = sim.Viscosity, prevVort = sim.Vorticity, prevTs = sim.Timestep;
             float prevDiss = sim.Dissipation, prevVelDiss = sim.VelocityDissipation;
-            sim.SetTunable("viscosity", transportTestViscosity); // 0 = isolate advection; >0 also tests diffusion
-            sim.SetTunable("vorticity", 0f);
+            sim.SetTunable("viscosity", transportTestViscosity);   // 0 = isolate advection; >0 also tests diffusion
+            sim.SetTunable("vorticity", transportTestVorticity);   // >0 tests the dt-normalized vorticity impulse
             sim.SetTunable("dissipation", 1f);
-            sim.SetTunable("velocityDissipation", 1f);
-            string viscSuffix = transportTestViscosity > 0f ? "_visc" : "";
+            sim.SetTunable("velocityDissipation", transportTestVelocityDissipation);
+            string viscSuffix = (transportTestViscosity > 0f ? "_visc" : "")
+                              + (transportTestVorticity > 0f ? "_vort" : "");
 
             // Stimulus: a fluid ink (water, advectionWeight 1) given a GENTLE rightward push so it
             // drifts a measurable distance while staying well inside the domain (no absorbing-boundary

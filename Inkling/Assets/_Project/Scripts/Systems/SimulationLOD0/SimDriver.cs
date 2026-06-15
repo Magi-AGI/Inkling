@@ -418,6 +418,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         /// substeps of ≤ maxSubstepDt each so per-step advection stays low-Courant at low framerates.
         /// Queued injections are applied once at frame start; the dt-normalized decays compose exactly
         /// (pow(r, frameDt/N)^N == pow(r, frameDt)).
+        /// STABILITY: the dt-normalized velocity impulses (vorticity confinement, force injection) scale
+        /// by (subDt / timestep). Keeping maxSubstepDt ≤ the solver timestep makes that ratio ≤ 1, so an
+        /// energy-pumping impulse never exceeds its tuned per-step magnitude even at low fps. Raising
+        /// maxSubstepDt above the timestep (or disabling substeps) can let those impulses spike — keep
+        /// maxSubstepDt == timestep unless you know what you're doing.
         /// </summary>
         private void SimulateFrameSubstepped(float frameDt)
         {
