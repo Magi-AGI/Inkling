@@ -24,6 +24,8 @@ namespace Magi.Inkling.Dev
         [SerializeField] private bool runOnStart = false;
         [Tooltip("Set true at runtime (e.g. via MCP) to kick off a run.")]
         public bool runRequested = false;
+        [Tooltip("Set true at runtime to run the transport dt-normalization cross-rate test.")]
+        public bool runTransportDtRequested = false;
 
         [Header("Output")]
         [Tooltip("Folder under the project root (sibling of Assets) for captures.")]
@@ -51,12 +53,196 @@ namespace Magi.Inkling.Dev
                 runRequested = false;
                 Trigger();
             }
+            if (runTransportDtRequested && !running)
+            {
+                runTransportDtRequested = false;
+                TriggerTransportDt();
+            }
         }
 
         [ContextMenu("Run Scenarios")]
         public void Trigger()
         {
             if (!running) StartCoroutine(RunAll());
+        }
+
+        [ContextMenu("Run Transport DT Test")]
+        public void TriggerTransportDt()
+        {
+            if (!running) StartCoroutine(RunTransportDtTest());
+        }
+
+        /// <summary>
+        /// Cross-rate validation for transport dt-normalization. Builds an IDENTICAL initial
+        /// condition (fixed-dt injection burst with a directional push), then settles for the SAME
+        /// real sim-time at several timesteps. Viscosity + vorticity are zeroed so advection is the
+        /// only dt-dependent transport — if advection is dt-normalized, the drifted plume's centroid
+        /// converges across rates (spread differs slightly from semi-Lagrangian numerical diffusion).
+        /// </summary>
+        private IEnumerator RunTransportDtTest()
+        {
+            running = true;
+            Application.runInBackground = true;
+
+            var sim = FindFirstObjectByType<SimDriver>();
+            if (sim == null) { Debug.LogError("[InkScenarioRunner] No SimDriver in scene."); running = false; yield break; }
+
+            int guard = 0;
+            while (sim.GetDisplayTexture() == null && guard++ < 300) yield return null;
+            if (sim.GetDisplayTexture() == null) { Debug.LogError("[InkScenarioRunner] Sim never became ready."); running = false; yield break; }
+
+            foreach (var inj in FindObjectsByType<TexturedInjector>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                inj.enabled = false;
+
+            string root = Path.GetFullPath(Path.Combine(Application.dataPath, "..", outputSubdir));
+            Directory.CreateDirectory(root);
+            Debug.Log("[InkScenarioRunner] Transport DT test output -> " + root);
+
+            bool prevExternal = sim.ExternalStepControl;
+            sim.ExternalStepControl = true;
+            sim.SetDisplayVelocity(false);
+
+            // Isolate ADVECTION: no viscous diffusion, no per-frame vorticity impulse, and no decay
+            // (dissipation/velocityDissipation = 1) so the blob's drift is driven purely by advection
+            // and scales linearly with advection-time — making the framerate dependence unambiguous.
+            float prevVisc = sim.Viscosity, prevVort = sim.Vorticity, prevTs = sim.Timestep;
+            float prevDiss = sim.Dissipation, prevVelDiss = sim.VelocityDissipation;
+            sim.SetTunable("viscosity", 0f);
+            sim.SetTunable("vorticity", 0f);
+            sim.SetTunable("dissipation", 1f);
+            sim.SetTunable("velocityDissipation", 1f);
+
+            // Stimulus: a fluid ink (water, advectionWeight 1) given a GENTLE rightward push so it
+            // drifts a measurable distance while staying well inside the domain (no absorbing-boundary
+            // mass loss) and at a low Courant number (so per-step numerical diffusion stays small).
+            const int inkType = 1;
+            Color col = new Color(0f, 0f, 1f);
+            Vector2 injectPos = new Vector2(0.35f, 0.5f);
+            Vector2 force = new Vector2(0.01f, 0f); // small; SimDriver.forceStrength scales this up internally
+
+            // The solver Timestep stays pinned at the legacy fixed value for the WHOLE test. Only the
+            // per-step real frame dt (FrameDeltaTime, via StepSimulation(dt)) varies — exactly the
+            // play-mode situation the fix targets (one step/frame at fixed timestep, variable real dt).
+            const float fixedDt = 0.016f;
+            const int buildSteps = 20;   // density injected for this many steps (builds the blob)
+            const int forceSteps = 4;    // force injected only for the first few steps (brief impulse)
+            const float realTime = 1.0f; // real seconds of settling, held constant across framerates
+            sim.SetTunable("timestep", fixedDt);
+
+            // Emulated framerates. Over the SAME real time, a higher framerate takes more (smaller) steps.
+            var fpsCases = new (float fps, string tag)[] { (20f, "fps020"), (120f, "fps120") };
+
+            // For each framerate, run TWO variants over identical initial conditions:
+            //   OLD  = advect by the fixed timestep every step  (pre-fix behavior: framerate-dependent)
+            //   NEW  = advect by the real frame dt              (post-fix: framerate-independent)
+            foreach (var fc in fpsCases)
+            {
+                int n = Mathf.Max(1, Mathf.RoundToInt(fc.fps * realTime));
+                float realDt = 1f / fc.fps;
+
+                // OLD emulation: every step advects by fixedDt regardless of real frame time.
+                sim.ResetSimulation();
+                yield return BuildInitialCondition(sim, injectPos, col, inkType, force, buildSteps, forceSteps, fixedDt);
+                for (int i = 0; i < n; i++)
+                {
+                    sim.StepSimulation(fixedDt);
+                    if ((i & 15) == 15) { sim.RefreshDisplay(); yield return null; }
+                }
+                sim.RefreshDisplay(); yield return null;
+                CaptureTransport(sim, root, "transport_old_" + fc.tag, fixedDt, n, realTime);
+                Debug.Log("[InkScenarioRunner] captured transport_old_" + fc.tag + " (n=" + n + ", advTime=" + (n * fixedDt) + ")");
+
+                // NEW: each step advects by the real frame dt, so advection-time == real time.
+                sim.ResetSimulation();
+                yield return BuildInitialCondition(sim, injectPos, col, inkType, force, buildSteps, forceSteps, fixedDt);
+                for (int i = 0; i < n; i++)
+                {
+                    sim.StepSimulation(realDt);
+                    if ((i & 15) == 15) { sim.RefreshDisplay(); yield return null; }
+                }
+                sim.RefreshDisplay(); yield return null;
+                CaptureTransport(sim, root, "transport_new_" + fc.tag, realDt, n, realTime);
+                Debug.Log("[InkScenarioRunner] captured transport_new_" + fc.tag + " (n=" + n + ", advTime=" + (n * realDt) + ")");
+            }
+
+            sim.SetTunable("viscosity", prevVisc);
+            sim.SetTunable("vorticity", prevVort);
+            sim.SetTunable("dissipation", prevDiss);
+            sim.SetTunable("velocityDissipation", prevVelDiss);
+            sim.SetTunable("timestep", prevTs);
+            sim.ExternalStepControl = prevExternal;
+            running = false;
+            Debug.Log("[InkScenarioRunner] TRANSPORT DT DONE -> " + root);
+        }
+
+        /// <summary>Builds the identical blob+impulse initial condition (fixed dt) for a transport test variant.</summary>
+        private IEnumerator BuildInitialCondition(SimDriver sim, Vector2 pos, Color col, int inkType,
+            Vector2 force, int buildSteps, int forceSteps, float dt)
+        {
+            for (int i = 0; i < buildSteps; i++)
+            {
+                sim.InjectDensity(pos, col, inkType);
+                if (i < forceSteps) sim.InjectForce(pos, force);
+                sim.StepSimulation(dt);
+                if ((i & 15) == 15) { sim.RefreshDisplay(); yield return null; }
+            }
+        }
+
+        private void CaptureTransport(SimDriver sim, string root, string label, float dt, int steps, float realTime)
+        {
+            SaveRT(sim.GetDisplayTexture(), Path.Combine(root, label + "_display.png"), false, out _, out _);
+            SaveRT(sim.GetVelocityTexture(), Path.Combine(root, label + "_velocity.png"), true, out float avgSpeed, out float maxSpeed);
+            MeasureCentroid(sim.GetDisplayTexture(), out float cx, out float cy, out float mass);
+            var ci = CultureInfo.InvariantCulture;
+            string json = "{"
+                + "\"label\":\"" + label + "\","
+                + "\"dt\":" + dt.ToString(ci) + ","
+                + "\"steps\":" + steps + ","
+                + "\"advectionTime\":" + (steps * dt).ToString(ci) + ","
+                + "\"realTime\":" + realTime.ToString(ci) + ","
+                + "\"centroidX\":" + cx.ToString(ci) + ","
+                + "\"centroidY\":" + cy.ToString(ci) + ","
+                + "\"mass\":" + mass.ToString(ci) + ","
+                + "\"avgSpeed\":" + avgSpeed.ToString(ci) + ","
+                + "\"maxSpeed\":" + maxSpeed.ToString(ci)
+                + "}";
+            File.WriteAllText(Path.Combine(root, label + ".json"), json);
+        }
+
+        /// <summary>Luminance-weighted centroid (UV 0..1) and total luminance of an RT, for cross-rate drift comparison.</summary>
+        private void MeasureCentroid(RenderTexture rt, out float cx, out float cy, out float mass)
+        {
+            cx = 0f; cy = 0f; mass = 0f;
+            if (rt == null) return;
+            var tmp = RenderTexture.GetTemporary(captureSize, captureSize, 0, RenderTextureFormat.ARGBFloat);
+            Graphics.Blit(rt, tmp);
+            var prev = RenderTexture.active;
+            RenderTexture.active = tmp;
+            var tex = new Texture2D(captureSize, captureSize, TextureFormat.RGBAFloat, false);
+            tex.ReadPixels(new Rect(0, 0, captureSize, captureSize), 0, 0);
+            tex.Apply();
+            RenderTexture.active = prev;
+            RenderTexture.ReleaseTemporary(tmp);
+            var px = tex.GetPixels();
+            double sum = 0, sx = 0, sy = 0;
+            for (int y = 0; y < captureSize; y++)
+            {
+                for (int x = 0; x < captureSize; x++)
+                {
+                    Color p = px[y * captureSize + x];
+                    float lum = 0.299f * p.r + 0.587f * p.g + 0.114f * p.b;
+                    sum += lum;
+                    sx += lum * x;
+                    sy += lum * y;
+                }
+            }
+            Destroy(tex);
+            mass = (float)sum;
+            if (sum > 1e-6)
+            {
+                cx = (float)(sx / sum) / captureSize;
+                cy = (float)(sy / sum) / captureSize;
+            }
         }
 
         private IEnumerator RunAll()
@@ -230,6 +416,23 @@ namespace Magi.Inkling.Dev
                 runner = go.AddComponent<InkScenarioRunner>();
             }
             runner.Trigger();
+        }
+
+        [MenuItem("Inkling/Run Transport DT Test")]
+        private static void RunTransportDtMenu()
+        {
+            if (!Application.isPlaying)
+            {
+                Debug.LogWarning("[InkScenarioRunner] Enter Play mode first, then run this menu.");
+                return;
+            }
+            var runner = FindFirstObjectByType<InkScenarioRunner>();
+            if (runner == null)
+            {
+                var go = new GameObject("InkScenarioRunner");
+                runner = go.AddComponent<InkScenarioRunner>();
+            }
+            runner.TriggerTransportDt();
         }
 #endif
     }

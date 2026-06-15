@@ -418,6 +418,20 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             SimulateFrame();
         }
 
+        /// <summary>
+        /// Advances one step but with an explicit real-time delta (<paramref name="frameDtOverride"/>)
+        /// for the dt-normalized transport/decay paths, while keeping the fixed solver Timestep.
+        /// Lets callers emulate variable framerates (validation) and is the building block for dt
+        /// clamping/substepping. A non-positive override falls back to the fixed-timestep step.
+        /// </summary>
+        public void StepSimulation(float frameDtOverride)
+        {
+            if (ctx == null || ctx.FluidCompute == null) return;
+            SyncContextFromFields();
+            if (frameDtOverride > 0f) ctx.FrameDeltaTime = frameDtOverride;
+            SimulateFrame();
+        }
+
         /// <summary>Clears all simulation state (density, velocity, pressure, particles) to zero.</summary>
         public void ResetSimulation()
         {
