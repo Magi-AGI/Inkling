@@ -58,6 +58,8 @@ namespace Magi.Inkling.Dev
         public bool runInkTuningRequested = false;
         [Tooltip("Directional push strength for the ink-tuning pass.")]
         public float tuningPush = 0.2f;
+        [Tooltip("Ink index to capture in the tuning pass. -1 = fire+water; otherwise that single ink (0..9).")]
+        public int tuningInkOverride = -1;
 
         private bool running;
 
@@ -113,14 +115,26 @@ namespace Magi.Inkling.Dev
             sim.ExternalStepControl = true;
             sim.SetDisplayVelocity(false);
 
-            var inks = new (int idx, string name, Color col)[]
+            var all = new (int idx, string name, Color col)[]
             {
-                (0, "fire",  new Color(1f, 0f, 0f)),
-                (1, "water", new Color(0f, 0f, 1f)),
+                (0, "fire",        new Color(1f, 0f, 0f)),
+                (1, "water",       new Color(0f, 0f, 1f)),
+                (2, "plantSeeded", new Color(0f, 1f, 0f)),
+                (3, "plantGrown",  new Color(0f, 0.5f, 0f)),
+                (4, "steam",       new Color(0.49f, 0.49f, 0.49f)),
+                (5, "glitter",     new Color(1f, 0.5f, 1f)),
+                (6, "blackBody",   new Color(0.1f, 0.1f, 0.1f)),
+                (7, "elecSeeded",  new Color(1f, 1f, 0f)),
+                (8, "elecGrown",   new Color(0.5f, 0.5f, 0f)),
+                (9, "ice",         new Color(0f, 1f, 1f)),
             };
+            int[] sel = (tuningInkOverride >= 0 && tuningInkOverride < all.Length)
+                ? new[] { tuningInkOverride }
+                : new[] { 0, 1 };
             var push = new Vector2(tuningPush, 0f);
-            foreach (var ink in inks)
+            foreach (var idx in sel)
             {
+                var ink = all[idx];
                 sim.ResetSimulation();
                 yield return RunStimulus(sim, push, ink.idx, ink.col);
                 Capture(sim, root, "tune_" + tuningTag + "_" + ink.name);
