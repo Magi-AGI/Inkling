@@ -18,9 +18,10 @@ namespace Magi.Inkling.Systems.Brush
         [Range(0.01f, 10f)]
         public float densityMultiplier = 1f;
 
-        [Tooltip("Force multiplier for velocity injection when dragging.")]
-        [Range(0f, 200f)]
-        public float forceMultiplier = 1f;
+        [Tooltip("Gain on mouse velocity (UV/sec) for velocity injection while dragging. ~0.1 gives a " +
+                 "brisk drag a strong push (≈ the tuned plume stimulus); raise toward 0.2 for more.")]
+        [Range(0f, 0.5f)]
+        public float forceMultiplier = 0.1f;
 
         [Header("Sampling / Mirror")]
         [Tooltip("Skip injections when the cursor moves less than this UV distance (0-1). Prevents oversampling while dragging.")]

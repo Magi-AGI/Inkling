@@ -22,6 +22,8 @@ namespace Magi.Inkling.Systems.Brush
         private bool isInjecting;
         private Vector2 lastUv;
         private bool hasLast;
+        private Vector2 lastFrameUv;
+        private bool hasLastFrame;
 
         private void Start()
         {
@@ -52,16 +54,23 @@ namespace Magi.Inkling.Systems.Brush
                 
                 Vector2 uv = SimulationUvUtility.ComputeUv(screenPos, targetRenderer, cam, lastUv);
 
-                // Force should be injected continuously while dragging so velocity
-                // remains responsive even when stamp spacing is coarse.
-                if (hasLast)
+                // Inject velocity in the direction the mouse is moving, proportional to mouse SPEED.
+                // Using mouse velocity (UV/sec) rather than per-frame displacement keeps the impulse
+                // frame-rate independent: the dt-normalized force path integrates the passed value over
+                // the frame, so faster framerates (smaller per-frame deltas) still sum to the same push.
+                // Injected every frame while dragging so motion stays responsive regardless of stamp spacing.
+                if (hasLastFrame)
                 {
-                    Vector2 force = (uv - lastUv) * config.forceMultiplier;
-                    if (force.sqrMagnitude > 0.000001f)
+                    float dt = Mathf.Clamp(Time.deltaTime, 1e-4f, 0.1f);
+                    Vector2 mouseVelUv = (uv - lastFrameUv) / dt;
+                    Vector2 force = mouseVelUv * config.forceMultiplier;
+                    if (force.sqrMagnitude > 1e-8f)
                     {
                         simWriter.InjectForce(uv, force);
                     }
                 }
+                lastFrameUv = uv;
+                hasLastFrame = true;
 
                 bool shouldStamp = !wasInjecting
                     || !hasLast
@@ -83,6 +92,7 @@ namespace Magi.Inkling.Systems.Brush
             else
             {
                 hasLast = false;
+                hasLastFrame = false;
             }
         }
 

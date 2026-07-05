@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Magi.Inkling::Magi.Inkling.Systems.Brush.BrushConfig
   brushRadiusUv: 0.02
   densityMultiplier: 1
-  forceMultiplier: 1
+  forceMultiplier: 0.1
   minDistanceUv: 0.005
   enableMirror: 0
   mirrorAxisX: 0.5
