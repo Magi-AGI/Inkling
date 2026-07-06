@@ -46,6 +46,12 @@ namespace Magi.Inkling.Systems.Growth
         [Range(0f, 0.25f)]
         public float diagonalSpreadWeight = 0.05f;
 
+        [Tooltip("Grown plant only spreads (neighbor expansion) into cells whose water exceeds this " +
+                 "threshold — grown expands across water, not across the plant-seed bed. Does not affect " +
+                 "direct seeded->grown maturation.")]
+        [Range(0f, 1f)]
+        public float plantSpreadWaterThreshold = 0.01f;
+
         [Header("Decay")]
         [Tooltip("Enable decay of grown plants/electricity over time")]
         public bool enableDecay = false;

@@ -6,6 +6,7 @@
 // to Write at the end. Avoids race conditions.
 
 #pragma kernel InkInteractions
+#pragma kernel ApplyReactionImpulse
 
 // Include iparticle struct definition (X-macro file)
 #define ifloat float
@@ -37,6 +38,39 @@ float4 _ProductCol5;       // Product reactions column 5: 2×3
 float3 _Weights;        // self, cardinal, diagonal
 float _RateMultiplier;  // Global multiplier for reaction rates (default ~10 for visible effects)
 float4 _InteractionThresholds;  // Per-ink minimum concentration for reactions (matches _InkIndices order)
+
+// ── Reaction-driven motion (data-driven, generalized) ────────────────────────
+// The concentration reaction path (productMatrix) does not move fluid. To let reactions
+// push the field (e.g. fire spreading out of a still plant region), each affinity group
+// carries a parallel "reaction impulse matrix" with the SAME 6 pair columns as the product
+// matrix. Convention, for a pair column A×B:
+//   * DIRECTION = grad(slotB) - grad(slotA)  — the local concentration-gradient front normal
+//                 pointing from A toward B (the fuel the reaction advances into).
+//   * INTENSITY = column-sum of the impulse matrix for that pair (signed) × the reaction
+//                 product magnitude. For "A + B -> C" put a positive coefficient in row C;
+//                 a negative coefficient flips the vector direction.
+// This is independent from the concentration productMatrix, so motion strength tunes
+// separately from conversion speed. Nothing here hardcodes specific ink types.
+//
+// InkInteractions accumulates a per-cell VECTOR (RG) = sum over pairs of normalize(dir) *
+// intensity. ApplyReactionImpulse later converts that vector into bounded velocity. Gather /
+// per-cell writes only (one thread owns one cell), so no scatter/atomics are needed.
+int _AccumulateReactionImpulse;   // 0/1: whether InkInteractions writes into _ReactionImpulseRW
+float _ReactionImpulseGain;       // scales the accumulated vector before impulse conversion
+float4x4 _ReactionImpulseMatrix;  // impulse coefficients, columns 0-3: 0×1, 0×2, 0×3, 1×2
+float4 _ReactionImpulseCol4;      // impulse coefficients column 4: 1×3
+float4 _ReactionImpulseCol5;      // impulse coefficients column 5: 2×3
+RWTexture2D<float2> _ReactionImpulseRW;  // accumulated reaction impulse vector (cleared each step)
+
+// ApplyReactionImpulse params
+Texture2D<float2> _ReactionImpulseRead;  // reaction impulse vector field (SRV view of the RW target)
+Texture2D<float2> _VelocityReadRI;
+RWTexture2D<float2> _VelocityWriteRI;
+float _ReactionImpulseStrength;   // velocity delta per unit magnitude (per-step; dt-scaled below)
+float _ReactionImpulseMax;        // clamp on per-cell velocity delta magnitude
+float _ReactionImpulseCurlBias;   // weight of tangential (swirl) component
+float _ReactionImpulseExpansionBias;  // weight of outward front-normal component
+float _ReactionImpulseDtScale;    // FrameDeltaTime/Timestep: matches other per-substep velocity impulses
 
 // Helper: Extract ink value by field index (0-9)
 float GetInkByIndex(iparticle p, int idx)
@@ -93,6 +127,21 @@ iparticle SampleParticle(int2 pos)
     return _ParticlesRead[pos.y * _Resolution + pos.x];
 }
 
+// Reaction-impulse contribution for one A×B pair: normalized (gradB - gradA) direction times
+// the signed (coef * saturated-product) intensity. gradX/gradY hold the per-slot central-
+// difference gradients (index a/b are compile-time constants at every call site so the vector
+// component access folds to a constant). A soft saturation prod/(1+prod) bounds each pair's
+// contribution so raw (possibly large) product terms can't inject an unbounded impulse.
+float2 ReactionPairVec(int a, int b, float prod, float coef, float4 gradX, float4 gradY)
+{
+    float2 dir = float2(gradX[b] - gradX[a], gradY[b] - gradY[a]);
+    float len = length(dir);
+    if (len < 1e-6 || abs(coef) < 1e-8 || prod <= 0.0)
+        return float2(0.0, 0.0);
+    float intensity = coef * (prod / (1.0 + prod));
+    return (dir / len) * intensity;
+}
+
 // Helper: Clamp deltas per-channel so we don't consume more than available
 // Returns clamped delta (not a global scale - each channel is clamped independently)
 float4 ClampConsumption(float4 rawDelta, float4 available)
@@ -140,12 +189,13 @@ void InkInteractions(uint3 id : SV_DispatchThreadID)
     // Sample self
     float4 selfInks = ExtractGroupInks(p, _InkIndices);
 
-    // Sample cardinal neighbors (up, down, left, right)
-    float4 cardinalSum = float4(0, 0, 0, 0);
-    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(0, 1)), _InkIndices);
-    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(0, -1)), _InkIndices);
-    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(1, 0)), _InkIndices);
-    cardinalSum += ExtractGroupInks(SampleParticle(pos + int2(-1, 0)), _InkIndices);
+    // Sample cardinal neighbors (up, down, left, right). Kept individually (not just summed)
+    // so per-slot concentration gradients are available for the reaction-impulse direction.
+    float4 gUp    = ExtractGroupInks(SampleParticle(pos + int2(0, 1)), _InkIndices);
+    float4 gDown  = ExtractGroupInks(SampleParticle(pos + int2(0, -1)), _InkIndices);
+    float4 gRight = ExtractGroupInks(SampleParticle(pos + int2(1, 0)), _InkIndices);
+    float4 gLeft  = ExtractGroupInks(SampleParticle(pos + int2(-1, 0)), _InkIndices);
+    float4 cardinalSum = gUp + gDown + gRight + gLeft;
 
     // Sample diagonal neighbors (corners)
     float4 diagonalSum = float4(0, 0, 0, 0);
@@ -220,6 +270,42 @@ void InkInteractions(uint3 id : SV_DispatchThreadID)
         SetInkByIndex(result, fieldIdx, newVal);
     }
 
+    // ----- Reaction impulse accumulation (data-driven vector) -----
+    // For each of the 6 conjunctive pair products, add a vector = normalize(gradB - gradA) *
+    // (columnSumOfImpulseMatrix * saturated-product). Direction comes from the concentration
+    // gradient of THIS group's slots (no ink names hardcoded); the impulse matrix column-sum
+    // is the signed intensity (positive row C => A+B->C pushes toward B; negative flips it).
+    //
+    // dt NOTE: products0/products1 are the raw adjacency products (post-threshold) — the
+    // _DeltaTime * _RateMultiplier factor is applied ONLY to the concentration path (rawDelta
+    // above), never to these. So the impulse carries no dt here; its single dt factor is
+    // _ReactionImpulseDtScale (subDt/timestep) in ApplyReactionImpulse — there is no dt^2.
+    if (_AccumulateReactionImpulse != 0)
+    {
+        // Per-slot central-difference gradients from the cardinal neighbors.
+        float4 gradX = 0.5 * (gRight - gLeft);
+        float4 gradY = 0.5 * (gUp - gDown);
+
+        // Column sums of the impulse matrix: mul(ones, M)[k] = sum over rows of column k.
+        // (Same row=output-slot / column=pair convention as _ProductMatrix.)
+        float4 impCoef0 = mul(float4(1, 1, 1, 1), _ReactionImpulseMatrix);  // pairs 0×1,0×2,0×3,1×2
+        float impCoef4 = dot(_ReactionImpulseCol4, float4(1, 1, 1, 1));     // pair 1×3
+        float impCoef5 = dot(_ReactionImpulseCol5, float4(1, 1, 1, 1));     // pair 2×3
+
+        float2 acc = float2(0.0, 0.0);
+        acc += ReactionPairVec(0, 1, products0.x, impCoef0.x, gradX, gradY);
+        acc += ReactionPairVec(0, 2, products0.y, impCoef0.y, gradX, gradY);
+        acc += ReactionPairVec(0, 3, products0.z, impCoef0.z, gradX, gradY);
+        acc += ReactionPairVec(1, 2, products0.w, impCoef0.w, gradX, gradY);
+        acc += ReactionPairVec(1, 3, products1.x, impCoef4, gradX, gradY);
+        acc += ReactionPairVec(2, 3, products1.y, impCoef5, gradX, gradY);
+
+        acc *= _ReactionImpulseGain;
+        // Additive across the per-group dispatches of this step (each dispatch has this
+        // thread own exactly this cell; dispatches are sequential, so += is race-free).
+        _ReactionImpulseRW[int2(id.xy)] = _ReactionImpulseRW[int2(id.xy)] + acc;
+    }
+
     // ----- Black Body Ink Clearing -----
     // When black body concentration exceeds threshold, it actively clears all other inks.
     // Reference behavior: bb > 0.5 triggers -0.05 per tick drain on all 9 other ink types.
@@ -241,4 +327,64 @@ void InkInteractions(uint3 id : SV_DispatchThreadID)
 
     // Write to output buffer
     _ParticlesWrite[idx] = result;
+}
+
+// Converts the accumulated reaction-impulse VECTOR field into a bounded velocity impulse.
+// Runs after pressure projection + obstacle boundary (so it isn't immediately cancelled)
+// and before vorticity confinement (so swirl can amplify it).
+//
+// The accumulator already stores a direction (the reaction front normal) and magnitude
+// (intensity), so no ink types or concentration re-sampling are needed here. To let a thin
+// reacting front also move the cells immediately adjacent to it, each cell adopts the vector
+// of the strongest neighbor in its 3x3 (neighborhood max BY MAGNITUDE — carries both the
+// amplitude and the direction outward from the front). That vector's normal drives a
+// curl-biased + weaker-expansion impulse, dt-scaled to match the pipeline's other per-substep
+// velocity impulses, and clamped to avoid a reaction->fuel->faster-reaction runaway.
+[numthreads(8, 8, 1)]
+void ApplyReactionImpulse(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution || id.y >= (uint)_Resolution)
+        return;
+
+    int2 p = int2(id.xy);
+    int hi = _Resolution - 1;
+
+    // Neighborhood max by magnitude: adopt the strongest nearby reaction vector.
+    float2 best = float2(0.0, 0.0);
+    float bestMag = 0.0;
+    [unroll]
+    for (int oy = -1; oy <= 1; oy++)
+    {
+        [unroll]
+        for (int ox = -1; ox <= 1; ox++)
+        {
+            int2 s = int2(clamp(p.x + ox, 0, hi), clamp(p.y + oy, 0, hi));
+            float2 v = _ReactionImpulseRead[s];
+            float m = length(v);
+            if (m > bestMag) { bestMag = m; best = v; }
+        }
+    }
+
+    float2 vel = _VelocityReadRI[p];
+
+    if (bestMag > 1e-6)
+    {
+        float2 n = best / bestMag;              // front normal (expansion direction)
+        float2 tangential = float2(-n.y, n.x);  // consistent-handed swirl around the front
+
+        float2 dir = _ReactionImpulseCurlBias * tangential
+                   + _ReactionImpulseExpansionBias * n;
+
+        // dt scaling: magnitude ~ strength * amp * (subDt/timestep) so injected energy is
+        // framerate/substep independent, matching vorticity confinement / force injection.
+        float2 impulse = dir * (bestMag * _ReactionImpulseStrength * _ReactionImpulseDtScale);
+
+        float mag = length(impulse);
+        if (mag > _ReactionImpulseMax)
+            impulse *= _ReactionImpulseMax / mag;
+
+        vel += impulse;
+    }
+
+    _VelocityWriteRI[p] = vel;
 }

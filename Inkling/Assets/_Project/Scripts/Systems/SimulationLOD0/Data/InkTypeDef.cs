@@ -30,8 +30,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float colorMatchTolerance = 0.3f;
 
         [Header("Simulation Properties")]
-        [Tooltip("Half-life: seconds for this ink to fade to 50% concentration. Frame-rate independent. Lower = fades faster.")]
-        [Range(0.25f, 120f)]
+        [Tooltip("Half-life: seconds for this ink to fade to 50% concentration. Frame-rate independent. Lower = fades faster. " +
+                 "Uncapped upward for authoring (set 1000+ for near-persistent inks); still exponential decay, never truly permanent.")]
+        [Min(0.25f)]
         public float dissipationHalfLife = 8f;
 
         [Tooltip("How much this ink spreads/diffuses (0=none, 1=max spread). Higher values make ink bleed into neighbors.")]

@@ -27,6 +27,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.VorticityTex = CreateRT(resolution, RenderTextureFormat.RHalf, "Vorticity");
             ctx.Obstacles = CreateRT(resolution, RenderTextureFormat.RFloat, "Obstacles");
             ctx.CreatureInkBuffer = CreateRT(resolution, RenderTextureFormat.ARGBHalf, "CreatureInk");
+            // Reaction impulse VECTOR accumulator (RG = xy impulse direction*intensity). Always
+            // allocated so the InkInteractions kernel's UAV binding is valid even when the feature is off.
+            ctx.ReactionImpulseTex = CreateRT(resolution, RenderTextureFormat.RGFloat, "ReactionImpulse");
 
             // Particle buffers
             AllocateParticleBuffers(ctx);
@@ -99,6 +102,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ReleaseRT(ctx.Divergence);
             ReleaseRT(ctx.VorticityTex);
             ReleaseRT(ctx.Obstacles);
+            ReleaseRT(ctx.ReactionImpulseTex);
             ReleaseRT(ctx.DisplayRT);
             ReleaseRT(ctx.GradientRT);
             ReleaseRT(ctx.CreatureInkBuffer);

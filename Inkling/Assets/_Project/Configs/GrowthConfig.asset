@@ -21,5 +21,6 @@ MonoBehaviour:
   enableSpread: 0
   cardinalSpreadWeight: 0.1
   diagonalSpreadWeight: 0.05
+  plantSpreadWaterThreshold: 0.01
   enableDecay: 0
   decayRate: 0.01

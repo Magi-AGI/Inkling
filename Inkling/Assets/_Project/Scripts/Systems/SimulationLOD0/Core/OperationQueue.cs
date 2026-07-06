@@ -62,6 +62,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         private bool channelSplatReady;
         private int kernelInkInteractions;
         private bool inkInteractionsReady;
+        private int kernelApplyReactionImpulse;
+        private bool applyReactionImpulseReady;
         private int kernelStampDensityBatched;
         private int kernelStampParticlesBatched;
         private bool batchedStampReady;
@@ -82,6 +84,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public int KernelChannelSplat => kernelChannelSplat;
         public bool InkInteractionsReady => inkInteractionsReady;
         public int KernelInkInteractions => kernelInkInteractions;
+        public bool ApplyReactionImpulseReady => applyReactionImpulseReady;
+        public int KernelApplyReactionImpulse => kernelApplyReactionImpulse;
         public bool BatchedInjectionReady => batchedInjectionReady;
         public int KernelAddDensityBatched => kernelAddDensityBatched;
         public int KernelAddParticlesBatched => kernelAddParticlesBatched;
@@ -219,6 +223,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 {
                     Debug.LogWarning("[SimDriver] Ink interactions compute init failed (missing InkInteractions kernel). Ink reactions disabled.");
                     inkInteractionsReady = false;
+                }
+
+                if (TryFindKernel(ctx.InkInteractionsCompute, "ApplyReactionImpulse", out kernelApplyReactionImpulse))
+                {
+                    applyReactionImpulseReady = true;
+                }
+                else
+                {
+                    applyReactionImpulseReady = false;
+                    Debug.LogWarning("[SimDriver] ApplyReactionImpulse kernel missing; fire/plant reaction impulse disabled.");
                 }
             }
 

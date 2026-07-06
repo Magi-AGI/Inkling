@@ -359,6 +359,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 GL.Clear(true, true, Color.clear);
                 RenderTexture.active = null;
             }
+            // Reaction-impulse accumulator: clear unconditionally each step so a step that
+            // skips ink interactions (or runs with the feature off) never applies stale motion.
+            if (ctx.ReactionImpulseTex != null)
+            {
+                RenderTexture.active = ctx.ReactionImpulseTex;
+                GL.Clear(true, true, Color.clear);
+                RenderTexture.active = null;
+            }
 
             // 0. Ink-to-obstacle pass (writes 1.0 into obstacle RT where solid inks exceed threshold)
             if (ctx.FluidKernelInkToObstacles >= 0 && ctx.UseParticleSimulation
@@ -418,6 +426,20 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                         ctx.InkInteractionsCompute.SetFloat("_BlackBodyThreshold", clearing.threshold);
                         ctx.InkInteractionsCompute.SetFloat("_BlackBodyClearingRate", clearing.rate);
 
+                        // Reaction-impulse accumulation setup. The UAV must be bound whenever the
+                        // InkInteractions kernel dispatches (it declares _ReactionImpulseRW), so bind
+                        // unconditionally when the texture exists; the write itself is gated by the
+                        // _AccumulateReactionImpulse flag. Direction and intensity are fully data-driven
+                        // from each group's reactionImpulseMatrix (uploaded per group below) — nothing
+                        // hardcodes specific ink types.
+                        bool accumulateImpulse = ctx.EnableReactionImpulse && ctx.ReactionImpulseTex != null;
+                        if (ctx.ReactionImpulseTex != null)
+                        {
+                            ctx.InkInteractionsCompute.SetTexture(opQueue.KernelInkInteractions, "_ReactionImpulseRW", ctx.ReactionImpulseTex);
+                        }
+                        ctx.InkInteractionsCompute.SetInt("_AccumulateReactionImpulse", accumulateImpulse ? 1 : 0);
+                        ctx.InkInteractionsCompute.SetFloat("_ReactionImpulseGain", ctx.ReactionImpulseGain);
+
                         foreach (var group in ctx.AffinityGroups)
                         {
                             if (group == null) continue;
@@ -427,6 +449,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                             ctx.InkInteractionsCompute.SetMatrix("_ProductMatrix", group.productMatrix);
                             ctx.InkInteractionsCompute.SetVector("_ProductCol4", group.productCol4);
                             ctx.InkInteractionsCompute.SetVector("_ProductCol5", group.productCol5);
+                            // Parallel reaction-impulse matrix (motion, independent of concentration).
+                            ctx.InkInteractionsCompute.SetMatrix("_ReactionImpulseMatrix", group.reactionImpulseMatrix);
+                            ctx.InkInteractionsCompute.SetVector("_ReactionImpulseCol4", group.reactionImpulseCol4);
+                            ctx.InkInteractionsCompute.SetVector("_ReactionImpulseCol5", group.reactionImpulseCol5);
                             Vector3 weights = group.GetWeights();
                             ctx.InkInteractionsCompute.SetFloats("_Weights", weights.x, weights.y, weights.z);
                             ctx.InkInteractionsCompute.SetFloat("_RateMultiplier", group.reactionRateMultiplier);
@@ -556,6 +582,42 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             if (sw != null) ProjectionMs = (float)sw.Elapsed.TotalMilliseconds;
+
+            // 5b. Reaction impulse (fire replacing plant seeds motion).
+            // Applied AFTER pressure projection + obstacle boundary so projection does not
+            // immediately cancel it, and BEFORE vorticity confinement so swirl amplifies it.
+            // Obstacle boundary is re-applied here so the injected motion respects solids even
+            // when vorticity confinement is disabled (VorticityStrength == 0).
+            if (ctx.EnableReactionImpulse && ctx.ReactionImpulseTex != null
+                && opQueue.ApplyReactionImpulseReady && ctx.InkInteractionsCompute != null)
+            {
+                var ic = ctx.InkInteractionsCompute;
+                int k = opQueue.KernelApplyReactionImpulse;
+                // dt scale = subDt/timestep, matching the pipeline's other per-substep velocity
+                // impulses so injected energy is framerate/substep independent (FrameDeltaTime is
+                // the active substep real dt; see SimDriver.SimulateFrameSubstepped).
+                float dtScale = ctx.Timestep > 1e-6f ? ctx.FrameDeltaTime / ctx.Timestep : 1f;
+                ic.SetInt("_Resolution", ctx.Resolution);
+                ic.SetFloat("_ReactionImpulseStrength", ctx.ReactionImpulseStrength);
+                ic.SetFloat("_ReactionImpulseMax", ctx.ReactionImpulseMax);
+                ic.SetFloat("_ReactionImpulseCurlBias", ctx.ReactionImpulseCurlBias);
+                ic.SetFloat("_ReactionImpulseExpansionBias", ctx.ReactionImpulseExpansionBias);
+                ic.SetFloat("_ReactionImpulseDtScale", dtScale);
+                ic.SetTexture(k, "_ReactionImpulseRead", ctx.ReactionImpulseTex);
+                ic.SetTexture(k, "_VelocityReadRI", ctx.Velocity.Read);
+                ic.SetTexture(k, "_VelocityWriteRI", ctx.Velocity.Write);
+                ic.Dispatch(k, threadGroups, threadGroups, 1);
+                ctx.Velocity.Swap();
+
+                if (ctx.FluidKernelApplyObstacleBoundary != 0)
+                {
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelApplyObstacleBoundary, "_VelocityRead", ctx.Velocity.Read);
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelApplyObstacleBoundary, "_VelocityWrite", ctx.Velocity.Write);
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelApplyObstacleBoundary, "_ObstacleRead", ctx.Obstacles);
+                    ctx.FluidCompute.Dispatch(ctx.FluidKernelApplyObstacleBoundary, threadGroups, threadGroups, 1);
+                    ctx.Velocity.Swap();
+                }
+            }
 
             // 6. Vorticity confinement
             // Run this after projection so pressure solve doesn't immediately cancel the swirl impulse.

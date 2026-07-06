@@ -23,6 +23,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public RenderTexture DisplayRT;
         public RenderTexture GradientRT;
         public RenderTexture CreatureInkBuffer;
+        // Per-cell reaction magnitude (fire replacing plant), written by InkInteractions and
+        // consumed by the ApplyReactionImpulse kernel. Cleared each step.
+        public RenderTexture ReactionImpulseTex;
 
         // ── Channel textures (UAV + mipped + downsampled) ───────────────────
         public RenderTexture ChannelRT0;
@@ -99,6 +102,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public bool UseInkInteractions;
         public bool InkInteractionsDebugMode;
         public AffinityGroup[] AffinityGroups;
+
+        // ── Reaction impulse (fire replacing plant seeds motion) ────────────
+        public bool EnableReactionImpulse;
+        public float ReactionImpulseStrength;
+        public float ReactionImpulseMax;
+        public float ReactionImpulseCurlBias;
+        public float ReactionImpulseExpansionBias;
+        public float ReactionImpulseGain;
 
         // ── Ink definitions ─────────────────────────────────────────────────
         public InkTypeDef[] InkDefinitions;

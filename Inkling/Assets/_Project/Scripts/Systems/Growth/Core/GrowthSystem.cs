@@ -190,6 +190,7 @@ namespace Magi.Inkling.Systems.Growth
             growthCompute.SetInt("_EnableSpread", config.enableSpread ? 1 : 0);
             growthCompute.SetFloat("_CardinalSpreadWeight", config.cardinalSpreadWeight);
             growthCompute.SetFloat("_DiagonalSpreadWeight", config.diagonalSpreadWeight);
+            growthCompute.SetFloat("_PlantSpreadWaterThreshold", config.plantSpreadWaterThreshold);
 
             // Dispatch
             growthCompute.Dispatch(kernelGrowSeeds, threadGroups, threadGroups, 1);

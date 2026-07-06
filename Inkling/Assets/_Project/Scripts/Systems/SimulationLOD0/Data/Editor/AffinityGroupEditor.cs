@@ -11,12 +11,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
         private SerializedProperty productMatrix;
         private SerializedProperty productCol4;
         private SerializedProperty productCol5;
+        private SerializedProperty reactionImpulseMatrix;
+        private SerializedProperty reactionImpulseCol4;
+        private SerializedProperty reactionImpulseCol5;
         private SerializedProperty reactionRateMultiplier;
         private SerializedProperty selfWeight;
         private SerializedProperty cardinalWeight;
         private SerializedProperty diagonalWeight;
 
         private bool showProductMatrix = true;
+        private bool showReactionImpulseMatrix = true;
 
         private void OnEnable()
         {
@@ -25,6 +29,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
             productMatrix = serializedObject.FindProperty("productMatrix");
             productCol4 = serializedObject.FindProperty("productCol4");
             productCol5 = serializedObject.FindProperty("productCol5");
+            reactionImpulseMatrix = serializedObject.FindProperty("reactionImpulseMatrix");
+            reactionImpulseCol4 = serializedObject.FindProperty("reactionImpulseCol4");
+            reactionImpulseCol5 = serializedObject.FindProperty("reactionImpulseCol5");
             reactionRateMultiplier = serializedObject.FindProperty("reactionRateMultiplier");
             selfWeight = serializedObject.FindProperty("selfWeight");
             cardinalWeight = serializedObject.FindProperty("cardinalWeight");
@@ -41,8 +48,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
 
             EditorGUILayout.Space(10);
 
-            // Get ink names for labels
+            // Get ink names for labels + the 6 ink-pair column labels (shared by both matrices).
             string[] inkNames = GetInkNames();
+            string[] productLabels = new string[]
+            {
+                $"{inkNames[0]}×{inkNames[1]}",
+                $"{inkNames[0]}×{inkNames[2]}",
+                $"{inkNames[0]}×{inkNames[3]}",
+                $"{inkNames[1]}×{inkNames[2]}",
+                $"{inkNames[1]}×{inkNames[3]}",
+                $"{inkNames[2]}×{inkNames[3]}"
+            };
 
             // Product Reaction Matrix
             showProductMatrix = EditorGUILayout.Foldout(showProductMatrix, "Product Reaction Matrix (A + B → C)", true, EditorStyles.foldoutHeader);
@@ -50,19 +66,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
             {
                 EditorGUILayout.HelpBox("For reactions requiring TWO inks present.\nColumn = product of two inks, Row = ink affected.", MessageType.Info);
 
-                // Product column labels based on ink names
-                string[] productLabels = new string[]
-                {
-                    $"{inkNames[0]}×{inkNames[1]}",
-                    $"{inkNames[0]}×{inkNames[2]}",
-                    $"{inkNames[0]}×{inkNames[3]}",
-                    $"{inkNames[1]}×{inkNames[2]}",
-                    $"{inkNames[1]}×{inkNames[3]}",
-                    $"{inkNames[2]}×{inkNames[3]}"
-                };
-
                 // Draw 4x6 product matrix (4x4 main + 2 extra columns)
                 DrawProductMatrix(productMatrix, productCol4, productCol5, inkNames, productLabels);
+            }
+
+            EditorGUILayout.Space(10);
+
+            // Reaction Impulse Matrix (motion) — same 6-column layout as the product matrix.
+            showReactionImpulseMatrix = EditorGUILayout.Foldout(showReactionImpulseMatrix, "Reaction Impulse Matrix (motion, A + B → C)", true, EditorStyles.foldoutHeader);
+            if (showReactionImpulseMatrix)
+            {
+                EditorGUILayout.HelpBox(
+                    "Drives fluid MOTION from reactions, independent of the product matrix above " +
+                    "(concentration conversion speed). Same layout: Column = ink pair A×B, Row = signed intensity.\n" +
+                    "Direction for pair A×B is grad(B) - grad(A) (front normal A→B/fuel). Put a signed " +
+                    "coefficient in row C for 'A + B → C'; negative flips the direction.\n" +
+                    "OrganicGroup: the Fire row under Fire×PlantSeeded and Fire×PlantGrown pushes fire into plant.",
+                    MessageType.Info);
+
+                // Same 6 ink-pair columns as the product matrix (labels hoisted above).
+                DrawProductMatrix(reactionImpulseMatrix, reactionImpulseCol4, reactionImpulseCol5, inkNames, productLabels);
             }
 
             EditorGUILayout.Space(10);

@@ -111,6 +111,28 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private bool inkInteractionsDebugMode = false;
         [SerializeField] private AffinityGroup[] affinityGroups;
 
+        [Header("Reaction Impulse (fire replacing plant)")]
+        [Tooltip("Seed velocity where fire replaces plant so fire can spread out of a still plant " +
+                 "region. Flag-guarded: off = byte-identical to the concentration-only reaction path.")]
+        [SerializeField] private bool enableReactionImpulse = true;
+        [Tooltip("Velocity delta per unit reaction impulse magnitude, per-step (dt-scaled by subDt/timestep). " +
+                 "Raise for stronger spread.")]
+        [Range(0f, 40f)]
+        [SerializeField] private float reactionImpulseStrength = 40f;
+        [Tooltip("Hard clamp on the per-cell velocity delta magnitude. Guards against a " +
+                 "reaction->fuel->faster-reaction runaway. Uncapped for authoring; the runtime clamp still applies.")]
+        [Min(0f)]
+        [SerializeField] private float reactionImpulseMax = 10f;
+        [Tooltip("Weight of the tangential (swirl/curl) component of the impulse.")]
+        [Range(0f, 2f)]
+        [SerializeField] private float reactionImpulseCurlBias = 1f;
+        [Tooltip("Weight of the outward front-normal (expansion) component. Kept weaker than curl.")]
+        [Range(0f, 2f)]
+        [SerializeField] private float reactionImpulseExpansionBias = 0.35f;
+        [Tooltip("Gain applied to the accumulated reaction magnitude before it becomes an impulse.")]
+        [Range(0f, 8f)]
+        [SerializeField] private float reactionImpulseGain = 1f;
+
         [Header("Black Body Ink (Fallback)")]
         [SerializeField] private bool enableBlackBodyClearingFallback = false;
         [Range(0f, 1f)]
@@ -147,6 +169,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private int currentInkType = 0;
 
         public int CurrentInkType { get => currentInkType; set => currentInkType = Mathf.Clamp(value, 0, 9); }
+
+        /// <summary>
+        /// Fire-replacing-plant reaction impulse. Defaults enabled for live playtest of fire spread.
+        /// Deterministic callers (InkScenarioRunner / baseline tests) can set this false before stepping
+        /// to keep byte-identical, concentration-only reaction behavior — SyncContextFromFields() runs
+        /// at the top of every StepSimulation, so the change propagates on the next step.
+        /// </summary>
+        public bool EnableReactionImpulse { get => enableReactionImpulse; set => enableReactionImpulse = value; }
 
         // ── Modules ─────────────────────────────────────────────────────────
         private SimulationContext ctx;
@@ -341,6 +371,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.AffinityGroups = affinityGroups;
             ctx.InkDefinitions = inkDefinitions;
 
+            ctx.EnableReactionImpulse = enableReactionImpulse;
+            ctx.ReactionImpulseStrength = reactionImpulseStrength;
+            ctx.ReactionImpulseMax = reactionImpulseMax;
+            ctx.ReactionImpulseCurlBias = reactionImpulseCurlBias;
+            ctx.ReactionImpulseExpansionBias = reactionImpulseExpansionBias;
+            ctx.ReactionImpulseGain = reactionImpulseGain;
+
             ctx.EnableBlackBodyClearingFallback = enableBlackBodyClearingFallback;
             ctx.BlackBodyThresholdFallback = blackBodyThresholdFallback;
             ctx.BlackBodyClearingRateFallback = blackBodyClearingRateFallback;
@@ -494,6 +531,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 case "dissipation": dissipation = value; break;
                 case "velocityDissipation": velocityDissipation = value; break;
                 case "timestep": timestep = value; break;
+                case "reactionImpulseStrength": reactionImpulseStrength = value; break;
+                case "reactionImpulseMax": reactionImpulseMax = value; break;
+                case "reactionImpulseCurlBias": reactionImpulseCurlBias = value; break;
+                case "reactionImpulseExpansionBias": reactionImpulseExpansionBias = value; break;
+                case "reactionImpulseGain": reactionImpulseGain = value; break;
                 default: Debug.LogWarning("[SimDriver] Unknown tunable: " + key); break;
             }
         }

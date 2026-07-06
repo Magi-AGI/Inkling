@@ -17,6 +17,7 @@ namespace Magi.Inkling.Systems.Rendering
         public Texture2D electricityGradientTexOverride;
         public Texture2D iceGradientTexOverride;
         public Texture2D plantGradientTexOverride;
+        public Texture2D plantGrownGradientTexOverride;
         public Texture2D steamGradientTexOverride;
         public Texture2D dustGradientTexOverride;
 
@@ -51,6 +52,12 @@ namespace Magi.Inkling.Systems.Rendering
         [Range(0, 3)] public float plantEmission = 0.4f;
         public AnimationCurve plantIntensityCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
 
+        [Tooltip("Grown plant (matured foliage). Rendered for the plantGrown channel; kept a deep " +
+                 "organic green so grown plant does not bleach to metal/white.")]
+        public Gradient plantGrownGradient = CreatePlantGrownGradient();
+        [Range(0, 3)] public float plantGrownEmission = 0.4f;
+        public AnimationCurve plantGrownIntensityCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+
         [Header("Steam/Vapor")]
         public Gradient steamGradient = CreateSteamGradient();
         [Range(0, 3)] public float steamEmission = 0.6f;
@@ -79,6 +86,7 @@ namespace Magi.Inkling.Systems.Rendering
             textures.electricityTexture = CreateGradientTexture(electricityGradient, electricityIntensityCurve, resolution);
             textures.iceTexture = CreateGradientTexture(iceGradient, iceIntensityCurve, resolution);
             textures.plantTexture = CreateGradientTexture(plantGradient, plantIntensityCurve, resolution);
+            textures.plantGrownTexture = CreateGradientTexture(plantGrownGradient, plantGrownIntensityCurve, resolution);
             textures.steamTexture = CreateGradientTexture(steamGradient, steamIntensityCurve, resolution);
             textures.dustTexture = CreateGradientTexture(dustGradient, dustIntensityCurve, resolution);
 
@@ -110,6 +118,7 @@ namespace Magi.Inkling.Systems.Rendering
                     electricityTexture = electricityGradientTexOverride != null ? electricityGradientTexOverride : CreateGradientTexture(electricityGradient, electricityIntensityCurve, defaultResolution),
                     iceTexture = iceGradientTexOverride != null ? iceGradientTexOverride : CreateGradientTexture(iceGradient, iceIntensityCurve, defaultResolution),
                     plantTexture = plantGradientTexOverride != null ? plantGradientTexOverride : CreateGradientTexture(plantGradient, plantIntensityCurve, defaultResolution),
+                    plantGrownTexture = plantGrownGradientTexOverride != null ? plantGrownGradientTexOverride : CreateGradientTexture(plantGrownGradient, plantGrownIntensityCurve, defaultResolution),
                     steamTexture = steamGradientTexOverride != null ? steamGradientTexOverride : CreateGradientTexture(steamGradient, steamIntensityCurve, defaultResolution),
                     dustTexture = dustGradientTexOverride != null ? dustGradientTexOverride : CreateGradientTexture(dustGradient, dustIntensityCurve, defaultResolution)
                 };
@@ -121,6 +130,7 @@ namespace Magi.Inkling.Systems.Rendering
             material.SetTexture("_ElectricityGradientTex", cachedTextures.electricityTexture);
             material.SetTexture("_IceGradientTex", cachedTextures.iceTexture);
             material.SetTexture("_PlantGradientTex", cachedTextures.plantTexture);
+            material.SetTexture("_PlantGrownGradientTex", cachedTextures.plantGrownTexture);
             material.SetTexture("_SteamGradientTex", cachedTextures.steamTexture);
             material.SetTexture("_DustGradientTex", cachedTextures.dustTexture);
 
@@ -293,6 +303,28 @@ namespace Magi.Inkling.Systems.Rendering
             return gradient;
         }
 
+        private static Gradient CreatePlantGrownGradient()
+        {
+            // Matured foliage: deep organic green, darker than seeded plant. Low-intensity key is
+            // a non-white dark green so weak grown plant does not bleach toward white.
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new GradientColorKey[]
+                {
+                    new GradientColorKey(new Color(0.10f, 0.20f, 0.06f), 0f),
+                    new GradientColorKey(new Color(0.15f, 0.38f, 0.12f), 0.5f),
+                    new GradientColorKey(new Color(0.25f, 0.55f, 0.18f), 1f)
+                },
+                new GradientAlphaKey[]
+                {
+                    new GradientAlphaKey(0.5f, 0f),
+                    new GradientAlphaKey(1f, 0.3f),
+                    new GradientAlphaKey(1f, 1f)
+                }
+            );
+            return gradient;
+        }
+
         private static Gradient CreateSteamGradient()
         {
             var gradient = new Gradient();
@@ -344,6 +376,7 @@ namespace Magi.Inkling.Systems.Rendering
             public Texture2D electricityTexture;
             public Texture2D iceTexture;
             public Texture2D plantTexture;
+            public Texture2D plantGrownTexture;
             public Texture2D steamTexture;
             public Texture2D dustTexture;
 
@@ -355,6 +388,7 @@ namespace Magi.Inkling.Systems.Rendering
                 if (electricityTexture != null) DestroyImmediate(electricityTexture);
                 if (iceTexture != null) DestroyImmediate(iceTexture);
                 if (plantTexture != null) DestroyImmediate(plantTexture);
+                if (plantGrownTexture != null) DestroyImmediate(plantGrownTexture);
                 if (steamTexture != null) DestroyImmediate(steamTexture);
                 if (dustTexture != null) DestroyImmediate(dustTexture);
             }

@@ -20,23 +20,42 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 085dfe8b59bc3a54286508756ca46cf9, type: 2}
   productMatrix:
     e00: 0
-    e01: 1
-    e02: 1
+    e01: 0.01
+    e02: 0.001
     e03: 0
     e10: 0
     e11: 0
     e12: 0
     e13: -0.001
     e20: 0
-    e21: -1
+    e21: -0.01
     e22: 0
     e23: 0.001
     e30: 0
     e31: 0
-    e32: -1
+    e32: -0.001
     e33: 0
   productCol4: {x: 0, y: -0.001, z: 0.001, w: 0}
   productCol5: {x: 0, y: 0, z: 0, w: 0}
+  reactionImpulseMatrix:
+    e00: 0
+    e01: 1
+    e02: 1
+    e03: 0
+    e10: 0
+    e11: 0
+    e12: 0
+    e13: 0
+    e20: 0
+    e21: 0
+    e22: 0
+    e23: 0
+    e30: 0
+    e31: 0
+    e32: 0
+    e33: 0
+  reactionImpulseCol4: {x: 0, y: 0, z: 0, w: 0}
+  reactionImpulseCol5: {x: 0, y: 0, z: 0, w: 0}
   reactionRateMultiplier: 10
   selfWeight: 1
   cardinalWeight: 1

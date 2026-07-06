@@ -28,6 +28,7 @@ float _ElectricitySeedThreshold;
 int _EnableSpread;
 float _CardinalSpreadWeight;
 float _DiagonalSpreadWeight;
+float _PlantSpreadWaterThreshold;  // grown plant only spreads into cells with water above this
 
 // Helper: Sample particle at position (clamped)
 iparticle SampleParticle(int2 pos)
@@ -104,8 +105,10 @@ void GrowSeeds(uint3 id : SV_DispatchThreadID)
         float plantSpread = (cardinalPlant * _CardinalSpreadWeight + diagPlant * _DiagonalSpreadWeight) * _DeltaTime;
         float elecSpread = (cardinalElec * _CardinalSpreadWeight + diagElec * _DiagonalSpreadWeight) * _DeltaTime;
 
-        // Only spread if we have some seed present (prevents unconstrained growth)
-        if (p.plantSeeded > 0.001)
+        // Grown plant expands into WATER, not into plant seeds: gate the neighbor-spread
+        // contribution on local water presence so grown creeps across water rather than
+        // over the seed bed. (Direct seeded->grown maturation above is a separate mechanism.)
+        if (p.water > _PlantSpreadWaterThreshold)
         {
             p.plantGrown = min(p.plantGrown + plantSpread, _PlantMaxGrown);
         }

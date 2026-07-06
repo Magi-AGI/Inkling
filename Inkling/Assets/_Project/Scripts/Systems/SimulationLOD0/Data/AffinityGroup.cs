@@ -26,6 +26,21 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Product matrix column 5: reactions involving inks 2×3")]
         public Vector4 productCol5 = Vector4.zero;
 
+        [Header("Reaction Impulse Matrix (motion, A + B → C)")]
+        [Tooltip("Drives fluid MOTION from reactions, independent of the concentration productMatrix " +
+                 "(so motion strength tunes separately from conversion speed). Same 6 pair columns as " +
+                 "productMatrix: 0×1, 0×2, 0×3, 1×2 here; 1×3, 2×3 in Col4/Col5. For a pair A×B the " +
+                 "impulse DIRECTION is grad(slotB) - grad(slotA) (front normal, A → B/fuel) and the " +
+                 "INTENSITY is this column's signed sum. For 'A + B → C' put a positive coefficient in " +
+                 "row C; a negative coefficient flips the direction. All-zero = no reaction motion.")]
+        public Matrix4x4 reactionImpulseMatrix = Matrix4x4.zero;
+
+        [Tooltip("Reaction impulse matrix column 4: motion for pair 1×3")]
+        public Vector4 reactionImpulseCol4 = Vector4.zero;
+
+        [Tooltip("Reaction impulse matrix column 5: motion for pair 2×3")]
+        public Vector4 reactionImpulseCol5 = Vector4.zero;
+
         [Header("Rate Settings")]
         [Tooltip("Global multiplier for reaction rates. Reference uses ~10-20 for visible effects.")]
         [Range(0.1f, 50f)]

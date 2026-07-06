@@ -12,6 +12,7 @@ Shader "Inkling/InkGradientRenderer"
         _ElectricityGradientTex ("Electricity Gradient", 2D) = "white" {}
         _IceGradientTex ("Ice Gradient", 2D) = "white" {}
         _PlantGradientTex ("Plant Gradient", 2D) = "white" {}
+        _PlantGrownGradientTex ("Plant Grown Gradient", 2D) = "white" {}
         _SteamGradientTex ("Steam Gradient", 2D) = "white" {}
         _DustGradientTex ("Dust Gradient", 2D) = "white" {}
 
@@ -31,7 +32,7 @@ Shader "Inkling/InkGradientRenderer"
 
         [Header(Debug)]
         [Toggle] _ShowChannels ("Show Raw Channels", Float) = 0
-        [KeywordEnum(Combined, Fire, Water, Metal, Electric)] _DebugMode ("Debug Mode", Float) = 0
+        [KeywordEnum(Combined, Fire, Water, Metal, Electric, PlantSeeded, PlantGrown, PlantBoth)] _DebugMode ("Debug Mode", Float) = 0
     }
 
     SubShader
@@ -61,7 +62,7 @@ Shader "Inkling/InkGradientRenderer"
             #pragma multi_compile_instancing
             #pragma shader_feature _SHOWCHANNELS_ON
             #pragma multi_compile _ _PARTICLEBUFFER_ON
-            #pragma multi_compile _DEBUGMODE_COMBINED _DEBUGMODE_FIRE _DEBUGMODE_WATER _DEBUGMODE_METAL _DEBUGMODE_ELECTRIC
+            #pragma multi_compile _DEBUGMODE_COMBINED _DEBUGMODE_FIRE _DEBUGMODE_WATER _DEBUGMODE_METAL _DEBUGMODE_ELECTRIC _DEBUGMODE_PLANTSEEDED _DEBUGMODE_PLANTGROWN _DEBUGMODE_PLANTBOTH
 
             #include "UnityCG.cginc"
 
@@ -102,6 +103,7 @@ Shader "Inkling/InkGradientRenderer"
             sampler2D _ElectricityGradientTex;
             sampler2D _IceGradientTex;
             sampler2D _PlantGradientTex;
+            sampler2D _PlantGrownGradientTex;
             sampler2D _SteamGradientTex;
             sampler2D _DustGradientTex;
 
@@ -184,6 +186,16 @@ Shader "Inkling/InkGradientRenderer"
                     return float4(ch0.r, ch0.g, ch1.a, 1.0); // fire, water, ice
                 #endif
 
+                // Plant-focused diagnostics: show raw channel MASS so it can be told apart from
+                // gradient color. Seeded = ch0.b, Grown = ch0.a.
+                #if _DEBUGMODE_PLANTSEEDED
+                    return float4(ch0.b, ch0.b, ch0.b, 1.0);        // grayscale plantSeeded
+                #elif _DEBUGMODE_PLANTGROWN
+                    return float4(ch0.a, ch0.a, ch0.a, 1.0);        // grayscale plantGrown
+                #elif _DEBUGMODE_PLANTBOTH
+                    return float4(ch0.b, ch0.a, 0.0, 1.0);          // seeded=red, grown=green
+                #endif
+
                 // Per-channel gradient lookups, weighted by channel intensity.
                 // Weighting is essential: gradient textures may return non-zero at
                 // intensity=0 (especially unassigned textures defaulting to white),
@@ -204,7 +216,7 @@ Shader "Inkling/InkGradientRenderer"
                     ( SampleGradient(_FireGradientTex,        fireI)   * fireI
                     + SampleGradient(_WaterGradientTex,       waterI)  * waterI
                     + SampleGradient(_PlantGradientTex,       plantSI) * plantSI
-                    + SampleGradient(_MetalGradientTex,       plantGI) * plantGI
+                    + SampleGradient(_PlantGrownGradientTex,  plantGI) * plantGI
                     + SampleGradient(_SteamGradientTex,       steamI)  * steamI
                     + SampleGradient(_DustGradientTex,        dustI)   * dustI
                     + SampleGradient(_ElectricityGradientTex, elecI)   * elecI
