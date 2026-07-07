@@ -180,6 +180,7 @@ namespace Magi.Inkling.Systems.Growth
             growthCompute.SetFloat("_PlantGrowthRate", config.plantGrowthRate);
             growthCompute.SetFloat("_PlantMaxGrown", config.plantMaxGrown);
             growthCompute.SetFloat("_PlantSeedThreshold", config.plantSeedThreshold);
+            growthCompute.SetFloat("_PlantGrowthWaterThreshold", config.plantGrowthWaterThreshold);
 
             // Electricity growth params
             growthCompute.SetFloat("_ElectricityGrowthRate", config.electricityGrowthRate);

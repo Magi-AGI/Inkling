@@ -12,8 +12,10 @@ namespace Magi.Inkling.Tests.PlayMode
 {
     public class GrowthComputeTests
     {
+        // Direct plant maturation now requires local WATER: a seeded cell only matures to grown
+        // where water is present. This test is the WET case (water present → converts).
         [UnityTest]
-        public IEnumerator GrowSeeds_ConvertsPlantSeededToPlantGrown()
+        public IEnumerator GrowSeeds_WetSeededCell_ConvertsToPlantGrown()
         {
 #if UNITY_EDITOR
             var growth = AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -22,10 +24,11 @@ namespace Magi.Inkling.Tests.PlayMode
 
             int kernel = growth.FindKernel("GrowSeeds");
 
-            // single pixel sim
+            // single pixel sim: seeded AND wet
             var particles = new iparticle[1];
             particles[0].plantSeeded = 1f;
             particles[0].plantGrown = 0f;
+            particles[0].water = 0.5f;
 
             using var buffer = new ComputeBuffer(1, Marshal.SizeOf<iparticle>());
             buffer.SetData(particles);
@@ -36,12 +39,14 @@ namespace Magi.Inkling.Tests.PlayMode
             growth.SetFloat("_PlantGrowthRate", 0.5f);
             growth.SetFloat("_PlantMaxGrown", 1f);
             growth.SetFloat("_PlantSeedThreshold", 0.0f);
+            growth.SetFloat("_PlantGrowthWaterThreshold", 0.01f);
             growth.SetFloat("_ElectricityGrowthRate", 0f);
             growth.SetFloat("_ElectricityMaxGrown", 0f);
             growth.SetFloat("_ElectricitySeedThreshold", 1f);
             growth.SetInt("_EnableSpread", 0);
             growth.SetFloat("_CardinalSpreadWeight", 0f);
             growth.SetFloat("_DiagonalSpreadWeight", 0f);
+            growth.SetFloat("_PlantSpreadWaterThreshold", 0.01f);
 
             growth.Dispatch(kernel, 1, 1, 1);
             yield return null; // allow GPU to finish
@@ -49,6 +54,54 @@ namespace Magi.Inkling.Tests.PlayMode
             buffer.GetData(particles);
             Assert.That(particles[0].plantSeeded, Is.LessThan(1f));
             Assert.That(particles[0].plantGrown, Is.GreaterThan(0f));
+#else
+            yield break;
+#endif
+        }
+
+        // Direct plant maturation DRY case: a seeded cell with no water must NOT mature to grown.
+        [UnityTest]
+        public IEnumerator GrowSeeds_DrySeededCell_DoesNotConvert()
+        {
+#if UNITY_EDITOR
+            var growth = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Assets/_Project/Scripts/Systems/Growth/Compute/Growth.compute");
+            Assert.IsNotNull(growth, "Growth.compute not found");
+
+            int kernel = growth.FindKernel("GrowSeeds");
+
+            // single pixel sim: seeded but DRY (no water)
+            var particles = new iparticle[1];
+            particles[0].plantSeeded = 1f;
+            particles[0].plantGrown = 0f;
+            particles[0].water = 0f;
+
+            using var buffer = new ComputeBuffer(1, Marshal.SizeOf<iparticle>());
+            buffer.SetData(particles);
+
+            growth.SetBuffer(kernel, "_Particles", buffer);
+            growth.SetInt("_Resolution", 1);
+            growth.SetFloat("_DeltaTime", 1f);
+            growth.SetFloat("_PlantGrowthRate", 0.5f);
+            growth.SetFloat("_PlantMaxGrown", 1f);
+            growth.SetFloat("_PlantSeedThreshold", 0.0f);
+            growth.SetFloat("_PlantGrowthWaterThreshold", 0.01f);
+            growth.SetFloat("_ElectricityGrowthRate", 0f);
+            growth.SetFloat("_ElectricityMaxGrown", 0f);
+            growth.SetFloat("_ElectricitySeedThreshold", 1f);
+            growth.SetInt("_EnableSpread", 0);
+            growth.SetFloat("_CardinalSpreadWeight", 0f);
+            growth.SetFloat("_DiagonalSpreadWeight", 0f);
+            growth.SetFloat("_PlantSpreadWaterThreshold", 0.01f);
+
+            growth.Dispatch(kernel, 1, 1, 1);
+            yield return null; // allow GPU to finish
+
+            buffer.GetData(particles);
+            Assert.That(particles[0].plantGrown, Is.EqualTo(0f).Within(1e-5f),
+                "A dry seeded cell must not mature into grown plant.");
+            Assert.That(particles[0].plantSeeded, Is.EqualTo(1f).Within(1e-5f),
+                "A dry seeded cell must retain its seeds (no maturation).");
 #else
             yield break;
 #endif
@@ -90,6 +143,7 @@ namespace Magi.Inkling.Tests.PlayMode
             growth.SetFloat("_PlantGrowthRate", 0f);      // disable direct maturation → isolate spread
             growth.SetFloat("_PlantMaxGrown", 1f);
             growth.SetFloat("_PlantSeedThreshold", 0.01f);
+            growth.SetFloat("_PlantGrowthWaterThreshold", 0.01f);
             growth.SetFloat("_ElectricityGrowthRate", 0f);
             growth.SetFloat("_ElectricityMaxGrown", 0f);
             growth.SetFloat("_ElectricitySeedThreshold", 1f);

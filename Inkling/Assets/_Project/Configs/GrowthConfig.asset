@@ -15,6 +15,7 @@ MonoBehaviour:
   plantGrowthRate: 0.1
   plantMaxGrown: 1
   plantSeedThreshold: 0.01
+  plantGrowthWaterThreshold: 0.01
   electricityGrowthRate: 0.3
   electricityMaxGrown: 1
   electricitySeedThreshold: 0.01

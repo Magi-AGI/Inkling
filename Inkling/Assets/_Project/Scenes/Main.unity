@@ -1371,9 +1371,10 @@ MonoBehaviour:
   affinityGroups:
   - {fileID: 11400000, guid: da76efa99d9a5cf4aadca3f811d21554, type: 2}
   - {fileID: 11400000, guid: bb5975a015651cc47aab80f9ac703167, type: 2}
+  - {fileID: 11400000, guid: 3892ae7ecffb33f4cad3ec4e410eee4c, type: 2}
   enableReactionImpulse: 1
   reactionImpulseStrength: 40
-  reactionImpulseMax: 10
+  reactionImpulseMax: 100
   reactionImpulseCurlBias: 1
   reactionImpulseExpansionBias: 0.35
   reactionImpulseGain: 1

@@ -21,6 +21,11 @@ namespace Magi.Inkling.Systems.Growth
         [Range(0f, 0.5f)]
         public float plantSeedThreshold = 0.01f;
 
+        [Tooltip("Direct seeded->grown maturation only occurs in cells whose water exceeds this " +
+                 "threshold. Plant matures where there is water; dry seeds do not grow.")]
+        [Range(0f, 1f)]
+        public float plantGrowthWaterThreshold = 0.01f;
+
         [Header("Electricity Growth")]
         [Tooltip("Rate at which electricitySeeded converts to electricityGrown per second")]
         [Range(0f, 2f)]

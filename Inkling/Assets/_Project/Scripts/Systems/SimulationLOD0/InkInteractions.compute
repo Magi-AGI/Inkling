@@ -142,23 +142,52 @@ float2 ReactionPairVec(int a, int b, float prod, float coef, float4 gradX, float
     return (dir / len) * intensity;
 }
 
-// Helper: Clamp deltas per-channel so we don't consume more than available
-// Returns clamped delta (not a global scale - each channel is clamped independently)
-float4 ClampConsumption(float4 rawDelta, float4 available)
+// Applies ONE pair-reaction column as a single stoichiometric event, scaled by a common factor so
+// production and consumption stay paired. This is the conservation fix (ckpt-015): a balanced
+// (zero column-sum) reaction stays locally mass-conserving even when the pair PRODUCT is nonzero
+// only because neighbors (adjacency) hold the reactants — consumption is limited by LOCAL
+// availability, so a cell with no local reactant runs the event at scale 0 (no minting).
+//   coeff               : per-output-slot stoichiometric coefficients for this pair column
+//   extent              : raw reaction extent (thresholded product * dt * rate), >= 0
+//   remaining           : local reactant budget (consumption draws it down)      [inout]
+//   productionRemaining : shared per-step production budget per slot (draws down) [inout]
+// Returns the (scaled) event delta to accumulate. Only NEGATIVE terms draw remaining; only
+// POSITIVE terms draw the production budget — matching the requested convention. `appliedScale`
+// (0..1) is the common factor the event was limited by, so callers (e.g. the reaction-impulse
+// path) can gate motion on whether the concentration reaction actually occurred.
+float4 ApplyLimitedReactionEvent(float4 coeff, float extent, inout float4 remaining, inout float4 productionRemaining, out float appliedScale)
 {
-    float4 result = rawDelta;
+    float4 eventDelta = coeff * extent;
+    float scale = 1.0;
 
     [unroll]
     for (int i = 0; i < 4; i++)
     {
-        // If delta is negative (consuming), clamp to available amount
-        if (rawDelta[i] < 0)
+        if (eventDelta[i] < 0.0)
         {
-            result[i] = max(rawDelta[i], -available[i]);
+            // Consuming slot i: cannot take more than is locally available.
+            float avail = max(remaining[i], 0.0);
+            scale = min(scale, avail / max(-eventDelta[i], 1e-8));
+        }
+        else if (eventDelta[i] > 0.0)
+        {
+            // Producing slot i: bounded by the shared per-step production budget.
+            float budget = max(productionRemaining[i], 0.0);
+            scale = min(scale, budget / max(eventDelta[i], 1e-8));
         }
     }
 
-    return result;
+    appliedScale = saturate(scale);
+    eventDelta *= appliedScale;
+
+    [unroll]
+    for (int j = 0; j < 4; j++)
+    {
+        remaining[j] += min(eventDelta[j], 0.0);            // negative consumption reduces remaining
+        productionRemaining[j] -= max(eventDelta[j], 0.0);  // positive production reduces budget
+    }
+
+    return eventDelta;
 }
 
 [numthreads(8, 8, 1)]
@@ -239,24 +268,41 @@ void InkInteractions(uint3 id : SV_DispatchThreadID)
     if (adjacency.y < t13 || adjacency.w < t13) products1.x = 0;
     if (adjacency.z < t23 || adjacency.w < t23) products1.y = 0;
 
-    // Product reactions (conjunctive: A + B → C)
-    float4 productDelta = mul(_ProductMatrix, products0)
-                        + _ProductCol4 * products1.x
-                        + _ProductCol5 * products1.y;
+    // ----- Event-level conservation (ckpt-015) -----
+    // Apply each pair column as ONE stoichiometric event scaled by a single factor. This replaces
+    // the old (mul → per-channel ClampConsumption → independent positive clamp) path, which could
+    // MINT mass at reaction fronts: the product uses neighborhood adjacency, but consumption was
+    // clipped per-channel against LOCAL selfInks, so a cell with no local reactant kept the
+    // positive production while zeroing the negative terms (e.g. Fire+Ice→Water in an empty cell).
+    // Here, consumption is limited by local availability and production by a shared per-step budget,
+    // both by scaling the WHOLE event — so balanced (zero column-sum) reactions stay conservative
+    // and negative-only sink columns still remove up to local availability without ever creating.
+    float dtRate = _DeltaTime * _RateMultiplier;
 
-    // Reaction delta, scaled by dt and rate multiplier
-    float4 rawDelta = productDelta * _DeltaTime * _RateMultiplier;
+    // Per-pair column coefficient vectors (same convention as mul(_ProductMatrix, products0):
+    // column k of the matrix = per-output-slot coefficients for pair k).
+    float4 col01 = mul(_ProductMatrix, float4(1, 0, 0, 0)); // pair 0×1
+    float4 col02 = mul(_ProductMatrix, float4(0, 1, 0, 0)); // pair 0×2
+    float4 col03 = mul(_ProductMatrix, float4(0, 0, 1, 0)); // pair 0×3
+    float4 col12 = mul(_ProductMatrix, float4(0, 0, 0, 1)); // pair 1×2
+    float4 col13 = _ProductCol4;                            // pair 1×3
+    float4 col23 = _ProductCol5;                            // pair 2×3
 
-    // Per-channel conservation: clamp each channel's consumption to available amount.
-    float4 delta = ClampConsumption(rawDelta, selfInks);
-
-    // Note: AND-based reactions are handled by the product matrix automatically.
-    // When either reactant is zero, the product term is zero, so no reaction occurs.
-    // No explicit gating needed - the math handles it naturally.
-
-    // Per-step production clamp to avoid runaway growth
     const float MAX_PRODUCTION_PER_STEP = 0.8;
-    delta = clamp(delta, float4(-1e6, -1e6, -1e6, -1e6), float4(MAX_PRODUCTION_PER_STEP, MAX_PRODUCTION_PER_STEP, MAX_PRODUCTION_PER_STEP, MAX_PRODUCTION_PER_STEP));
+    float4 remaining = max(selfInks, 0.0);                  // local reactant budget (consumption)
+    float4 productionRemaining = float4(MAX_PRODUCTION_PER_STEP, MAX_PRODUCTION_PER_STEP,
+                                        MAX_PRODUCTION_PER_STEP, MAX_PRODUCTION_PER_STEP);
+
+    // Accumulate six limited pair events in a deterministic fixed order. Capture each event's
+    // applied scale (0..1) so the reaction-impulse path can respect the same conservation limit.
+    float4 delta = float4(0, 0, 0, 0);
+    float s01, s02, s03, s12, s13, s23;
+    delta += ApplyLimitedReactionEvent(col01, products0.x * dtRate, remaining, productionRemaining, s01);
+    delta += ApplyLimitedReactionEvent(col02, products0.y * dtRate, remaining, productionRemaining, s02);
+    delta += ApplyLimitedReactionEvent(col03, products0.z * dtRate, remaining, productionRemaining, s03);
+    delta += ApplyLimitedReactionEvent(col12, products0.w * dtRate, remaining, productionRemaining, s12);
+    delta += ApplyLimitedReactionEvent(col13, products1.x * dtRate, remaining, productionRemaining, s13);
+    delta += ApplyLimitedReactionEvent(col23, products1.y * dtRate, remaining, productionRemaining, s23);
 
     // Apply deltas back to particle
     iparticle result = p;
@@ -276,9 +322,12 @@ void InkInteractions(uint3 id : SV_DispatchThreadID)
     // gradient of THIS group's slots (no ink names hardcoded); the impulse matrix column-sum
     // is the signed intensity (positive row C => A+B->C pushes toward B; negative flips it).
     //
-    // dt NOTE: products0/products1 are the raw adjacency products (post-threshold) — the
-    // _DeltaTime * _RateMultiplier factor is applied ONLY to the concentration path (rawDelta
-    // above), never to these. So the impulse carries no dt here; its single dt factor is
+    // CONSERVATION NOTE (ckpt-016): the impulse intensity now uses products * the SAME per-pair
+    // event scale (s01..s23) that limited the concentration reaction, so motion is only generated
+    // where a real (limited) reaction occurred — a cell that could not pay for a reaction locally
+    // (scale 0) contributes no impulse, instead of the old raw-adjacency "non-event" motion.
+    // dt NOTE: products0/products1 are the raw adjacency products (post-threshold) and the scales
+    // are dimensionless, so the impulse still carries no dt here; its single dt factor remains
     // _ReactionImpulseDtScale (subDt/timestep) in ApplyReactionImpulse — there is no dt^2.
     if (_AccumulateReactionImpulse != 0)
     {
@@ -292,13 +341,14 @@ void InkInteractions(uint3 id : SV_DispatchThreadID)
         float impCoef4 = dot(_ReactionImpulseCol4, float4(1, 1, 1, 1));     // pair 1×3
         float impCoef5 = dot(_ReactionImpulseCol5, float4(1, 1, 1, 1));     // pair 2×3
 
+        // products * event scale: motion respects the conservation limiting of each reaction.
         float2 acc = float2(0.0, 0.0);
-        acc += ReactionPairVec(0, 1, products0.x, impCoef0.x, gradX, gradY);
-        acc += ReactionPairVec(0, 2, products0.y, impCoef0.y, gradX, gradY);
-        acc += ReactionPairVec(0, 3, products0.z, impCoef0.z, gradX, gradY);
-        acc += ReactionPairVec(1, 2, products0.w, impCoef0.w, gradX, gradY);
-        acc += ReactionPairVec(1, 3, products1.x, impCoef4, gradX, gradY);
-        acc += ReactionPairVec(2, 3, products1.y, impCoef5, gradX, gradY);
+        acc += ReactionPairVec(0, 1, products0.x * s01, impCoef0.x, gradX, gradY);
+        acc += ReactionPairVec(0, 2, products0.y * s02, impCoef0.y, gradX, gradY);
+        acc += ReactionPairVec(0, 3, products0.z * s03, impCoef0.z, gradX, gradY);
+        acc += ReactionPairVec(1, 2, products0.w * s12, impCoef0.w, gradX, gradY);
+        acc += ReactionPairVec(1, 3, products1.x * s13, impCoef4, gradX, gradY);
+        acc += ReactionPairVec(2, 3, products1.y * s23, impCoef5, gradX, gradY);
 
         acc *= _ReactionImpulseGain;
         // Additive across the per-group dispatches of this step (each dispatch has this

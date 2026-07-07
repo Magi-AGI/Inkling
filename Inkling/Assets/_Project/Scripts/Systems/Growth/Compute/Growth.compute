@@ -18,6 +18,7 @@ float _DeltaTime;
 float _PlantGrowthRate;
 float _PlantMaxGrown;
 float _PlantSeedThreshold;
+float _PlantGrowthWaterThreshold;  // direct seeded->grown maturation requires water above this
 
 // Electricity growth
 float _ElectricityGrowthRate;
@@ -47,7 +48,9 @@ void GrowSeeds(uint3 id : SV_DispatchThreadID)
     iparticle p = _Particles[idx];
 
     // ----- Plant Growth -----
-    if (p.plantSeeded > _PlantSeedThreshold)
+    // Direct seeded->grown maturation requires local water: plant matures where it is wet,
+    // dry seeds do not grow. (Neighbor spread below is separately water-gated.)
+    if (p.plantSeeded > _PlantSeedThreshold && p.water > _PlantGrowthWaterThreshold)
     {
         // Calculate growth amount for this frame
         float plantGrowth = min(p.plantSeeded, _PlantGrowthRate * _DeltaTime);
@@ -107,7 +110,7 @@ void GrowSeeds(uint3 id : SV_DispatchThreadID)
 
         // Grown plant expands into WATER, not into plant seeds: gate the neighbor-spread
         // contribution on local water presence so grown creeps across water rather than
-        // over the seed bed. (Direct seeded->grown maturation above is a separate mechanism.)
+        // over the seed bed. (Direct seeded->grown maturation above is separately water-gated.)
         if (p.water > _PlantSpreadWaterThreshold)
         {
             p.plantGrown = min(p.plantGrown + plantSpread, _PlantMaxGrown);
