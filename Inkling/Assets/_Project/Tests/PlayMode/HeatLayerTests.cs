@@ -117,6 +117,107 @@ namespace Magi.Inkling.Tests.PlayMode
                 Object.DestroyImmediate(hw);
             }
         }
+
+        // Creates an RT seeded from a per-cell array (index y*res+x) in the .r channel.
+        private static RenderTexture MakeSeededRT(int res, RenderTextureFormat fmt, float[] seed)
+        {
+            var rt = new RenderTexture(res, res, 0, fmt) { enableRandomWrite = true };
+            rt.Create();
+            var t = new Texture2D(res, res, TextureFormat.RGBAFloat, false);
+            try
+            {
+                for (int y = 0; y < res; y++)
+                    for (int x = 0; x < res; x++)
+                        t.SetPixel(x, y, new Color(seed[y * res + x], 0f, 0f, 0f));
+                t.Apply();
+                Graphics.Blit(t, rt);
+            }
+            finally { Object.DestroyImmediate(t); }
+            return rt;
+        }
+
+        // Reads the .r channel of every cell into a per-cell array (index y*res+x).
+        private static float[] ReadAllR(RenderTexture rt, int res)
+        {
+            var prev = RenderTexture.active;
+            var tex = new Texture2D(res, res, TextureFormat.RGBAFloat, false);
+            try
+            {
+                RenderTexture.active = rt;
+                tex.ReadPixels(new Rect(0, 0, res, res), 0, 0);
+                tex.Apply();
+                var outp = new float[res * res];
+                for (int y = 0; y < res; y++)
+                    for (int x = 0; x < res; x++)
+                        outp[y * res + x] = tex.GetPixel(x, y).r;
+                return outp;
+            }
+            finally { RenderTexture.active = prev; Object.DestroyImmediate(tex); }
+        }
+
+        // Dispatch AdvectHeat over a grid with an obstacle mask; returns the resulting heat grid.
+        private static float[] DispatchAdvectHeatGrid(float[] heat, float[] obstacle, Vector2 vel,
+            int res, float dt, float dissipation, float ambient)
+        {
+            var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.inktools.sim/Compute/Fluids.compute");
+            int kernel = cs.FindKernel("AdvectHeat");
+
+            var hr = MakeSeededRT(res, RenderTextureFormat.RHalf, heat);
+            var hw = MakeSeededRT(res, RenderTextureFormat.RHalf, new float[res * res]);
+            var obs = MakeSeededRT(res, RenderTextureFormat.RFloat, obstacle);
+            var velRT = new RenderTexture(res, res, 0, RenderTextureFormat.RGHalf) { enableRandomWrite = true };
+            velRT.Create();
+            try
+            {
+                FillRT(velRT, new Color(vel.x, vel.y, 0f, 0f));
+                cs.SetVector("_SimulationSize", new Vector2(res, res));
+                cs.SetFloat("_FrameDeltaTime", dt);
+                cs.SetFloat("_ThermalDissipation", dissipation);
+                cs.SetFloat("_AmbientTemperature", ambient);
+                cs.SetTexture(kernel, "_VelocityRead", velRT);
+                cs.SetTexture(kernel, "_HeatRead", hr);
+                cs.SetTexture(kernel, "_HeatWrite", hw);
+                cs.SetTexture(kernel, "_ObstacleRead", obs);
+                int g = Mathf.CeilToInt(res / 8f);
+                cs.Dispatch(kernel, g, g, 1);
+                return ReadAllR(hw, res);
+            }
+            finally
+            {
+                hr.Release(); hw.Release(); obs.Release(); velRT.Release();
+                Object.DestroyImmediate(hr); Object.DestroyImmediate(hw);
+                Object.DestroyImmediate(obs); Object.DestroyImmediate(velRT);
+            }
+        }
+
+        // Dispatch DiffuseHeat over a grid with an obstacle mask; returns the resulting heat grid.
+        private static float[] DispatchDiffuseHeatGrid(float[] heat, float[] obstacle, int res, float diffusion)
+        {
+            var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.inktools.sim/Compute/Fluids.compute");
+            int kernel = cs.FindKernel("DiffuseHeat");
+
+            var hr = MakeSeededRT(res, RenderTextureFormat.RHalf, heat);
+            var hw = MakeSeededRT(res, RenderTextureFormat.RHalf, new float[res * res]);
+            var obs = MakeSeededRT(res, RenderTextureFormat.RFloat, obstacle);
+            try
+            {
+                cs.SetVector("_SimulationSize", new Vector2(res, res));
+                cs.SetFloat("_ThermalDiffusion", diffusion);
+                cs.SetTexture(kernel, "_HeatRead", hr);
+                cs.SetTexture(kernel, "_HeatWrite", hw);
+                cs.SetTexture(kernel, "_ObstacleRead", obs);
+                int g = Mathf.CeilToInt(res / 8f);
+                cs.Dispatch(kernel, g, g, 1);
+                return ReadAllR(hw, res);
+            }
+            finally
+            {
+                hr.Release(); hw.Release(); obs.Release();
+                Object.DestroyImmediate(hr); Object.DestroyImmediate(hw); Object.DestroyImmediate(obs);
+            }
+        }
 #endif
 
         // 1. Allocate creates ctx.Heat as an RHalf ping-pong buffer.
@@ -233,10 +334,12 @@ namespace Magi.Inkling.Tests.PlayMode
             var velocity = MakeR(RenderTextureFormat.RGHalf);   // zero velocity
             var heatRead = MakeR(RenderTextureFormat.RHalf);
             var heatWrite = MakeR(RenderTextureFormat.RHalf);
+            var obstacle = MakeR(RenderTextureFormat.RFloat);   // no obstacles (CP4: AdvectHeat reads it)
             try
             {
                 FillRT(velocity, Color.clear);
                 FillRT(heatWrite, Color.clear);
+                FillRT(obstacle, Color.clear);
                 // Seed center texel (res/2, res/2) = 0.5 on the read side.
                 FillRT(heatRead, Color.clear);
                 var prev = RenderTexture.active;
@@ -267,6 +370,7 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetTexture(kernel, "_VelocityRead", velocity);
                 cs.SetTexture(kernel, "_HeatRead", heatRead);
                 cs.SetTexture(kernel, "_HeatWrite", heatWrite);
+                cs.SetTexture(kernel, "_ObstacleRead", obstacle);
                 cs.Dispatch(kernel, groups, groups, 1);
                 yield return null;
 
@@ -279,6 +383,7 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetTexture(kernel, "_VelocityRead", velocity);
                 cs.SetTexture(kernel, "_HeatRead", heatRead);
                 cs.SetTexture(kernel, "_HeatWrite", heatWrite);
+                cs.SetTexture(kernel, "_ObstacleRead", obstacle);
                 cs.Dispatch(kernel, groups, groups, 1);
                 yield return null;
 
@@ -291,9 +396,11 @@ namespace Magi.Inkling.Tests.PlayMode
                 velocity.Release();
                 heatRead.Release();
                 heatWrite.Release();
+                obstacle.Release();
                 Object.DestroyImmediate(velocity);
                 Object.DestroyImmediate(heatRead);
                 Object.DestroyImmediate(heatWrite);
+                Object.DestroyImmediate(obstacle);
             }
 #else
             yield break;
@@ -428,6 +535,66 @@ namespace Magi.Inkling.Tests.PlayMode
                 "SimDriver must copy thermal source fields into the context");
 #else
             Assert.Ignore("Editor-only source assertion");
+#endif
+        }
+
+        // 9. DiffuseHeat no-flux: an obstacle neighbor does not receive heat, and the heated cell
+        // treats that obstacle neighbor as itself. A control run (no obstacle) proves the block is real.
+        [UnityTest]
+        public IEnumerator DiffuseHeat_ObstacleBlocksNeighborExchange()
+        {
+#if UNITY_EDITOR
+            const int res = 3;
+            int C = 1 * res + 1;   // (1,1) heated cell
+            int R = 1 * res + 2;   // (2,1) right neighbor / obstacle site
+
+            var heat = new float[res * res]; heat[C] = 1f;
+            var wall = new float[res * res]; wall[R] = 1f;
+            var open = new float[res * res];
+
+            float[] blocked = DispatchDiffuseHeatGrid(heat, wall, res, 1f);
+            Assert.That(blocked[R], Is.EqualTo(0f).Within(2e-2f),
+                "Obstacle cell must not receive heat from its neighbor (no-flux).");
+            Assert.That(blocked[C], Is.EqualTo(0.25f).Within(3e-2f),
+                "Heated cell treats the obstacle neighbor as itself (retains ~0.25).");
+
+            float[] control = DispatchDiffuseHeatGrid(heat, open, res, 1f);
+            Assert.That(control[R], Is.EqualTo(0.25f).Within(3e-2f),
+                "Without an obstacle the neighbor DOES receive heat (~0.25) — proves the block is real.");
+
+            yield return null;
+#else
+            yield break;
+#endif
+        }
+
+        // 10. AdvectHeat no-flux: a velocity back-trace that crosses a solid must not jump heat
+        // across it. A control run (no obstacle) confirms the same back-trace would transfer heat.
+        [UnityTest]
+        public IEnumerator AdvectHeat_ObstacleBlocksBacktrace()
+        {
+#if UNITY_EDITOR
+            const int res = 3;
+            int SRC = 1 * res + 0;   // (0,1) source heat behind the wall
+            int WALL = 1 * res + 1;  // (1,1) obstacle between source and target
+            int DST = 1 * res + 2;   // (2,1) target; velocity (2,0) back-traces it toward (0,1)
+
+            var heat = new float[res * res]; heat[SRC] = 1f;
+            var wall = new float[res * res]; wall[WALL] = 1f;
+            var open = new float[res * res];
+            var vel = new Vector2(2f, 0f);
+
+            float[] blocked = DispatchAdvectHeatGrid(heat, wall, vel, res, 1f, 1f, 0f);
+            Assert.That(blocked[DST], Is.EqualTo(0f).Within(3e-2f),
+                "Back-trace across a solid must fall back to current heat (no jump).");
+
+            float[] control = DispatchAdvectHeatGrid(heat, open, vel, res, 1f, 1f, 0f);
+            Assert.That(control[DST], Is.EqualTo(1f).Within(5e-2f),
+                "Without an obstacle the back-trace transfers source heat (~1.0) — proves the block is real.");
+
+            yield return null;
+#else
+            yield break;
 #endif
         }
     }

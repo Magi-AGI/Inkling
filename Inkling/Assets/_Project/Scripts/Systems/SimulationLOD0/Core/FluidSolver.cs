@@ -538,7 +538,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // 1b. Heat transport (scalar environment layer). Source (fire emits heat) first so it
             // reflects the current particle field, then advect by current velocity + decay, then
             // optional diffusion. Heat is diagnostic only in CP3 — it drives no other field.
-            if (ctx.Heat != null && ctx.FluidKernelAdvectHeat >= 0)
+            // CP4: AdvectHeat/DiffuseHeat unconditionally read _ObstacleRead, so require ctx.Obstacles
+            // here (CP1 always allocates it; the guard just prevents an unbound SRV in test/abnormal setups).
+            if (ctx.Heat != null && ctx.FluidKernelAdvectHeat >= 0 && ctx.Obstacles != null)
             {
                 // Heat sources: fire emits heat (add-only; never writes the particle buffer).
                 if (ctx.EnableHeatSources && ctx.FluidKernelAddHeatSources >= 0
@@ -551,9 +553,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     ctx.Heat.Swap();
                 }
 
+                // Obstacle mask for no-flux heat transport (CP4). ctx.Obstacles holds this frame's
+                // ink/geometry solids; bound unconditionally (required by the guard above) so
+                // AdvectHeat/DiffuseHeat don't leak heat across walls and never read an unbound SRV.
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_VelocityRead", ctx.Velocity.Read);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_HeatRead", ctx.Heat.Read);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_HeatWrite", ctx.Heat.Write);
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_ObstacleRead", ctx.Obstacles);
                 ctx.FluidCompute.Dispatch(ctx.FluidKernelAdvectHeat, threadGroups, threadGroups, 1);
                 ctx.Heat.Swap();
 
@@ -561,6 +567,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 {
                     ctx.FluidCompute.SetTexture(ctx.FluidKernelDiffuseHeat, "_HeatRead", ctx.Heat.Read);
                     ctx.FluidCompute.SetTexture(ctx.FluidKernelDiffuseHeat, "_HeatWrite", ctx.Heat.Write);
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelDiffuseHeat, "_ObstacleRead", ctx.Obstacles);
                     ctx.FluidCompute.Dispatch(ctx.FluidKernelDiffuseHeat, threadGroups, threadGroups, 1);
                     ctx.Heat.Swap();
                 }
