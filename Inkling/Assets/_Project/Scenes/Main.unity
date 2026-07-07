@@ -1366,6 +1366,7 @@ MonoBehaviour:
   useParticleDiffusion: 1
   maxParticleSimResolution: 1024
   inkInteractionsCompute: {fileID: 7200000, guid: aa92fa222fb65b04f87571b5ecc49a6f, type: 3}
+  thermalInteractionsCompute: {fileID: 7200000, guid: 984226b36b28b5641ac32914eb145170, type: 3}
   useInkInteractions: 1
   inkInteractionsDebugMode: 0
   affinityGroups:

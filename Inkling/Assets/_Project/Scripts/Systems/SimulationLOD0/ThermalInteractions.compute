@@ -1,0 +1,111 @@
+// ThermalInteractions.compute
+// Heat-driven LOCAL phase changes (CP5): Ice->Water (melt), Water->Steam (boil),
+// Steam->Water (condense). Every conversion is per-cell only — a cell's own ice/water/steam
+// driven by its own heat. There is NO neighbor sampling and NO adjacency product, which
+// structurally avoids the minting class that affected the adjacency-based InkInteractions.
+//
+// Conservation: each conversion is exactly paired (e.g. ice-- => water++ by the same amount),
+// so ink MASS (ice+water+steam) is conserved per event. Only heat (energy, not mass) is
+// consumed/released, bounded per event by a per-threshold excess of the RUNNING heat value.
+//
+// Ordering (CP5, condenseHeatRelease == 0): condensation runs FIRST from the pre-reaction
+// snapshot (heat0, steam0) so heat-consuming melt/boil can never trigger same-pass condensation
+// of newly-produced steam. Then melt, then boil (boil re-derives its excess after melt drawdown).
+//
+// Heat is a separate scalar layer (RHalf): read as an SRV (Texture2D<float>, promotes cleanly)
+// and written via a half-typed UAV to match the RHalf format, mirroring the sim's Heat kernels.
+
+#pragma kernel ThermalInteractions
+
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+StructuredBuffer<iparticle> _ParticlesRead;
+RWStructuredBuffer<iparticle> _ParticlesWrite;
+
+Texture2D<float> _HeatRead;      // scalar heat layer (read-only SRV)
+RWTexture2D<ifloat> _HeatWrite;  // scalar heat layer (UAV; ifloat == half matches RHalf)
+
+int _Resolution;
+float _FrameDeltaTime;
+int _EnableThermalInteractions;
+
+// Thresholds (sanitized C#-side to condense <= melt <= boil).
+float _MeltThreshold;
+float _BoilThreshold;
+float _CondenseThreshold;
+
+// Per-second conversion rates.
+float _MeltRate;
+float _BoilRate;
+float _CondenseRate;
+
+// Latent heat per unit converted (consumed on melt/boil) and released on condense (0 in CP5).
+float _MeltHeatCost;
+float _BoilHeatCost;
+float _CondenseHeatRelease;
+
+// Clamp bounds (ambient <= maxHeat, sanitized C#-side).
+float _AmbientTemperature;
+float _MaxHeat;
+
+[numthreads(8, 8, 1)]
+void ThermalInteractions(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_Resolution || id.y >= (uint)_Resolution)
+        return;
+
+    uint idx = id.y * (uint)_Resolution + id.x;
+
+    // Copy the FULL particle through; only ice/water/steam are mutated below.
+    iparticle p = _ParticlesRead[idx];
+    float heat0 = _HeatRead[int2(id.xy)];
+
+    // Disabled: exact pass-through of every field + heat (baseline stays byte-identical).
+    if (_EnableThermalInteractions == 0)
+    {
+        _ParticlesWrite[idx] = p;
+        _HeatWrite[int2(id.xy)] = heat0;
+        return;
+    }
+
+    float dt = _FrameDeltaTime;
+    const float EPS = 1e-6;
+
+    float ice0 = p.ice, water0 = p.water, steam0 = p.steam;
+    float ice = ice0, water = water0, steam = steam0;
+    float heat = heat0;
+
+    // 1. Condense FIRST — from the pre-reaction snapshot (heat0, steam0) only, so newly-boiled
+    //    steam this pass is never condensed. CP5: _CondenseHeatRelease == 0 => heat unchanged here.
+    if (heat0 < _CondenseThreshold)
+    {
+        float condense = min(steam0, steam0 * _CondenseRate * dt);
+        steam -= condense;
+        water += condense;
+        heat = min(_MaxHeat, heat + condense * _CondenseHeatRelease);
+    }
+
+    // 2. Melt (Ice->Water) — excess heat above the melt threshold from the RUNNING heat.
+    float excessMelt = max(0.0, heat - _MeltThreshold);
+    float melt = min(ice, min(ice * _MeltRate * dt, excessMelt / max(_MeltHeatCost, EPS)));
+    ice -= melt;
+    water += melt;
+    heat -= melt * _MeltHeatCost;
+
+    // 3. Boil (Water->Steam) — excess RE-DERIVED against the boil threshold AFTER melt drawdown.
+    //    `water` includes water melted this pass (cascade allowed, bounded by the boil heat budget).
+    float excessBoil = max(0.0, heat - _BoilThreshold);
+    float boil = min(water, min(water * _BoilRate * dt, excessBoil / max(_BoilHeatCost, EPS)));
+    water -= boil;
+    steam += boil;
+    heat -= boil * _BoilHeatCost;
+
+    p.ice = max(0.0, ice);
+    p.water = max(0.0, water);
+    p.steam = max(0.0, steam);
+    heat = clamp(heat, _AmbientTemperature, _MaxHeat);
+
+    _ParticlesWrite[idx] = p;
+    _HeatWrite[int2(id.xy)] = heat;
+}

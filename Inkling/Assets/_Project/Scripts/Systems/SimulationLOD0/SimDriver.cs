@@ -107,6 +107,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Ink Interactions")]
         [SerializeField] private ComputeShader inkInteractionsCompute;
+        [SerializeField] private ComputeShader thermalInteractionsCompute;
         [SerializeField] private bool useInkInteractions = true;
         [SerializeField] private bool inkInteractionsDebugMode = false;
         [SerializeField] private AffinityGroup[] affinityGroups;
@@ -151,6 +152,36 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Clamp ceiling for the heat field to prevent runaway values.")]
         [Min(0f)]
         [SerializeField] private float maxHeat = 1f;
+
+        [Header("Thermal Interactions (CP5: heat-driven phase changes, opt-in)")]
+        [Tooltip("When true, heat drives LOCAL phase changes: ice->water (melt), water->steam (boil), " +
+                 "steam->water (condense). Default OFF — first pass that alters ink state, so baseline " +
+                 "is unchanged until enabled. Local-only conversions (no neighbor sampling) are conservation-safe.")]
+        [SerializeField] private bool enableThermalInteractions = false;
+        [Tooltip("Heat below which steam condenses to water. Sanitized to <= meltThreshold.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float condenseThreshold = 0.2f;
+        [Tooltip("Heat above which ice melts to water. Sanitized to condense <= this <= boil.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float meltThreshold = 0.4f;
+        [Tooltip("Heat above which water boils to steam. Sanitized to >= meltThreshold.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float boilThreshold = 0.7f;
+        [Tooltip("Melt/boil/condense conversion rates (fraction of the source ink per second).")]
+        [Min(0f)]
+        [SerializeField] private float meltRate = 1f;
+        [Min(0f)]
+        [SerializeField] private float boilRate = 1f;
+        [Min(0f)]
+        [SerializeField] private float condenseRate = 1f;
+        [Tooltip("Latent heat consumed per unit of ice melted / water boiled.")]
+        [Min(0f)]
+        [SerializeField] private float meltHeatCost = 0.5f;
+        [Min(0f)]
+        [SerializeField] private float boilHeatCost = 0.5f;
+        [Tooltip("Latent heat released per unit condensed. Kept 0 in CP5 to avoid condense->heat->boil feedback.")]
+        [Min(0f)]
+        [SerializeField] private float condenseHeatRelease = 0f;
 
         [Header("Black Body Ink (Fallback)")]
         [SerializeField] private bool enableBlackBodyClearingFallback = false;
@@ -373,6 +404,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.ParticleToColorCompute = particleToColorCompute;
             ctx.ParticleChannelSplatCompute = particleChannelSplatCompute;
             ctx.InkInteractionsCompute = inkInteractionsCompute;
+            ctx.ThermalInteractionsCompute = thermalInteractionsCompute;
 
             ctx.UseParticleSimulation = useParticleSimulation;
             ctx.UseParticleAdvection = useParticleAdvection;
@@ -403,6 +435,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.EnableHeatSources = enableHeatSources;
             ctx.FireHeatEmissionRate = fireHeatEmissionRate;
             ctx.MaxHeat = maxHeat;
+
+            ctx.EnableThermalInteractions = enableThermalInteractions;
+            ctx.CondenseThreshold = condenseThreshold;
+            ctx.MeltThreshold = meltThreshold;
+            ctx.BoilThreshold = boilThreshold;
+            ctx.MeltRate = meltRate;
+            ctx.BoilRate = boilRate;
+            ctx.CondenseRate = condenseRate;
+            ctx.MeltHeatCost = meltHeatCost;
+            ctx.BoilHeatCost = boilHeatCost;
+            ctx.CondenseHeatRelease = condenseHeatRelease;
 
             ctx.EnableBlackBodyClearingFallback = enableBlackBodyClearingFallback;
             ctx.BlackBodyThresholdFallback = blackBodyThresholdFallback;

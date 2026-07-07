@@ -87,6 +87,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     ctx.FluidKernelDiffuseHeat = -1;
                     ctx.FluidKernelAddHeatSources = -1;
                 }
+
+                // ThermalInteractions is a separate Inkling compute shader (CP5). Always reset the
+                // kernel index first so editor re-initialization can't leave a stale value when the
+                // shader ref is missing or the kernel is absent.
+                ctx.KernelThermalInteractions = -1;
+                if (ctx.ThermalInteractionsCompute != null
+                    && ctx.ThermalInteractionsCompute.HasKernel("ThermalInteractions"))
+                {
+                    try { ctx.KernelThermalInteractions = ctx.ThermalInteractionsCompute.FindKernel("ThermalInteractions"); }
+                    catch { ctx.KernelThermalInteractions = -1; }
+                }
             }
             catch (System.Exception)
             {
@@ -571,6 +582,48 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     ctx.FluidCompute.Dispatch(ctx.FluidKernelDiffuseHeat, threadGroups, threadGroups, 1);
                     ctx.Heat.Swap();
                 }
+            }
+
+            // 1c. Thermal interactions (CP5): heat-driven LOCAL phase changes (ice->water->steam,
+            // steam->water). Opt-in — default off, so not dispatched and baseline is byte-identical.
+            // Runs after heat transport (heat is fresh) using the current particle field; reads/writes
+            // both the particle buffer and the heat layer, and swaps both. LOCAL only (no neighbor
+            // sampling) so it cannot mint mass. Sanitized thresholds enforce condense <= melt <= boil.
+            if (ctx.EnableThermalInteractions && ctx.KernelThermalInteractions >= 0
+                && ctx.ThermalInteractionsCompute != null && ctx.Heat != null
+                && ctx.ParticlesBuffer != null && ctx.ParticlesBuffer[ctx.ParticleReadIndex] != null)
+            {
+                var tc = ctx.ThermalInteractionsCompute;
+                int k = ctx.KernelThermalInteractions;
+
+                float condenseT = Mathf.Max(0f, ctx.CondenseThreshold);
+                float meltT = Mathf.Max(condenseT, ctx.MeltThreshold);
+                float boilT = Mathf.Max(meltT, ctx.BoilThreshold);
+                float ambient = ctx.AmbientTemperature;
+                float maxHeat = Mathf.Max(ambient, ctx.MaxHeat);
+
+                tc.SetInt("_Resolution", ctx.Resolution);
+                tc.SetFloat("_FrameDeltaTime", ctx.FrameDeltaTime);
+                tc.SetInt("_EnableThermalInteractions", 1);
+                tc.SetFloat("_CondenseThreshold", condenseT);
+                tc.SetFloat("_MeltThreshold", meltT);
+                tc.SetFloat("_BoilThreshold", boilT);
+                tc.SetFloat("_MeltRate", Mathf.Max(0f, ctx.MeltRate));
+                tc.SetFloat("_BoilRate", Mathf.Max(0f, ctx.BoilRate));
+                tc.SetFloat("_CondenseRate", Mathf.Max(0f, ctx.CondenseRate));
+                tc.SetFloat("_MeltHeatCost", Mathf.Max(0f, ctx.MeltHeatCost));
+                tc.SetFloat("_BoilHeatCost", Mathf.Max(0f, ctx.BoilHeatCost));
+                tc.SetFloat("_CondenseHeatRelease", Mathf.Max(0f, ctx.CondenseHeatRelease));
+                tc.SetFloat("_AmbientTemperature", ambient);
+                tc.SetFloat("_MaxHeat", maxHeat);
+
+                tc.SetBuffer(k, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
+                tc.SetBuffer(k, "_ParticlesWrite", ctx.ParticlesBuffer[ctx.ParticleWriteIndex]);
+                tc.SetTexture(k, "_HeatRead", ctx.Heat.Read);
+                tc.SetTexture(k, "_HeatWrite", ctx.Heat.Write);
+                tc.Dispatch(k, threadGroups, threadGroups, 1);
+                ctx.SwapParticleBuffers();
+                ctx.Heat.Swap();
             }
 
             // 2. Diffusion

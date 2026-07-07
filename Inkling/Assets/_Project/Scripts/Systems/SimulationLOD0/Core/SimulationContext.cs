@@ -87,6 +87,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public ComputeShader ParticleToColorCompute;
         public ComputeShader ParticleChannelSplatCompute;
         public ComputeShader InkInteractionsCompute;
+        public ComputeShader ThermalInteractionsCompute;
 
         // ── Particle simulation flags ───────────────────────────────────────
         public bool UseParticleSimulation;
@@ -125,6 +126,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public bool EnableHeatSources = true;
         public float FireHeatEmissionRate = 1f;
         public float MaxHeat = 1f;
+
+        // Thermal interactions (CP5): heat-driven LOCAL phase changes. Default OFF (opt-in) —
+        // this is the first pass that alters ink state, so baseline stays unchanged until enabled.
+        public bool EnableThermalInteractions = false;
+        public float CondenseThreshold = 0.2f;
+        public float MeltThreshold = 0.4f;
+        public float BoilThreshold = 0.7f;
+        public float MeltRate = 1f;
+        public float BoilRate = 1f;
+        public float CondenseRate = 1f;
+        public float MeltHeatCost = 0.5f;
+        public float BoilHeatCost = 0.5f;
+        public float CondenseHeatRelease = 0f;
 
         // ── Ink definitions ─────────────────────────────────────────────────
         public InkTypeDef[] InkDefinitions;
@@ -166,6 +180,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public int FluidKernelAdvectHeat = -1;
         public int FluidKernelDiffuseHeat = -1;
         public int FluidKernelAddHeatSources = -1;
+        public int KernelThermalInteractions = -1;
 
         // ── Helpers ─────────────────────────────────────────────────────────
 
