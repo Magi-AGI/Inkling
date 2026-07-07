@@ -133,6 +133,25 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Range(0f, 8f)]
         [SerializeField] private float reactionImpulseGain = 1f;
 
+        [Header("Heat / Thermal (CP3: diagnostic only, not gameplay)")]
+        [Tooltip("Seconds for heat to fade 50% toward ambient. Large ≈ persistent. Frame-rate independent.")]
+        [Min(0.25f)]
+        [SerializeField] private float thermalDissipationHalfLife = 1000f;
+        [Tooltip("How fast heat spreads to neighbors per step (0 = none). Heat can diffuse faster than pigments.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float thermalDiffusion = 0f;
+        [Tooltip("Temperature heat decays toward (default 0).")]
+        [SerializeField] private float ambientTemperature = 0f;
+        [Tooltip("When true, fire concentration emits heat into the heat layer (add-only; does not modify " +
+                 "particles). Diagnostic in CP3 — visible only in the Heat debug view, not Combined rendering.")]
+        [SerializeField] private bool enableHeatSources = true;
+        [Tooltip("Heat added per unit fire per second (dt-normalized).")]
+        [Min(0f)]
+        [SerializeField] private float fireHeatEmissionRate = 1f;
+        [Tooltip("Clamp ceiling for the heat field to prevent runaway values.")]
+        [Min(0f)]
+        [SerializeField] private float maxHeat = 1f;
+
         [Header("Black Body Ink (Fallback)")]
         [SerializeField] private bool enableBlackBodyClearingFallback = false;
         [Range(0f, 1f)]
@@ -377,6 +396,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.ReactionImpulseCurlBias = reactionImpulseCurlBias;
             ctx.ReactionImpulseExpansionBias = reactionImpulseExpansionBias;
             ctx.ReactionImpulseGain = reactionImpulseGain;
+
+            ctx.ThermalDissipationHalfLife = thermalDissipationHalfLife;
+            ctx.ThermalDiffusion = thermalDiffusion;
+            ctx.AmbientTemperature = ambientTemperature;
+            ctx.EnableHeatSources = enableHeatSources;
+            ctx.FireHeatEmissionRate = fireHeatEmissionRate;
+            ctx.MaxHeat = maxHeat;
 
             ctx.EnableBlackBodyClearingFallback = enableBlackBodyClearingFallback;
             ctx.BlackBodyThresholdFallback = blackBodyThresholdFallback;

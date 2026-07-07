@@ -73,6 +73,52 @@ namespace Magi.Inkling.Tests.PlayMode
             }
         }
 
+#if UNITY_EDITOR
+        // Dispatches AddHeatSources on a 1-cell grid and returns the resulting center heat.
+        // Uses the raw iparticle float layout (stride 56); fire is field index 0.
+        private static float DispatchAddHeatSources(float fire, float heat0, int enable, float rate, float dt, float maxHeat)
+        {
+            const int res = 1;
+            var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.inktools.sim/Compute/Fluids.compute");
+            Assert.IsNotNull(cs, "Fluids.compute should load");
+            int kernel = cs.FindKernel("AddHeatSources");
+
+            var particle = new float[14];
+            particle[0] = fire; // fire = iparticle field index 0
+
+            var buf = new ComputeBuffer(res * res, 56);
+            var hr = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf) { enableRandomWrite = true }; hr.Create();
+            var hw = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf) { enableRandomWrite = true }; hw.Create();
+            try
+            {
+                buf.SetData(particle);
+                FillRT(hr, new Color(heat0, 0f, 0f, 0f));
+                FillRT(hw, Color.clear);
+
+                cs.SetVector("_SimulationSize", new Vector2(res, res));
+                cs.SetFloat("_FrameDeltaTime", dt);
+                cs.SetInt("_EnableHeatSources", enable);
+                cs.SetFloat("_FireHeatEmissionRate", rate);
+                cs.SetFloat("_MaxHeat", maxHeat);
+                cs.SetBuffer(kernel, "_ParticlesRead", buf);
+                cs.SetTexture(kernel, "_HeatRead", hr);
+                cs.SetTexture(kernel, "_HeatWrite", hw);
+                cs.Dispatch(kernel, 1, 1, 1);
+
+                return ReadCenterR(hw);
+            }
+            finally
+            {
+                buf.Release();
+                hr.Release();
+                hw.Release();
+                Object.DestroyImmediate(hr);
+                Object.DestroyImmediate(hw);
+            }
+        }
+#endif
+
         // 1. Allocate creates ctx.Heat as an RHalf ping-pong buffer.
         [UnityTest]
         public IEnumerator Allocate_CreatesHeatLayer_AsRHalf()
@@ -331,6 +377,55 @@ namespace Magi.Inkling.Tests.PlayMode
                 "Heat debug keyword must be in the _DebugMode multi_compile list");
             StringAssert.Contains("PlantBoth, Heat", src,
                 "Heat must be the last entry in the _DebugMode KeywordEnum");
+#else
+            Assert.Ignore("Editor-only source assertion");
+#endif
+        }
+
+        // 7. AddHeatSources: fire emits heat, non-fire stays inert, output clamps to _MaxHeat, and
+        // a disabled gate passes existing heat through unchanged.
+        [UnityTest]
+        public IEnumerator AddHeatSources_FireEmits_NonFireInert_ClampsAndGates()
+        {
+#if UNITY_EDITOR
+            // Fire cell: 0 + fire(0.5) * rate(1) * dt(1) = 0.5
+            float fired = DispatchAddHeatSources(0.5f, 0f, 1, 1f, 1f, 1f);
+            Assert.That(fired, Is.EqualTo(0.5f).Within(2e-2f), "Fire should emit heat (~0.5)");
+
+            // Non-fire cell must not heat itself.
+            float noFire = DispatchAddHeatSources(0f, 0f, 1, 1f, 1f, 1f);
+            Assert.That(noFire, Is.EqualTo(0f).Within(1e-3f), "Non-fire cell must stay at 0");
+
+            // Clamp: 0 + 1 * 10 * 1 = 10, clamped to _MaxHeat = 0.3
+            float clamped = DispatchAddHeatSources(1f, 0f, 1, 10f, 1f, 0.3f);
+            Assert.That(clamped, Is.EqualTo(0.3f).Within(2e-2f), "Heat must clamp to _MaxHeat");
+
+            // Disabled: seeded heat 0.25 passes through unchanged despite fire present.
+            float disabled = DispatchAddHeatSources(1f, 0.25f, 0, 5f, 1f, 1f);
+            Assert.That(disabled, Is.EqualTo(0.25f).Within(2e-2f), "Disabled sources must pass heat through");
+
+            yield return null;
+#else
+            yield break;
+#endif
+        }
+
+        // 8. SimDriver serializes the CP3 thermal fields (source-level assertion — the fields are
+        // private [SerializeField], so verify their declarations exist and copy into the context).
+        [Test]
+        public void SimDriver_SerializesThermalFields()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Scripts/Systems/SimulationLOD0/SimDriver.cs";
+            string src = System.IO.File.ReadAllText(path);
+            foreach (var field in new[] { "thermalDissipationHalfLife", "thermalDiffusion",
+                "ambientTemperature", "enableHeatSources", "fireHeatEmissionRate", "maxHeat" })
+            {
+                StringAssert.Contains(field, src, $"SimDriver should serialize {field}");
+                StringAssert.Contains($"ctx.", src); // sanity: context copy block present
+            }
+            StringAssert.Contains("ctx.FireHeatEmissionRate = fireHeatEmissionRate", src,
+                "SimDriver must copy thermal source fields into the context");
 #else
             Assert.Ignore("Editor-only source assertion");
 #endif

@@ -79,11 +79,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 {
                     ctx.FluidKernelAdvectHeat = ctx.FluidCompute.FindKernel("AdvectHeat");
                     ctx.FluidKernelDiffuseHeat = ctx.FluidCompute.FindKernel("DiffuseHeat");
+                    ctx.FluidKernelAddHeatSources = ctx.FluidCompute.FindKernel("AddHeatSources");
                 }
                 catch
                 {
                     ctx.FluidKernelAdvectHeat = -1;
                     ctx.FluidKernelDiffuseHeat = -1;
+                    ctx.FluidKernelAddHeatSources = -1;
                 }
             }
             catch (System.Exception)
@@ -150,6 +152,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_ThermalDissipation", HalfLifeToPerSecond(ctx.ThermalDissipationHalfLife));
             fc.SetFloat("_ThermalDiffusion", Mathf.Clamp01(ctx.ThermalDiffusion));
             fc.SetFloat("_AmbientTemperature", ctx.AmbientTemperature);
+
+            // Heat sources (CP3): fire emits heat. Add-only; does not modify particles.
+            fc.SetInt("_EnableHeatSources", ctx.EnableHeatSources ? 1 : 0);
+            fc.SetFloat("_FireHeatEmissionRate", Mathf.Max(0f, ctx.FireHeatEmissionRate));
+            fc.SetFloat("_MaxHeat", Mathf.Max(0f, ctx.MaxHeat));
 
             fc.SetVector("_TexelSize", new Vector4(1f / ctx.Resolution, 1f / ctx.Resolution, ctx.Resolution, ctx.Resolution));
         }
@@ -528,11 +535,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             if (sw != null) AdvectionMs = (float)sw.Elapsed.TotalMilliseconds;
 
-            // 1b. Heat transport (scalar environment layer). Advect by the current velocity, decay
-            // toward ambient, optionally diffuse. CP1: no heat sources exist, so with heat == 0
-            // everywhere this is a no-op on every other field (byte-identical to pre-heat).
+            // 1b. Heat transport (scalar environment layer). Source (fire emits heat) first so it
+            // reflects the current particle field, then advect by current velocity + decay, then
+            // optional diffusion. Heat is diagnostic only in CP3 — it drives no other field.
             if (ctx.Heat != null && ctx.FluidKernelAdvectHeat >= 0)
             {
+                // Heat sources: fire emits heat (add-only; never writes the particle buffer).
+                if (ctx.EnableHeatSources && ctx.FluidKernelAddHeatSources >= 0
+                    && ctx.ParticlesBuffer != null && ctx.ParticlesBuffer[ctx.ParticleReadIndex] != null)
+                {
+                    ctx.FluidCompute.SetBuffer(ctx.FluidKernelAddHeatSources, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelAddHeatSources, "_HeatRead", ctx.Heat.Read);
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelAddHeatSources, "_HeatWrite", ctx.Heat.Write);
+                    ctx.FluidCompute.Dispatch(ctx.FluidKernelAddHeatSources, threadGroups, threadGroups, 1);
+                    ctx.Heat.Swap();
+                }
+
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_VelocityRead", ctx.Velocity.Read);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_HeatRead", ctx.Heat.Read);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_HeatWrite", ctx.Heat.Write);

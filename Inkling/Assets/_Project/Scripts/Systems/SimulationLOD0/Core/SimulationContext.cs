@@ -121,6 +121,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float ThermalDissipationHalfLife = 1000f;
         public float ThermalDiffusion = 0f;
         public float AmbientTemperature = 0f;
+        // Heat sources (CP3): fire emits heat (add-only, diagnostic — heat drives nothing yet).
+        public bool EnableHeatSources = true;
+        public float FireHeatEmissionRate = 1f;
+        public float MaxHeat = 1f;
 
         // ── Ink definitions ─────────────────────────────────────────────────
         public InkTypeDef[] InkDefinitions;
@@ -161,6 +165,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public int FluidKernelInkToObstacles = -1;
         public int FluidKernelAdvectHeat = -1;
         public int FluidKernelDiffuseHeat = -1;
+        public int FluidKernelAddHeatSources = -1;
 
         // ── Helpers ─────────────────────────────────────────────────────────
 
