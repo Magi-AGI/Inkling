@@ -74,6 +74,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 {
                     ctx.FluidKernelInkToObstacles = -1;
                 }
+
+                try
+                {
+                    ctx.FluidKernelAdvectHeat = ctx.FluidCompute.FindKernel("AdvectHeat");
+                    ctx.FluidKernelDiffuseHeat = ctx.FluidCompute.FindKernel("DiffuseHeat");
+                }
+                catch
+                {
+                    ctx.FluidKernelAdvectHeat = -1;
+                    ctx.FluidKernelDiffuseHeat = -1;
+                }
             }
             catch (System.Exception)
             {
@@ -132,6 +143,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             // Per-ink properties
             SetInkProperties(fc);
+
+            // Heat layer (scalar environment field). Dissipation is a per-second retention toward
+            // ambient (from a half-life), matching the ink dissipation convention; defaults are
+            // inert (near-persistent, no diffusion, ambient 0) so CP1 has no observable effect.
+            fc.SetFloat("_ThermalDissipation", HalfLifeToPerSecond(ctx.ThermalDissipationHalfLife));
+            fc.SetFloat("_ThermalDiffusion", Mathf.Clamp01(ctx.ThermalDiffusion));
+            fc.SetFloat("_AmbientTemperature", ctx.AmbientTemperature);
 
             fc.SetVector("_TexelSize", new Vector4(1f / ctx.Resolution, 1f / ctx.Resolution, ctx.Resolution, ctx.Resolution));
         }
@@ -309,6 +327,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 ctx.FluidCompute.SetTexture(k, "_VorticityMag", ctx.VorticityTex);
                 ctx.FluidCompute.Dispatch(k, threadGroups, threadGroups, 1);
             }
+
+            // Heat is a persistent field (not cleared per-step); zero BOTH ping-pong sides here so a
+            // mid-run reset can't inherit stale temperature. Clear(Color) clears Read and Write.
+            ctx.Heat?.Clear(Color.clear);
 
             int particleCount = ctx.Resolution * ctx.Resolution;
             if (ctx.GpuPromotesHalf)
@@ -505,6 +527,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             }
 
             if (sw != null) AdvectionMs = (float)sw.Elapsed.TotalMilliseconds;
+
+            // 1b. Heat transport (scalar environment layer). Advect by the current velocity, decay
+            // toward ambient, optionally diffuse. CP1: no heat sources exist, so with heat == 0
+            // everywhere this is a no-op on every other field (byte-identical to pre-heat).
+            if (ctx.Heat != null && ctx.FluidKernelAdvectHeat >= 0)
+            {
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_VelocityRead", ctx.Velocity.Read);
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_HeatRead", ctx.Heat.Read);
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_HeatWrite", ctx.Heat.Write);
+                ctx.FluidCompute.Dispatch(ctx.FluidKernelAdvectHeat, threadGroups, threadGroups, 1);
+                ctx.Heat.Swap();
+
+                if (ctx.FluidKernelDiffuseHeat >= 0 && ctx.ThermalDiffusion > 0f)
+                {
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelDiffuseHeat, "_HeatRead", ctx.Heat.Read);
+                    ctx.FluidCompute.SetTexture(ctx.FluidKernelDiffuseHeat, "_HeatWrite", ctx.Heat.Write);
+                    ctx.FluidCompute.Dispatch(ctx.FluidKernelDiffuseHeat, threadGroups, threadGroups, 1);
+                    ctx.Heat.Swap();
+                }
+            }
 
             // 2. Diffusion
             if (ctx.Viscosity > 0f && ctx.DiffusionIterations > 0)

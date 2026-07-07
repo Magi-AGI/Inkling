@@ -21,6 +21,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.Velocity = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.RGHalf, "Velocity");
             ctx.Pressure = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.RHalf, "Pressure");
             ctx.Density = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.ARGBHalf, "Density");
+            // Heat: scalar environment/temperature layer. RHalf is sufficient for CP1; bump to
+            // RFloat only if latent-heat accumulation later needs the precision/range.
+            ctx.Heat = new PingPongRenderTexture(resolution, resolution, RenderTextureFormat.RHalf, "Heat");
 
             // Single render textures
             ctx.Divergence = CreateRT(resolution, RenderTextureFormat.RHalf, "Divergence");
@@ -98,6 +101,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.Velocity?.Dispose();
             ctx.Pressure?.Dispose();
             ctx.Density?.Dispose();
+            ctx.Heat?.Dispose();
 
             ReleaseRT(ctx.Divergence);
             ReleaseRT(ctx.VorticityTex);

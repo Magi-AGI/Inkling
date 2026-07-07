@@ -15,6 +15,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public PingPongRenderTexture Velocity;
         public PingPongRenderTexture Pressure;
         public PingPongRenderTexture Density;
+        // Heat: scalar environment/temperature layer (separate field, like velocity/pressure —
+        // NOT an iparticle channel). CP1: inert, transported/decayed but with no sources.
+        public PingPongRenderTexture Heat;
 
         // ── Single render textures ──────────────────────────────────────────
         public RenderTexture Divergence;
@@ -111,6 +114,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float ReactionImpulseExpansionBias;
         public float ReactionImpulseGain;
 
+        // ── Heat layer parameters (CP1: inert defaults) ─────────────────────
+        // ThermalDissipationHalfLife: seconds for heat to fade 50% toward ambient (large ≈ persistent).
+        // ThermalDiffusion: 0..1 blend toward neighbor average per step (0 = no spread).
+        // AmbientTemperature: value heat decays toward. Defaults keep the field inert & stable.
+        public float ThermalDissipationHalfLife = 1000f;
+        public float ThermalDiffusion = 0f;
+        public float AmbientTemperature = 0f;
+
         // ── Ink definitions ─────────────────────────────────────────────────
         public InkTypeDef[] InkDefinitions;
 
@@ -148,6 +159,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public int FluidKernelDiffuseParticles;
         public int FluidKernelAddParticlesGaussian;
         public int FluidKernelInkToObstacles = -1;
+        public int FluidKernelAdvectHeat = -1;
+        public int FluidKernelDiffuseHeat = -1;
 
         // ── Helpers ─────────────────────────────────────────────────────────
 
