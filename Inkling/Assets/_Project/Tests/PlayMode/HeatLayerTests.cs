@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -6,6 +7,7 @@ using UnityEngine.TestTools;
 using UnityEditor;
 #endif
 using Magi.Inkling.Systems.SimulationLOD0;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Tests.PlayMode
 {
@@ -30,6 +32,25 @@ namespace Magi.Inkling.Tests.PlayMode
                 tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
                 tex.Apply();
                 return tex.GetPixel(cx, cy).r;
+            }
+            finally
+            {
+                RenderTexture.active = prev;
+                Object.DestroyImmediate(tex);
+            }
+        }
+
+        // Reads a full RGBA pixel at (x,y) of a RenderTexture.
+        private static Color ReadPixelColor(RenderTexture rt, int x, int y)
+        {
+            var prev = RenderTexture.active;
+            var tex = new Texture2D(rt.width, rt.height, TextureFormat.RGBAFloat, false);
+            try
+            {
+                RenderTexture.active = rt;
+                tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+                tex.Apply();
+                return tex.GetPixel(x, y);
             }
             finally
             {
@@ -230,6 +251,88 @@ namespace Magi.Inkling.Tests.PlayMode
             }
 #else
             yield break;
+#endif
+        }
+
+        // 5. ParticleChannelSplat packs heat into _Channels2.z while electricity stays in x/y and w=0.
+        [UnityTest]
+        public IEnumerator ChannelSplat_PacksHeatIntoChannels2Z()
+        {
+#if UNITY_EDITOR
+            const int res = 1;
+            var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Assets/_Project/Scripts/Systems/Rendering/ParticleChannelSplat.compute");
+            Assert.IsNotNull(cs, "ParticleChannelSplat.compute should load");
+            int kernel = cs.FindKernel("ChannelSplat");
+
+            var particles = new iparticle[res * res];
+            particles[0].electricitySeeded = 0.3f;
+            particles[0].electricityGrown = 0.6f;
+
+            var buf = new ComputeBuffer(res * res, Marshal.SizeOf<iparticle>());
+            var heat = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf) { enableRandomWrite = true };
+            heat.Create();
+
+            RenderTexture MakeCh()
+            {
+                var rt = new RenderTexture(res, res, 0, RenderTextureFormat.ARGBFloat) { enableRandomWrite = true };
+                rt.Create();
+                return rt;
+            }
+            var ch0 = MakeCh();
+            var ch1 = MakeCh();
+            var ch2 = MakeCh();
+            try
+            {
+                buf.SetData(particles);
+                FillRT(heat, new Color(0.5f, 0f, 0f, 0f)); // seed heat = 0.5 everywhere (res 1)
+
+                cs.SetInt("_Resolution", res);
+                cs.SetBuffer(kernel, "_ParticlesRead", buf);
+                cs.SetTexture(kernel, "_HeatRead", heat);
+                cs.SetTexture(kernel, "_Channels0", ch0);
+                cs.SetTexture(kernel, "_Channels1", ch1);
+                cs.SetTexture(kernel, "_Channels2", ch2);
+                cs.Dispatch(kernel, 1, 1, 1);
+                yield return null;
+
+                Color c2 = ReadPixelColor(ch2, 0, 0);
+                Assert.That(c2.r, Is.EqualTo(0.3f).Within(2e-2f), "Channels2.x should carry electricitySeeded");
+                Assert.That(c2.g, Is.EqualTo(0.6f).Within(2e-2f), "Channels2.y should carry electricityGrown");
+                Assert.That(c2.b, Is.EqualTo(0.5f).Within(2e-2f), "Channels2.z should carry heat");
+                Assert.That(c2.a, Is.EqualTo(0f).Within(1e-3f), "Channels2.w is reserved and must stay 0");
+            }
+            finally
+            {
+                buf.Release();
+                heat.Release();
+                ch0.Release();
+                ch1.Release();
+                ch2.Release();
+                Object.DestroyImmediate(heat);
+                Object.DestroyImmediate(ch0);
+                Object.DestroyImmediate(ch1);
+                Object.DestroyImmediate(ch2);
+            }
+#else
+            yield break;
+#endif
+        }
+
+        // 6. The gradient shader exposes a Heat debug mode (source-level assertion; a full rendered
+        // shader test is brittle, so verify the keyword/enum exist and compile clean via the Editor).
+        [Test]
+        public void GradientShader_HasHeatDebugMode()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Scripts/Systems/Rendering/InkGradientRenderer.shader";
+            string src = System.IO.File.ReadAllText(path);
+            StringAssert.Contains("_DEBUGMODE_HEAT", src,
+                "Heat debug keyword must be in the _DebugMode multi_compile list");
+            StringAssert.Contains("PlantBoth, Heat", src,
+                "Heat must be the last entry in the _DebugMode KeywordEnum");
+#else
+            Assert.Ignore("Editor-only source assertion");
 #endif
         }
     }

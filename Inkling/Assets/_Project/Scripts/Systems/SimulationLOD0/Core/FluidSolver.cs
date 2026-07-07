@@ -699,10 +699,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 && ctx.UseParticleSimulation
                 && ctx.Resolution <= ctx.MaxParticleSimResolution;
             if (canRenderParticleChannels && opQueue.ChannelSplatReady && ctx.ParticlesBuffer != null
-                && ctx.ChannelRT0 != null && ctx.ChannelRT1 != null && ctx.ChannelRT2 != null)
+                && ctx.ChannelRT0 != null && ctx.ChannelRT1 != null && ctx.ChannelRT2 != null
+                && ctx.Heat != null)
             {
                 ctx.ParticleChannelSplatCompute.SetInt("_Resolution", ctx.Resolution);
                 ctx.ParticleChannelSplatCompute.SetBuffer(opQueue.KernelChannelSplat, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
+                // Heat scalar layer packed into _Channels2.z for debug viz (CP2). CP1 always allocates
+                // ctx.Heat, so it's normally present — but the kernel unconditionally reads _HeatRead,
+                // so require ctx.Heat in the guard above and bind it here to avoid an unbound SRV.
+                ctx.ParticleChannelSplatCompute.SetTexture(opQueue.KernelChannelSplat, "_HeatRead", ctx.Heat.Read);
                 ctx.ParticleChannelSplatCompute.SetTexture(opQueue.KernelChannelSplat, "_Channels0", ctx.ChannelRT0);
                 ctx.ParticleChannelSplatCompute.SetTexture(opQueue.KernelChannelSplat, "_Channels1", ctx.ChannelRT1);
                 ctx.ParticleChannelSplatCompute.SetTexture(opQueue.KernelChannelSplat, "_Channels2", ctx.ChannelRT2);

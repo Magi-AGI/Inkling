@@ -32,7 +32,7 @@ Shader "Inkling/InkGradientRenderer"
 
         [Header(Debug)]
         [Toggle] _ShowChannels ("Show Raw Channels", Float) = 0
-        [KeywordEnum(Combined, Fire, Water, Metal, Electric, PlantSeeded, PlantGrown, PlantBoth)] _DebugMode ("Debug Mode", Float) = 0
+        [KeywordEnum(Combined, Fire, Water, Metal, Electric, PlantSeeded, PlantGrown, PlantBoth, Heat)] _DebugMode ("Debug Mode", Float) = 0
     }
 
     SubShader
@@ -62,7 +62,7 @@ Shader "Inkling/InkGradientRenderer"
             #pragma multi_compile_instancing
             #pragma shader_feature _SHOWCHANNELS_ON
             #pragma multi_compile _ _PARTICLEBUFFER_ON
-            #pragma multi_compile _DEBUGMODE_COMBINED _DEBUGMODE_FIRE _DEBUGMODE_WATER _DEBUGMODE_METAL _DEBUGMODE_ELECTRIC _DEBUGMODE_PLANTSEEDED _DEBUGMODE_PLANTGROWN _DEBUGMODE_PLANTBOTH
+            #pragma multi_compile _DEBUGMODE_COMBINED _DEBUGMODE_FIRE _DEBUGMODE_WATER _DEBUGMODE_METAL _DEBUGMODE_ELECTRIC _DEBUGMODE_PLANTSEEDED _DEBUGMODE_PLANTGROWN _DEBUGMODE_PLANTBOTH _DEBUGMODE_HEAT
 
             #include "UnityCG.cginc"
 
@@ -73,7 +73,7 @@ Shader "Inkling/InkGradientRenderer"
             // (28 bytes in C# vs 56 bytes expected by the shader).
             //   _Channels0: fire, water, plantSeeded, plantGrown
             //   _Channels1: steam, glitter, blackBody, ice
-            //   _Channels2: electricitySeeded, electricityGrown, 0, 0
+            //   _Channels2: electricitySeeded, electricityGrown, heat, reserved
             sampler2D _Channels0;
             sampler2D _Channels1;
             sampler2D _Channels2;
@@ -180,7 +180,7 @@ Shader "Inkling/InkGradientRenderer"
                 // for hardware-filtered minification of sim-resolution data.
                 float4 ch0 = tex2D(_Channels0, input.uv); // fire, water, plantSeeded, plantGrown
                 float4 ch1 = tex2D(_Channels1, input.uv); // steam, glitter, blackBody, ice
-                float4 ch2 = tex2D(_Channels2, input.uv); // electricitySeeded, electricityGrown, 0, 0
+                float4 ch2 = tex2D(_Channels2, input.uv); // electricitySeeded, electricityGrown, heat, reserved
 
                 #ifdef _SHOWCHANNELS_ON
                     return float4(ch0.r, ch0.g, ch1.a, 1.0); // fire, water, ice
@@ -194,6 +194,12 @@ Shader "Inkling/InkGradientRenderer"
                     return float4(ch0.a, ch0.a, ch0.a, 1.0);        // grayscale plantGrown
                 #elif _DEBUGMODE_PLANTBOTH
                     return float4(ch0.b, ch0.a, 0.0, 1.0);          // seeded=red, grown=green
+                #elif _DEBUGMODE_HEAT
+                    // Heat debug (ch2.b): black -> orange -> white "hot metal" ramp.
+                    // Heat is a system-only scalar layer; this is a diagnostic view, not gameplay.
+                    float h = saturate(ch2.b);
+                    float3 hot = float3(saturate(h * 1.5), saturate(h * 1.5 - 0.4), saturate(h * 2.0 - 1.4));
+                    return float4(hot, 1.0);
                 #endif
 
                 // Per-channel gradient lookups, weighted by channel intensity.

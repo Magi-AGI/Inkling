@@ -14,10 +14,14 @@
 
 StructuredBuffer<iparticle> _ParticlesRead;
 
+// Heat is a SEPARATE scalar simulation layer (ctx.Heat ping-pong RT), not an iparticle field.
+// It is sampled here purely to pack into _Channels2.z for debug visualization (CP2). Read-only.
+Texture2D<float> _HeatRead;
+
 // Channel packing:
 //   _Channels0: fire, water, plantSeeded, plantGrown
 //   _Channels1: steam, glitter, blackBody, ice
-//   _Channels2: electricitySeeded, electricityGrown, 0, 0
+//   _Channels2: electricitySeeded, electricityGrown, heat, reserved
 RWTexture2D<float4> _Channels0;
 RWTexture2D<float4> _Channels1;
 RWTexture2D<float4> _Channels2;
@@ -33,7 +37,9 @@ void ChannelSplat(uint3 id : SV_DispatchThreadID)
     uint idx = id.y * (uint)_Resolution + id.x;
     iparticle p = _ParticlesRead[idx];
 
+    float heat = _HeatRead[int2(id.xy)];
+
     _Channels0[int2(id.xy)] = float4((float)p.fire, (float)p.water, (float)p.plantSeeded, (float)p.plantGrown);
     _Channels1[int2(id.xy)] = float4((float)p.steam, (float)p.glitter, (float)p.blackBody, (float)p.ice);
-    _Channels2[int2(id.xy)] = float4((float)p.electricitySeeded, (float)p.electricityGrown, 0, 0);
+    _Channels2[int2(id.xy)] = float4((float)p.electricitySeeded, (float)p.electricityGrown, heat, 0);
 }
