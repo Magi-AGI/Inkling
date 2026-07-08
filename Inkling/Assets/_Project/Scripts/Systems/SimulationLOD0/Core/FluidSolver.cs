@@ -599,7 +599,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 var tc = ctx.ThermalInteractionsCompute;
                 int k = ctx.KernelThermalInteractions;
 
-                float condenseT = Mathf.Max(0f, ctx.CondenseThreshold);
+                // Sanitize the thermal ladder: freeze <= condense <= melt <= boil.
+                float freezeT = Mathf.Max(0f, ctx.FreezeThreshold);
+                float condenseT = Mathf.Max(freezeT, ctx.CondenseThreshold);
                 float meltT = Mathf.Max(condenseT, ctx.MeltThreshold);
                 float boilT = Mathf.Max(meltT, ctx.BoilThreshold);
                 float ambient = ctx.AmbientTemperature;
@@ -608,12 +610,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 tc.SetInt("_Resolution", ctx.Resolution);
                 tc.SetFloat("_FrameDeltaTime", ctx.FrameDeltaTime);
                 tc.SetInt("_EnableThermalInteractions", 1);
+                tc.SetFloat("_FreezeThreshold", freezeT);
                 tc.SetFloat("_CondenseThreshold", condenseT);
                 tc.SetFloat("_MeltThreshold", meltT);
                 tc.SetFloat("_BoilThreshold", boilT);
                 tc.SetFloat("_MeltRate", Mathf.Max(0f, ctx.MeltRate));
                 tc.SetFloat("_BoilRate", Mathf.Max(0f, ctx.BoilRate));
                 tc.SetFloat("_CondenseRate", Mathf.Max(0f, ctx.CondenseRate));
+                tc.SetFloat("_FreezeRate", Mathf.Max(0f, ctx.FreezeRate));
                 tc.SetFloat("_MeltHeatCost", Mathf.Max(0f, ctx.MeltHeatCost));
                 tc.SetFloat("_BoilHeatCost", Mathf.Max(0f, ctx.BoilHeatCost));
                 tc.SetFloat("_CondenseHeatRelease", Mathf.Max(0f, ctx.CondenseHeatRelease));

@@ -155,10 +155,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         [Header("Thermal Interactions (CP5: heat-driven phase changes, opt-in)")]
         [Tooltip("When true, heat drives LOCAL phase changes: ice->water (melt), water->steam (boil), " +
-                 "steam->water (condense). Default OFF — first pass that alters ink state, so baseline " +
-                 "is unchanged until enabled. Local-only conversions (no neighbor sampling) are conservation-safe.")]
+                 "steam->water (condense), water->ice (freeze). Default OFF — first pass that alters ink " +
+                 "state, so baseline is unchanged until enabled. Local-only conversions (no neighbor " +
+                 "sampling) are conservation-safe.")]
         [SerializeField] private bool enableThermalInteractions = false;
-        [Tooltip("Heat below which steam condenses to water. Sanitized to <= meltThreshold.")]
+        [Tooltip("Heat below which water freezes to ice. Sanitized to <= condenseThreshold.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float freezeThreshold = 0.2f;
+        [Tooltip("Heat below which steam condenses to water. Sanitized to freeze <= this <= melt.")]
         [Range(0f, 1f)]
         [SerializeField] private float condenseThreshold = 0.2f;
         [Tooltip("Heat above which ice melts to water. Sanitized to condense <= this <= boil.")]
@@ -174,6 +178,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float boilRate = 1f;
         [Min(0f)]
         [SerializeField] private float condenseRate = 1f;
+        [Tooltip("Fraction of local water frozen to ice per second when below freezeThreshold.")]
+        [Min(0f)]
+        [SerializeField] private float freezeRate = 1f;
         [Tooltip("Latent heat consumed per unit of ice melted / water boiled.")]
         [Min(0f)]
         [SerializeField] private float meltHeatCost = 0.5f;
@@ -442,12 +449,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.MaxHeat = maxHeat;
 
             ctx.EnableThermalInteractions = enableThermalInteractions;
+            ctx.FreezeThreshold = freezeThreshold;
             ctx.CondenseThreshold = condenseThreshold;
             ctx.MeltThreshold = meltThreshold;
             ctx.BoilThreshold = boilThreshold;
             ctx.MeltRate = meltRate;
             ctx.BoilRate = boilRate;
             ctx.CondenseRate = condenseRate;
+            ctx.FreezeRate = freezeRate;
             ctx.MeltHeatCost = meltHeatCost;
             ctx.BoilHeatCost = boilHeatCost;
             ctx.CondenseHeatRelease = condenseHeatRelease;

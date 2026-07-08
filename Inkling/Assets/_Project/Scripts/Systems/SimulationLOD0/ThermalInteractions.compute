@@ -30,15 +30,17 @@ int _Resolution;
 float _FrameDeltaTime;
 int _EnableThermalInteractions;
 
-// Thresholds (sanitized C#-side to condense <= melt <= boil).
+// Thresholds (sanitized C#-side to freeze <= condense <= melt <= boil).
 float _MeltThreshold;
 float _BoilThreshold;
 float _CondenseThreshold;
+float _FreezeThreshold;
 
 // Per-second conversion rates.
 float _MeltRate;
 float _BoilRate;
 float _CondenseRate;
+float _FreezeRate;
 
 // Latent heat per unit converted (consumed on melt/boil) and released on condense (0 in CP5).
 float _MeltHeatCost;
@@ -124,14 +126,27 @@ void ThermalInteractions(uint3 id : SV_DispatchThreadID)
         heat = min(_MaxHeat, heat + condense * _CondenseHeatRelease);
     }
 
-    // 2. Melt (Ice->Water) — excess heat above the melt threshold from the RUNNING heat.
+    // 2. Freeze (Water->Ice) — gated on the RUNNING heat, consuming the RUNNING water, so cold steam
+    //    can cascade steam -> water -> ice in one dispatch. Purely local (no neighbor reads), mass-paired
+    //    (water-- => ice++), and bounded by available water and freezeRate*dt. CP7c: freezing neither
+    //    consumes nor releases heat, which keeps the cold band free of hot/cold feedback. Because
+    //    freeze <= condense <= melt <= boil (sanitized C#-side) and freezing does not warm the cell,
+    //    frozen ice cannot melt again later in this same dispatch.
+    if (heat < _FreezeThreshold)
+    {
+        float freeze = min(water, water * _FreezeRate * dt);
+        water -= freeze;
+        ice += freeze;
+    }
+
+    // 3. Melt (Ice->Water) — excess heat above the melt threshold from the RUNNING heat.
     float excessMelt = max(0.0, heat - _MeltThreshold);
     float melt = min(ice, min(ice * _MeltRate * dt, excessMelt / max(_MeltHeatCost, EPS)));
     ice -= melt;
     water += melt;
     heat -= melt * _MeltHeatCost;
 
-    // 3. Boil (Water->Steam) — excess RE-DERIVED against the boil threshold AFTER melt drawdown.
+    // 4. Boil (Water->Steam) — excess RE-DERIVED against the boil threshold AFTER melt drawdown.
     //    `water` includes water melted this pass (cascade allowed, bounded by the boil heat budget).
     float excessBoil = max(0.0, heat - _BoilThreshold);
     float boil = min(water, min(water * _BoilRate * dt, excessBoil / max(_BoilHeatCost, EPS)));

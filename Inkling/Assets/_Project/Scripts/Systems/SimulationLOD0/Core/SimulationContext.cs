@@ -130,12 +130,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // Thermal interactions (CP5): heat-driven LOCAL phase changes. Default OFF (opt-in) —
         // this is the first pass that alters ink state, so baseline stays unchanged until enabled.
         public bool EnableThermalInteractions = false;
+        // Thermal ladder: freeze <= condense <= melt <= boil (sanitized before upload).
+        public float FreezeThreshold = 0.2f;
         public float CondenseThreshold = 0.2f;
         public float MeltThreshold = 0.4f;
         public float BoilThreshold = 0.7f;
         public float MeltRate = 1f;
         public float BoilRate = 1f;
         public float CondenseRate = 1f;
+        public float FreezeRate = 1f;
         public float MeltHeatCost = 0.5f;
         public float BoilHeatCost = 0.5f;
         public float CondenseHeatRelease = 0f;

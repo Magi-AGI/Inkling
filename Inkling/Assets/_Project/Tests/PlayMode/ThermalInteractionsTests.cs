@@ -23,8 +23,8 @@ namespace Magi.Inkling.Tests.PlayMode
         {
             public int enable = 1;
             public float dt = 1f;
-            public float condenseT = 0.2f, meltT = 0.4f, boilT = 0.7f;
-            public float meltRate = 1f, boilRate = 1f, condenseRate = 1f;
+            public float freezeT = 0.2f, condenseT = 0.2f, meltT = 0.4f, boilT = 0.7f;
+            public float meltRate = 1f, boilRate = 1f, condenseRate = 1f, freezeRate = 1f;
             public float meltCost = 0.5f, boilCost = 0.5f, condenseRelease = 0f;
             public float ambient = 0f, maxHeat = 1f;
             // CP7b fuel-like fire. Sources default OFF so all pre-CP7b phase tests are unaffected.
@@ -88,12 +88,14 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetInt("_Resolution", res);
                 cs.SetFloat("_FrameDeltaTime", tp.dt);
                 cs.SetInt("_EnableThermalInteractions", tp.enable);
+                cs.SetFloat("_FreezeThreshold", tp.freezeT);
                 cs.SetFloat("_CondenseThreshold", tp.condenseT);
                 cs.SetFloat("_MeltThreshold", tp.meltT);
                 cs.SetFloat("_BoilThreshold", tp.boilT);
                 cs.SetFloat("_MeltRate", tp.meltRate);
                 cs.SetFloat("_BoilRate", tp.boilRate);
                 cs.SetFloat("_CondenseRate", tp.condenseRate);
+                cs.SetFloat("_FreezeRate", tp.freezeRate);
                 cs.SetFloat("_MeltHeatCost", tp.meltCost);
                 cs.SetFloat("_BoilHeatCost", tp.boilCost);
                 cs.SetFloat("_CondenseHeatRelease", tp.condenseRelease);
@@ -224,8 +226,10 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Condense_ColdSteamBecomesWater_WarmDoesNot()
         {
 #if UNITY_EDITOR
+            // freezeRate=0 isolates condensation: at heat 0.1 the condensed water would otherwise
+            // freeze to ice in the same pass (CP7c). Freezing is covered by its own tests below.
             var cold = new iparticle[1]; cold[0].steam = 1f;
-            var outCold = Run(cold, new[] { 0.1f }, 1, new TP(), out _);   // below condense(0.2)
+            var outCold = Run(cold, new[] { 0.1f }, 1, new TP { freezeRate = 0f }, out _);   // below condense(0.2)
             yield return null;
             Assert.That(outCold[0].water, Is.GreaterThan(0f), "Cold steam condenses to water");
             Assert.That(outCold[0].steam, Is.LessThan(1f), "Steam consumed");
@@ -255,6 +259,8 @@ namespace Magi.Inkling.Tests.PlayMode
             Assert.That(outp[0].steam, Is.EqualTo(1f).Within(4e-2f),
                 "Newly-boiled steam must remain steam (condensation ran first on steam0=0).");
             Assert.That(outp[0].water, Is.EqualTo(0f).Within(4e-2f), "All water boiled away");
+            Assert.That(outp[0].ice, Is.EqualTo(0f).Within(1e-3f),
+                "Newly-boiled steam must not condense-then-freeze in the same pass either (CP7c).");
             Assert.That(heatOut[0], Is.LessThan(0.5f),
                 "Sanity: final heat is below condenseThreshold, yet no condensation occurred.");
 #else
@@ -466,6 +472,89 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
+        // ── CP7c: Water -> Ice freezing + cold steam cascade ────────────────────────────────
+
+        // 18. Cold water freezes to ice; ice+water conserved; heat unchanged (no freeze cost/release).
+        [UnityTest]
+        public IEnumerator Freeze_WaterBelowThreshold_BecomesIce()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].water = 1f;
+            var outp = Run(p, new[] { 0.1f }, 1, new TP(), out float[] heatOut);   // below freeze(0.2)
+            yield return null;
+
+            Assert.That(outp[0].ice, Is.EqualTo(1f).Within(3e-2f), "Cold water freezes to ice");
+            Assert.That(outp[0].water, Is.EqualTo(0f).Within(3e-2f), "Water consumed by freezing");
+            Assert.That(outp[0].steam, Is.EqualTo(0f).Within(1e-3f), "No steam involved");
+            Assert.That(outp[0].water + outp[0].ice, Is.EqualTo(1f).Within(3e-2f), "water+ice conserved");
+            Assert.That(heatOut[0], Is.EqualTo(0.1f).Within(2e-2f), "Freezing neither consumes nor releases heat in CP7c");
+#else
+            yield break;
+#endif
+        }
+
+        // 19. Freezing is rate-limited: only freezeRate*dt of the water converts.
+        [UnityTest]
+        public IEnumerator Freeze_RateLimited_LeavesSomeWater()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].water = 1f;
+            var outp = Run(p, new[] { 0.1f }, 1, new TP { freezeRate = 0.25f }, out _);
+            yield return null;
+
+            Assert.That(outp[0].ice, Is.EqualTo(0.25f).Within(3e-2f), "Only rate*dt of water freezes");
+            Assert.That(outp[0].water, Is.EqualTo(0.75f).Within(3e-2f), "Remaining water stays liquid");
+#else
+            yield break;
+#endif
+        }
+
+        // 20. Cold cascade: steam condenses to water, and that RUNNING water freezes in the same
+        // dispatch (proves freeze consumes post-condensation water, not water0).
+        [UnityTest]
+        public IEnumerator Freeze_SteamCondensesThenFreezes_WhenCold()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].steam = 1f;
+            var outp = Run(p, new[] { 0.1f }, 1, new TP { condenseRate = 1f, freezeRate = 1f }, out _);
+            yield return null;
+
+            Assert.That(outp[0].steam, Is.EqualTo(0f).Within(3e-2f), "Steam fully condensed");
+            Assert.That(outp[0].water, Is.EqualTo(0f).Within(3e-2f), "Condensed water then froze");
+            Assert.That(outp[0].ice, Is.EqualTo(1f).Within(5e-2f), "steam -> water -> ice cascade in one dispatch");
+            Assert.That(outp[0].steam + outp[0].water + outp[0].ice, Is.EqualTo(1f).Within(5e-2f),
+                "Total steam+water+ice mass conserved through the cold cascade");
+#else
+            yield break;
+#endif
+        }
+
+        // 21. Local-only: warm local water does not freeze just because a NEIGHBOR cell is cold.
+        [UnityTest]
+        public IEnumerator Freeze_LocalOnly_NeighborColdDoesNotFreezeWarmLocalWater()
+        {
+#if UNITY_EDITOR
+            const int res = 3;
+            int C = 1 * res + 1;   // center: warm water
+            int N = 1 * res + 0;   // (0,1) cold neighbor
+
+            var p = new iparticle[res * res];
+            p[C].water = 1f;
+            var heat = new float[res * res];
+            heat[C] = 0.5f;   // warm: above freeze(0.2), below boil(0.7)
+            heat[N] = 0f;     // neighbor is cold
+
+            var outp = Run(p, heat, res, new TP(), out _);
+            yield return null;
+
+            Assert.That(outp[C].water, Is.EqualTo(1f).Within(3e-2f), "Warm local water must not freeze from neighbor cold");
+            Assert.That(outp[C].ice, Is.EqualTo(0f).Within(1e-3f), "No ice created without LOCAL cold");
+            Assert.That(outp[C].steam, Is.EqualTo(0f).Within(1e-3f), "No boil below the boil threshold");
+#else
+            yield break;
+#endif
+        }
+
         // 17. Robustness: an upstream numerical underflow (slightly negative fire) must not emit
         // negative heat, must not lower heat, and must clamp the output fire to 0.
         [UnityTest]
@@ -497,6 +586,28 @@ namespace Magi.Inkling.Tests.PlayMode
             string src = System.IO.File.ReadAllText(path);
             StringAssert.Contains("!ctx.EnableThermalInteractions", src,
                 "AddHeatSources dispatch must be guarded by !ctx.EnableThermalInteractions to avoid double-sourcing heat");
+#else
+            Assert.Ignore("Editor-only source assertion");
+#endif
+        }
+
+        // 22. Runtime wiring guard (CP7c): direct shader tests can pass while the runtime path never
+        // uploads the freeze uniforms, so freezing would silently no-op in play. Pin the upload AND the
+        // ordered freeze <= condense <= melt <= boil sanitization.
+        [Test]
+        public void FluidSolver_UploadsFreezeUniforms_ForRuntimeThermalInteractions()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Scripts/Systems/SimulationLOD0/Core/FluidSolver.cs";
+            string src = System.IO.File.ReadAllText(path);
+
+            StringAssert.Contains("\"_FreezeThreshold\"", src, "FluidSolver must upload _FreezeThreshold");
+            StringAssert.Contains("\"_FreezeRate\"", src, "FluidSolver must upload _FreezeRate");
+            StringAssert.Contains("Mathf.Max(0f, ctx.FreezeThreshold)", src,
+                "freezeT must be the floor of the sanitized thermal ladder");
+            StringAssert.Contains("Mathf.Max(freezeT, ctx.CondenseThreshold)", src,
+                "condenseT must be sanitized to >= freezeT (freeze <= condense <= melt <= boil)");
+            StringAssert.Contains("Mathf.Max(0f, ctx.FreezeRate)", src, "freezeRate must be clamped non-negative");
 #else
             Assert.Ignore("Editor-only source assertion");
 #endif
