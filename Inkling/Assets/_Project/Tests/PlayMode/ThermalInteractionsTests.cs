@@ -27,6 +27,10 @@ namespace Magi.Inkling.Tests.PlayMode
             public float meltRate = 1f, boilRate = 1f, condenseRate = 1f;
             public float meltCost = 0.5f, boilCost = 0.5f, condenseRelease = 0f;
             public float ambient = 0f, maxHeat = 1f;
+            // CP7b fuel-like fire. Sources default OFF so all pre-CP7b phase tests are unaffected.
+            public int enableHeatSources = 0;
+            public float fireEmissionRate = 1f;
+            public float fireFuelCost = 0f;
         }
 
         private static RenderTexture MakeHeatRT(int res, float[] seed)
@@ -95,6 +99,9 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetFloat("_CondenseHeatRelease", tp.condenseRelease);
                 cs.SetFloat("_AmbientTemperature", tp.ambient);
                 cs.SetFloat("_MaxHeat", tp.maxHeat);
+                cs.SetInt("_EnableHeatSources", tp.enableHeatSources);
+                cs.SetFloat("_FireHeatEmissionRate", tp.fireEmissionRate);
+                cs.SetFloat("_FireHeatFuelCost", tp.fireFuelCost);
 
                 cs.SetBuffer(kernel, "_ParticlesRead", readBuf);
                 cs.SetBuffer(kernel, "_ParticlesWrite", writeBuf);
@@ -365,6 +372,133 @@ namespace Magi.Inkling.Tests.PlayMode
             Assert.That(outp[0].water, Is.GreaterThanOrEqualTo(0f), "Water never negative");
 #else
             yield break;
+#endif
+        }
+
+        // ── CP7b: fuel-like fire (emission step inside ThermalInteractions) ─────────────────
+        // All fuel tests keep ice/water/steam at zero so only fire + heat are observed.
+
+        // 11. fuelCost = 0 => fire emits heat but is NOT consumed (add-only, pre-CP7b semantics).
+        [UnityTest]
+        public IEnumerator Fuel_ZeroCost_EmitsHeat_FireUnchanged()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].fire = 0.5f;
+            var tp = new TP { enableHeatSources = 1, fireEmissionRate = 1f, fireFuelCost = 0f };
+            var outp = Run(p, new[] { 0f }, 1, tp, out float[] heatOut);
+            yield return null;
+
+            Assert.That(heatOut[0], Is.EqualTo(0.5f).Within(2e-2f), "fire*rate*dt = 0.5 heat added");
+            Assert.That(outp[0].fire, Is.EqualTo(0.5f).Within(2e-2f), "fuelCost=0 must not consume fire");
+#else
+            yield break;
+#endif
+        }
+
+        // 12. Headroom-limited burn: heat clamps at _MaxHeat and fire is consumed only for the heat
+        // ACTUALLY added (0.2 * cost 2 = 0.4), never for the raw emission.
+        [UnityTest]
+        public IEnumerator Fuel_HeadroomLimited_ConsumesOnlyForHeatAdded()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].fire = 1f;
+            var tp = new TP { enableHeatSources = 1, fireEmissionRate = 100f, fireFuelCost = 2f, maxHeat = 1f };
+            var outp = Run(p, new[] { 0.8f }, 1, tp, out float[] heatOut);
+            yield return null;
+
+            Assert.That(heatOut[0], Is.EqualTo(1f).Within(2e-2f), "Heat fills the 0.2 headroom to _MaxHeat");
+            Assert.That(outp[0].fire, Is.EqualTo(0.6f).Within(3e-2f),
+                "Only 0.2 heat was added, so only 0.2*2 = 0.4 fire is burned (no energy mint)");
+#else
+            yield break;
+#endif
+        }
+
+        // 13. Fuel-limited burn: heat added is capped by fire/fuelCost; fire hits 0, never negative.
+        [UnityTest]
+        public IEnumerator Fuel_FuelLimited_CapsHeat_FireNotNegative()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].fire = 0.1f;
+            var tp = new TP { enableHeatSources = 1, fireEmissionRate = 100f, fireFuelCost = 5f, maxHeat = 3f };
+            var outp = Run(p, new[] { 0f }, 1, tp, out float[] heatOut);
+            yield return null;
+
+            Assert.That(heatOut[0], Is.EqualTo(0.02f).Within(5e-3f), "Heat capped by fire/fuelCost = 0.1/5 = 0.02");
+            Assert.That(outp[0].fire, Is.EqualTo(0f).Within(5e-3f), "Fire fully burned");
+            Assert.That(outp[0].fire, Is.GreaterThanOrEqualTo(0f), "Fire never negative");
+#else
+            yield break;
+#endif
+        }
+
+        // 14. At _MaxHeat: zero headroom => no heat added AND no fire consumed.
+        [UnityTest]
+        public IEnumerator Fuel_AtMaxHeat_NoHeatAdded_NoFireConsumed()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].fire = 1f;
+            var tp = new TP { enableHeatSources = 1, fireEmissionRate = 10f, fireFuelCost = 2f, maxHeat = 1f };
+            var outp = Run(p, new[] { 1f }, 1, tp, out float[] heatOut);
+            yield return null;
+
+            Assert.That(heatOut[0], Is.EqualTo(1f).Within(2e-2f), "Heat stays at _MaxHeat");
+            Assert.That(outp[0].fire, Is.EqualTo(1f).Within(2e-2f), "No headroom => no fuel burned");
+#else
+            yield break;
+#endif
+        }
+
+        // 15. Heat sources disabled => no emission, no fuel burn, even with fire and fuelCost set.
+        [UnityTest]
+        public IEnumerator Fuel_SourcesDisabled_NoEmission_NoBurn()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].fire = 1f;
+            var tp = new TP { enableHeatSources = 0, fireEmissionRate = 10f, fireFuelCost = 2f };
+            var outp = Run(p, new[] { 0.3f }, 1, tp, out float[] heatOut);
+            yield return null;
+
+            Assert.That(heatOut[0], Is.EqualTo(0.3f).Within(2e-2f), "No heat added when sources disabled");
+            Assert.That(outp[0].fire, Is.EqualTo(1f).Within(2e-2f), "No fire consumed when sources disabled");
+#else
+            yield break;
+#endif
+        }
+
+        // 17. Robustness: an upstream numerical underflow (slightly negative fire) must not emit
+        // negative heat, must not lower heat, and must clamp the output fire to 0.
+        [UnityTest]
+        public IEnumerator Fuel_NegativeFireUnderflow_NoNegativeEmission_ClampsToZero()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].fire = -0.01f;
+            var tp = new TP { enableHeatSources = 1, fireEmissionRate = 100f, fireFuelCost = 2f, maxHeat = 1f };
+            var outp = Run(p, new[] { 0.25f }, 1, tp, out float[] heatOut);
+            yield return null;
+
+            Assert.That(heatOut[0], Is.EqualTo(0.25f).Within(2e-2f),
+                "Negative fire must not emit negative heat or lower the heat field");
+            Assert.That(outp[0].fire, Is.GreaterThanOrEqualTo(0f), "Fire must never be negative on output");
+            Assert.That(outp[0].fire, Is.EqualTo(0f).Within(1e-3f), "Underflowed fire is clamped to 0");
+#else
+            yield break;
+#endif
+        }
+
+        // 16. Double-source guard: FluidSolver must not dispatch the InkTools AddHeatSources pass when
+        // ThermalInteractions is enabled (which now owns fire->heat emission). Source assertion —
+        // a full FluidSolver.Step() integration test would need a live sim + scene.
+        [Test]
+        public void FluidSolver_DoesNotDoubleSourceHeat_WhenThermalEnabled()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Scripts/Systems/SimulationLOD0/Core/FluidSolver.cs";
+            string src = System.IO.File.ReadAllText(path);
+            StringAssert.Contains("!ctx.EnableThermalInteractions", src,
+                "AddHeatSources dispatch must be guarded by !ctx.EnableThermalInteractions to avoid double-sourcing heat");
+#else
+            Assert.Ignore("Editor-only source assertion");
 #endif
         }
     }

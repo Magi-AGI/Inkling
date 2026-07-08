@@ -554,7 +554,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (ctx.Heat != null && ctx.FluidKernelAdvectHeat >= 0 && ctx.Obstacles != null)
             {
                 // Heat sources: fire emits heat (add-only; never writes the particle buffer).
-                if (ctx.EnableHeatSources && ctx.FluidKernelAddHeatSources >= 0
+                // DOUBLE-SOURCE GUARD (CP7b): when thermal interactions are enabled, ThermalInteractions
+                // owns fire->heat emission (with optional fuel burn), so skip this pass entirely.
+                if (ctx.EnableHeatSources && !ctx.EnableThermalInteractions
+                    && ctx.FluidKernelAddHeatSources >= 0
                     && ctx.ParticlesBuffer != null && ctx.ParticlesBuffer[ctx.ParticleReadIndex] != null)
                 {
                     ctx.FluidCompute.SetBuffer(ctx.FluidKernelAddHeatSources, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
@@ -616,6 +619,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 tc.SetFloat("_CondenseHeatRelease", Mathf.Max(0f, ctx.CondenseHeatRelease));
                 tc.SetFloat("_AmbientTemperature", ambient);
                 tc.SetFloat("_MaxHeat", maxHeat);
+
+                // Fuel-like fire (CP7b): this pass owns fire->heat emission while thermal is enabled.
+                // Timing: emitted heat can drive phase changes in THIS dispatch, then advects next step.
+                tc.SetInt("_EnableHeatSources", ctx.EnableHeatSources ? 1 : 0);
+                tc.SetFloat("_FireHeatEmissionRate", Mathf.Max(0f, ctx.FireHeatEmissionRate));
+                tc.SetFloat("_FireHeatFuelCost", Mathf.Max(0f, ctx.FireHeatFuelCost));
 
                 tc.SetBuffer(k, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
                 tc.SetBuffer(k, "_ParticlesWrite", ctx.ParticlesBuffer[ctx.ParticleWriteIndex]);

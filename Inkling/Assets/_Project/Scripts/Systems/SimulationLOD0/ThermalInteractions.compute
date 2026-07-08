@@ -49,6 +49,12 @@ float _CondenseHeatRelease;
 float _AmbientTemperature;
 float _MaxHeat;
 
+// Fuel-like fire (CP7b). When thermal interactions are enabled this pass OWNS fire->heat emission
+// (FluidSolver skips the InkTools AddHeatSources pass), so there is no double-sourcing.
+int _EnableHeatSources;       // 0/1 gate for the emission step below
+float _FireHeatEmissionRate;  // raw heat emitted per unit fire per second
+float _FireHeatFuelCost;      // fire burned per unit heat ACTUALLY added (0 = add-only, no burn)
+
 [numthreads(8, 8, 1)]
 void ThermalInteractions(uint3 id : SV_DispatchThreadID)
 {
@@ -72,6 +78,38 @@ void ThermalInteractions(uint3 id : SV_DispatchThreadID)
     float dt = _FrameDeltaTime;
     const float EPS = 1e-6;
 
+    // 0. Fuel-like fire emission (CP7b). Runs BEFORE the phase changes so the heat fire just
+    //    released can gate/drive them this same dispatch. Energy is never minted: heat is added
+    //    only up to the remaining headroom AND only as much as the local fuel supports, and fire
+    //    is burned in proportion to the heat ACTUALLY added (never the raw emission). With
+    //    _FireHeatFuelCost == 0 this is pure add-only emission and fire is untouched.
+    if (_EnableHeatSources != 0)
+    {
+        // Clamp the fuel source first: an upstream numerical underflow (fire < 0) must never emit
+        // negative heat, drain the heat field, or (via a negative burn term) inflate fire.
+        float fireFuel = max(0.0, p.fire);
+        float rawEmission = fireFuel * _FireHeatEmissionRate * dt;
+        float headroom = max(0.0, _MaxHeat - heat0);
+        float heatAdded;
+
+        if (_FireHeatFuelCost > EPS)
+        {
+            heatAdded = min(rawEmission, min(headroom, fireFuel / _FireHeatFuelCost));
+            p.fire = max(0.0, fireFuel - heatAdded * _FireHeatFuelCost);
+        }
+        else
+        {
+            heatAdded = min(rawEmission, headroom);
+            p.fire = fireFuel;  // no burn, but still clamp an underflowed fire to 0
+        }
+
+        // rawEmission/headroom/fuel-cap are all >= 0, so heatAdded >= 0: heat can never decrease here.
+        heat0 += heatAdded;
+    }
+
+    // Snapshot AFTER emission: condensation gates on this step's post-emission heat (a cell that
+    // fire just warmed must not condense), but still on the ORIGINAL steam, so newly-boiled steam
+    // is never condensed in the same pass (the ckpt-024 hazard fix).
     float ice0 = p.ice, water0 = p.water, steam0 = p.steam;
     float ice = ice0, water = water0, steam = steam0;
     float heat = heat0;

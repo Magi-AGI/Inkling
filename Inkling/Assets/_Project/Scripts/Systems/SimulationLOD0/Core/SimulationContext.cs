@@ -139,6 +139,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float MeltHeatCost = 0.5f;
         public float BoilHeatCost = 0.5f;
         public float CondenseHeatRelease = 0f;
+        // Fuel-like fire (CP7b): fire burned per unit heat actually added. 0 = add-only (no burn).
+        public float FireHeatFuelCost = 0f;
 
         // ── Ink definitions ─────────────────────────────────────────────────
         public InkTypeDef[] InkDefinitions;

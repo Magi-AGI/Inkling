@@ -182,6 +182,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Latent heat released per unit condensed. Kept 0 in CP5 to avoid condense->heat->boil feedback.")]
         [Min(0f)]
         [SerializeField] private float condenseHeatRelease = 0f;
+        [Tooltip("Fuel-like fire (CP7b): fire burned per unit of heat ACTUALLY emitted. 0 = add-only " +
+                 "(fire emits heat forever and only fades via its own dissipation). Only applies while " +
+                 "thermal interactions are enabled — that pass then owns fire->heat emission.")]
+        [Min(0f)]
+        [SerializeField] private float fireHeatFuelCost = 0f;
 
         [Header("Black Body Ink (Fallback)")]
         [SerializeField] private bool enableBlackBodyClearingFallback = false;
@@ -446,6 +451,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.MeltHeatCost = meltHeatCost;
             ctx.BoilHeatCost = boilHeatCost;
             ctx.CondenseHeatRelease = condenseHeatRelease;
+            ctx.FireHeatFuelCost = fireHeatFuelCost;
 
             ctx.EnableBlackBodyClearingFallback = enableBlackBodyClearingFallback;
             ctx.BlackBodyThresholdFallback = blackBodyThresholdFallback;
