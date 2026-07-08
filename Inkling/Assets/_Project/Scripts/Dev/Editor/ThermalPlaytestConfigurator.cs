@@ -24,7 +24,9 @@ namespace Magi.Inkling.Dev.EditorTools
         private const string ThermalGroupGuid  = "bb5975a015651cc47aab80f9ac703167";
         private const string OrganicGroup2Guid = "3892ae7ecffb33f4cad3ec4e410eee4c";
 
-        private const string MenuRoot = "Inkling/Thermal Playtest/";
+        // Nested under the generalized "Inkling/Playtests/" root so future playtests can follow the
+        // same pattern (e.g. "Inkling/Playtests/<Topic>/...").
+        private const string MenuRoot = "Inkling/Playtests/Thermal/";
 
         // ── Menu commands ───────────────────────────────────────────────────
 
@@ -129,8 +131,8 @@ namespace Magi.Inkling.Dev.EditorTools
             // Deliberately Debug.Log (not LogWarning): the message carries warning SEMANTICS via the
             // explicit prefix, but stays a Log so automated Unity_RunCommand smokes don't flag it.
             Debug.Log($"[ThermalPlaytest][TEMPORARY WARNING] Applied '{label}' to '{driver.name}'. The scene is marked " +
-                "dirty but was NOT saved — this is a TEMPORARY playtest config. Revert with 'Inkling/Thermal Playtest/" +
-                "Restore Legacy Baseline' or reload the scene without saving. Do NOT commit Main.unity from this change.");
+                "dirty but was NOT saved — this is a TEMPORARY playtest config. Revert with 'Inkling/Playtests/" +
+                "Thermal/Restore Legacy Baseline' or reload the scene without saving. Do NOT commit Main.unity from this change.");
             LogCurrentConfig();
         }
 
