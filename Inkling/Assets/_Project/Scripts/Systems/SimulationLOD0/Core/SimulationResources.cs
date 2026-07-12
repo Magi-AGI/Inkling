@@ -37,6 +37,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Particle buffers
             AllocateParticleBuffers(ctx);
 
+            // Thermal rule buffers (CP7d): fixed capacity, allocated once. Always created (even when
+            // thermal interactions are off) so the kernel's StructuredBuffer bindings are always valid.
+            ctx.ThermalTransitionBuffer = new ComputeBuffer(
+                ThermalRuleBaker.MaxTransitions, GpuThermalTransition.Stride, ComputeBufferType.Structured);
+            ctx.ThermalSourceBuffer = new ComputeBuffer(
+                ThermalRuleBaker.MaxSources, GpuThermalSource.Stride, ComputeBufferType.Structured);
+
             // Channel textures for particle-authoritative gradient rendering
             ctx.ChannelRT0 = CreateChannelRT(resolution, RenderTextureFormat.ARGBFloat, "Channels0_fire_water_plant");
             ctx.ChannelRT1 = CreateChannelRT(resolution, RenderTextureFormat.ARGBFloat, "Channels1_steam_glitter_bb_ice");
@@ -128,6 +135,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     ctx.ParticlesBuffer[i]?.Release();
                 }
             }
+
+            ctx.ThermalTransitionBuffer?.Release();
+            ctx.ThermalTransitionBuffer = null;
+            ctx.ThermalSourceBuffer?.Release();
+            ctx.ThermalSourceBuffer = null;
 
             if (ctx.DensityStampMaterial != null)
             {

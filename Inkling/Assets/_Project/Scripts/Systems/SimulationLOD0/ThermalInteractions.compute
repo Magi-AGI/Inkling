@@ -1,24 +1,53 @@
 // ThermalInteractions.compute
-// Heat-driven LOCAL phase changes (CP5): Ice->Water (melt), Water->Steam (boil),
-// Steam->Water (condense). Every conversion is per-cell only — a cell's own ice/water/steam
-// driven by its own heat. There is NO neighbor sampling and NO adjacency product, which
-// structurally avoids the minting class that affected the adjacency-based InkInteractions.
+// Heat-driven LOCAL phase changes, fully DATA-DRIVEN (CP7d slice 2).
 //
-// Conservation: each conversion is exactly paired (e.g. ice-- => water++ by the same amount),
-// so ink MASS (ice+water+steam) is conserved per event. Only heat (energy, not mass) is
-// consumed/released, bounded per event by a per-threshold excess of the RUNNING heat value.
+// The rules are no longer hardcoded. FluidSolver bakes every active AffinityGroup's authored
+// thermal data (falling back to the CP7 defaults) into ONE ordered rule set via ThermalRuleBaker,
+// uploads it as two StructuredBuffers, and dispatches this kernel ONCE globally — heat is a single
+// scalar field, so a per-group dispatch would break snapshot/cold/hot phase coherence.
 //
-// Ordering (CP5, condenseHeatRelease == 0): condensation runs FIRST from the pre-reaction
-// snapshot (heat0, steam0) so heat-consuming melt/boil can never trigger same-pass condensation
-// of newly-produced steam. Then melt, then boil (boil re-derives its excess after melt drawdown).
+// Execution model (must match ThermalCpuOracle exactly):
+//     emission -> all COLD transitions in baked order -> all HOT transitions in baked order -> clamp
 //
-// Heat is a separate scalar layer (RHalf): read as an SRV (Texture2D<float>, promotes cleanly)
-// and written via a half-typed UAV to match the RHalf format, mirroring the sim's Heat kernels.
+// Every conversion is per-cell only: a cell's own inks driven by its own heat. There is NO neighbour
+// sampling and NO adjacency product, so a transition can never mint mass — each one is a paired
+// from-- / to++. Only heat (energy, not mass) is consumed/released.
+//
+// The ckpt-024 hazard fix (newly-boiled steam must not condense in the same pass) is now EMERGENT
+// rather than a special case: cold runs before hot, so at cold time nothing has produced steam yet.
+// It is further guaranteed structurally — a hot transition's heat-budget cap (conv <= excess/heatCost)
+// means heat_after >= its own threshold, and the baker's ladder rule keeps every cold threshold <=
+// every hot threshold, so heat can never fall back into the condense band within a pass.
+//
+// Heat is a separate scalar layer (RHalf): read as an SRV (Texture2D<float>, promotes cleanly) and
+// written via a half-typed UAV to match the RHalf format, mirroring the sim's Heat kernels.
 
 #pragma kernel ThermalInteractions
 
 #include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
 #include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+// Must match GpuThermalTransition / GpuThermalSource in ThermalRuleBaker.cs field-for-field.
+// Explicitly padded to 16-byte multiples (32 and 16 bytes) rather than relying on a fragile stride.
+struct GpuThermalTransition
+{
+    int fromField;      // absolute iparticle field index (0..9)
+    int toField;        // absolute iparticle field index (0..9)
+    int regime;         // 0 = Cold, 1 = Hot
+    int pad0;
+    float threshold;
+    float rate;
+    float heatCost;     // HOT: consumed per unit converted; also caps conversion to excess/heatCost
+    float heatRelease;  // COLD: released per unit converted
+};
+
+struct GpuThermalSource
+{
+    int field;                // absolute iparticle field index (0..9)
+    float heatEmissionRate;   // raw heat per unit of this ink per second
+    float fuelCost;           // ink burned per unit of heat ACTUALLY added (0 = add-only)
+    int pad0;
+};
 
 StructuredBuffer<iparticle> _ParticlesRead;
 RWStructuredBuffer<iparticle> _ParticlesWrite;
@@ -26,36 +55,59 @@ RWStructuredBuffer<iparticle> _ParticlesWrite;
 Texture2D<float> _HeatRead;      // scalar heat layer (read-only SRV)
 RWTexture2D<ifloat> _HeatWrite;  // scalar heat layer (UAV; ifloat == half matches RHalf)
 
+StructuredBuffer<GpuThermalTransition> _ThermalTransitions;
+StructuredBuffer<GpuThermalSource> _ThermalSources;
+int _ThermalTransitionCount;
+int _ThermalSourceCount;
+int _ThermalRulesValid;   // 0 => the baked set was rejected; pass through inert (never partially apply)
+
 int _Resolution;
 float _FrameDeltaTime;
 int _EnableThermalInteractions;
-
-// Thresholds (sanitized C#-side to freeze <= condense <= melt <= boil).
-float _MeltThreshold;
-float _BoilThreshold;
-float _CondenseThreshold;
-float _FreezeThreshold;
-
-// Per-second conversion rates.
-float _MeltRate;
-float _BoilRate;
-float _CondenseRate;
-float _FreezeRate;
-
-// Latent heat per unit converted (consumed on melt/boil) and released on condense (0 in CP5).
-float _MeltHeatCost;
-float _BoilHeatCost;
-float _CondenseHeatRelease;
+int _EnableHeatSources;
 
 // Clamp bounds (ambient <= maxHeat, sanitized C#-side).
 float _AmbientTemperature;
 float _MaxHeat;
 
-// Fuel-like fire (CP7b). When thermal interactions are enabled this pass OWNS fire->heat emission
-// (FluidSolver skips the InkTools AddHeatSources pass), so there is no double-sourcing.
-int _EnableHeatSources;       // 0/1 gate for the emission step below
-float _FireHeatEmissionRate;  // raw heat emitted per unit fire per second
-float _FireHeatFuelCost;      // fire burned per unit heat ACTUALLY added (0 = add-only, no burn)
+#define REGIME_COLD 0
+#define REGIME_HOT  1
+
+// Field-index accessors over the 10 ink channels (mirrors InkInteractions.compute).
+float GetInkByIndex(iparticle p, int idx)
+{
+    switch (idx)
+    {
+        case 0: return p.fire;
+        case 1: return p.water;
+        case 2: return p.plantSeeded;
+        case 3: return p.plantGrown;
+        case 4: return p.steam;
+        case 5: return p.glitter;
+        case 6: return p.blackBody;
+        case 7: return p.electricitySeeded;
+        case 8: return p.electricityGrown;
+        case 9: return p.ice;
+        default: return 0;
+    }
+}
+
+void SetInkByIndex(inout iparticle p, int idx, float value)
+{
+    switch (idx)
+    {
+        case 0: p.fire = value; break;
+        case 1: p.water = value; break;
+        case 2: p.plantSeeded = value; break;
+        case 3: p.plantGrown = value; break;
+        case 4: p.steam = value; break;
+        case 5: p.glitter = value; break;
+        case 6: p.blackBody = value; break;
+        case 7: p.electricitySeeded = value; break;
+        case 8: p.electricityGrown = value; break;
+        case 9: p.ice = value; break;
+    }
+}
 
 [numthreads(8, 8, 1)]
 void ThermalInteractions(uint3 id : SV_DispatchThreadID)
@@ -65,98 +117,91 @@ void ThermalInteractions(uint3 id : SV_DispatchThreadID)
 
     uint idx = id.y * (uint)_Resolution + id.x;
 
-    // Copy the FULL particle through; only ice/water/steam are mutated below.
     iparticle p = _ParticlesRead[idx];
-    float heat0 = _HeatRead[int2(id.xy)];
+    float heat = _HeatRead[int2(id.xy)];
 
-    // Disabled: exact pass-through of every field + heat (baseline stays byte-identical).
-    if (_EnableThermalInteractions == 0)
+    // Disabled OR an invalid/rejected rule set => EXACT pass-through of every field + heat.
+    // An invalid set is inert, never partially applied.
+    if (_EnableThermalInteractions == 0 || _ThermalRulesValid == 0)
     {
         _ParticlesWrite[idx] = p;
-        _HeatWrite[int2(id.xy)] = heat0;
+        _HeatWrite[int2(id.xy)] = heat;
         return;
     }
 
     float dt = _FrameDeltaTime;
     const float EPS = 1e-6;
 
-    // 0. Fuel-like fire emission (CP7b). Runs BEFORE the phase changes so the heat fire just
-    //    released can gate/drive them this same dispatch. Energy is never minted: heat is added
-    //    only up to the remaining headroom AND only as much as the local fuel supports, and fire
-    //    is burned in proportion to the heat ACTUALLY added (never the raw emission). With
-    //    _FireHeatFuelCost == 0 this is pure add-only emission and fire is untouched.
+    // 0. Emission. Energy is never minted: heat is added only up to the remaining headroom AND only
+    //    as much as the local fuel supports, and the source is burned in proportion to the heat
+    //    ACTUALLY added (never the raw emission). fuelCost == 0 => add-only, source untouched.
+    //    The source is clamped >= 0 first so an upstream underflow can't emit negative heat or, via
+    //    a negative burn term, inflate the ink.
     if (_EnableHeatSources != 0)
     {
-        // Clamp the fuel source first: an upstream numerical underflow (fire < 0) must never emit
-        // negative heat, drain the heat field, or (via a negative burn term) inflate fire.
-        float fireFuel = max(0.0, p.fire);
-        float rawEmission = fireFuel * _FireHeatEmissionRate * dt;
-        float headroom = max(0.0, _MaxHeat - heat0);
-        float heatAdded;
-
-        if (_FireHeatFuelCost > EPS)
+        for (int s = 0; s < _ThermalSourceCount; s++)
         {
-            heatAdded = min(rawEmission, min(headroom, fireFuel / _FireHeatFuelCost));
-            p.fire = max(0.0, fireFuel - heatAdded * _FireHeatFuelCost);
+            GpuThermalSource src = _ThermalSources[s];
+
+            float fuel = max(0.0, GetInkByIndex(p, src.field));
+            float rawEmission = fuel * src.heatEmissionRate * dt;
+            float headroom = max(0.0, _MaxHeat - heat);
+            float heatAdded;
+
+            if (src.fuelCost > EPS)
+            {
+                heatAdded = min(rawEmission, min(headroom, fuel / src.fuelCost));
+                SetInkByIndex(p, src.field, max(0.0, fuel - heatAdded * src.fuelCost));
+            }
+            else
+            {
+                heatAdded = min(rawEmission, headroom);
+                SetInkByIndex(p, src.field, fuel);   // no burn, but still clamp an underflow to 0
+            }
+
+            // rawEmission/headroom/fuel-cap are all >= 0, so heatAdded >= 0: heat never decreases here.
+            heat += heatAdded;
         }
-        else
-        {
-            heatAdded = min(rawEmission, headroom);
-            p.fire = fireFuel;  // no burn, but still clamp an underflowed fire to 0
-        }
-
-        // rawEmission/headroom/fuel-cap are all >= 0, so heatAdded >= 0: heat can never decrease here.
-        heat0 += heatAdded;
     }
 
-    // Snapshot AFTER emission: condensation gates on this step's post-emission heat (a cell that
-    // fire just warmed must not condense), but still on the ORIGINAL steam, so newly-boiled steam
-    // is never condensed in the same pass (the ckpt-024 hazard fix).
-    float ice0 = p.ice, water0 = p.water, steam0 = p.steam;
-    float ice = ice0, water = water0, steam = steam0;
-    float heat = heat0;
-
-    // 1. Condense FIRST — from the pre-reaction snapshot (heat0, steam0) only, so newly-boiled
-    //    steam this pass is never condensed. CP5: _CondenseHeatRelease == 0 => heat unchanged here.
-    if (heat0 < _CondenseThreshold)
+    // 1. COLD transitions, in baked order. Gated by heat < threshold, rate-limited, may RELEASE heat.
+    //    Cold runs before hot, so nothing has produced steam yet => the "condense from steam0" hazard
+    //    fix falls out of the ordering.
+    for (int c = 0; c < _ThermalTransitionCount; c++)
     {
-        float condense = min(steam0, steam0 * _CondenseRate * dt);
-        steam -= condense;
-        water += condense;
-        heat = min(_MaxHeat, heat + condense * _CondenseHeatRelease);
+        GpuThermalTransition t = _ThermalTransitions[c];
+        if (t.regime != REGIME_COLD) continue;
+        if (heat >= t.threshold) continue;
+
+        // Clamp the source FIRST (as the emission path does). An upstream underflow (from < 0) would
+        // otherwise yield conv < 0, which drains the DESTINATION ink and inverts the heat release.
+        float from = max(0.0, GetInkByIndex(p, t.fromField));
+        float conv = min(from, from * t.rate * dt);
+
+        SetInkByIndex(p, t.fromField, max(0.0, from - conv));
+        SetInkByIndex(p, t.toField, max(0.0, GetInkByIndex(p, t.toField) + conv));
+        heat = min(_MaxHeat, heat + conv * t.heatRelease);
     }
 
-    // 2. Freeze (Water->Ice) — gated on the RUNNING heat, consuming the RUNNING water, so cold steam
-    //    can cascade steam -> water -> ice in one dispatch. Purely local (no neighbor reads), mass-paired
-    //    (water-- => ice++), and bounded by available water and freezeRate*dt. CP7c: freezing neither
-    //    consumes nor releases heat, which keeps the cold band free of hot/cold feedback. Because
-    //    freeze <= condense <= melt <= boil (sanitized C#-side) and freezing does not warm the cell,
-    //    frozen ice cannot melt again later in this same dispatch.
-    if (heat < _FreezeThreshold)
+    // 2. HOT transitions, in baked order. Each re-derives its excess against its OWN threshold from
+    //    the RUNNING heat (after prior drawdown), and is additionally capped by excess / heatCost.
+    for (int h = 0; h < _ThermalTransitionCount; h++)
     {
-        float freeze = min(water, water * _FreezeRate * dt);
-        water -= freeze;
-        ice += freeze;
+        GpuThermalTransition t = _ThermalTransitions[h];
+        if (t.regime != REGIME_HOT) continue;
+
+        // Clamp the source FIRST. With from < 0 the conv would go negative, which not only drains the
+        // destination ink but INVERTS the heat budget: `heat -= conv * heatCost` would ADD heat,
+        // minting energy from a numerical underflow. Clamping makes conv == 0 and zeroes the source.
+        float excess = max(0.0, heat - t.threshold);
+        float from = max(0.0, GetInkByIndex(p, t.fromField));
+        float conv = min(from, min(from * t.rate * dt, excess / max(t.heatCost, EPS)));
+
+        SetInkByIndex(p, t.fromField, max(0.0, from - conv));
+        SetInkByIndex(p, t.toField, max(0.0, GetInkByIndex(p, t.toField) + conv));
+        heat -= conv * t.heatCost;
     }
 
-    // 3. Melt (Ice->Water) — excess heat above the melt threshold from the RUNNING heat.
-    float excessMelt = max(0.0, heat - _MeltThreshold);
-    float melt = min(ice, min(ice * _MeltRate * dt, excessMelt / max(_MeltHeatCost, EPS)));
-    ice -= melt;
-    water += melt;
-    heat -= melt * _MeltHeatCost;
-
-    // 4. Boil (Water->Steam) — excess RE-DERIVED against the boil threshold AFTER melt drawdown.
-    //    `water` includes water melted this pass (cascade allowed, bounded by the boil heat budget).
-    float excessBoil = max(0.0, heat - _BoilThreshold);
-    float boil = min(water, min(water * _BoilRate * dt, excessBoil / max(_BoilHeatCost, EPS)));
-    water -= boil;
-    steam += boil;
-    heat -= boil * _BoilHeatCost;
-
-    p.ice = max(0.0, ice);
-    p.water = max(0.0, water);
-    p.steam = max(0.0, steam);
     heat = clamp(heat, _AmbientTemperature, _MaxHeat);
 
     _ParticlesWrite[idx] = p;

@@ -237,6 +237,67 @@ namespace Magi.Inkling.Tests.EditMode
             Assert.That(c[InkTypeId.Fire], Is.EqualTo(1f).Within(Tol));
         }
 
+        // ── Negative-source underflow (Codex blocker; the oracle is the normative spec) ──────
+        // A source that has underflowed below 0 must not yield a NEGATIVE conversion, which would
+        // drain the DESTINATION and — for hot transitions — invert the heat budget into heat CREATION.
+        // Source magnitude is -0.1 so each pre-fix deviation (0.05..0.1) dwarfs the 1e-4 tolerance.
+
+        private static ThermalRuleSet Custom(params BakedThermalTransition[] transitions)
+        {
+            var rs = new ThermalRuleSet();
+            rs.Transitions.AddRange(transitions);
+            return rs;
+        }
+
+        [Test]
+        public void NegativeSource_ColdTransition_DoesNotDrainDestinationOrInvertHeat()
+        {
+            // PRE-FIX: conv = -0.1 => ice 0.4 -> 0.3, heat 0.1 -> 0.05.
+            var c = Cell(water: -0.1f, ice: 0.4f, heat: 0.1f);
+            Step(c, Custom(new BakedThermalTransition
+            {
+                fromField = (int)InkTypeId.Water, toField = (int)InkTypeId.Ice,
+                regime = ThermalRegime.Cold, threshold = 0.2f, rate = 1f, heatRelease = 0.5f
+            }));
+
+            Assert.That(c[InkTypeId.Ice], Is.EqualTo(0.4f).Within(Tol), "Destination not drained (pre-fix: 0.3)");
+            Assert.That(c[InkTypeId.Water], Is.EqualTo(0f).Within(Tol), "Underflowed source clamps to 0");
+            Assert.That(c.Heat, Is.EqualTo(0.1f).Within(Tol), "Heat release not inverted (pre-fix: 0.05)");
+        }
+
+        [Test]
+        public void NegativeSource_HotTransition_DoesNotDrainDestinationOrMintHeat()
+        {
+            // PRE-FIX: conv = -0.1 => water 0.3 -> 0.2, heat 0.6 -> 0.65 (energy created).
+            var c = Cell(ice: -0.1f, water: 0.3f, heat: 0.6f);
+            Step(c, Defaults());   // heat 0.6: above melt (0.4), below boil (0.7)
+
+            Assert.That(c[InkTypeId.Water], Is.EqualTo(0.3f).Within(Tol), "Destination not drained (pre-fix: 0.2)");
+            Assert.That(c[InkTypeId.Ice], Is.EqualTo(0f).Within(Tol), "Underflowed source clamps to 0");
+            Assert.That(c.Heat, Is.EqualTo(0.6f).Within(Tol), "Heat NOT minted (pre-fix: 0.65)");
+            Assert.That(c[InkTypeId.Steam], Is.EqualTo(0f).Within(Tol), "Below boil threshold");
+        }
+
+        [Test]
+        public void NegativeSource_CustomNonDefaultFields_DoesNotDrainOrMint()
+        {
+            // PRE-FIX: conv = -0.1 => plantGrown 0.5 -> 0.4, heat 1.0 -> 1.05.
+            var c = new ThermalCpuOracle.Cell();
+            c[InkTypeId.PlantSeeded] = -0.1f;
+            c[InkTypeId.PlantGrown] = 0.5f;
+            c.Heat = 1f;
+
+            ThermalCpuOracle.Apply(c, Custom(new BakedThermalTransition
+            {
+                fromField = (int)InkTypeId.PlantSeeded, toField = (int)InkTypeId.PlantGrown,
+                regime = ThermalRegime.Hot, threshold = 0.4f, rate = 1f, heatCost = 0.5f
+            }), dt: 1f, ambient: 0f, maxHeat: 2f, enableHeatSources: false);
+
+            Assert.That(c[InkTypeId.PlantGrown], Is.EqualTo(0.5f).Within(Tol), "Destination not drained (pre-fix: 0.4)");
+            Assert.That(c[InkTypeId.PlantSeeded], Is.EqualTo(0f).Within(Tol), "Underflowed source clamps to 0");
+            Assert.That(c.Heat, Is.EqualTo(1f).Within(Tol), "Heat NOT minted (pre-fix: 1.05)");
+        }
+
         [Test]
         public void InvalidRuleSet_IsInert_PassThrough()
         {

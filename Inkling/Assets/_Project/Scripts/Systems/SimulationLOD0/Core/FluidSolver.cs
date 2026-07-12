@@ -24,10 +24,167 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float ProjectionMs { get; private set; }
         public float VorticityMs { get; private set; }
 
+        // ── Thermal rule cache (CP7d) ───────────────────────────────────────────────────
+        // Scratch arrays are allocated once; the rule set is re-baked and re-uploaded only when a
+        // signature over the authored data + SimDriver knobs changes, so a steady-state frame does
+        // zero allocation and zero GPU upload for thermal rules.
+        private readonly GpuThermalTransition[] thermalTransitionScratch =
+            new GpuThermalTransition[ThermalRuleBaker.MaxTransitions];
+        private readonly GpuThermalSource[] thermalSourceScratch =
+            new GpuThermalSource[ThermalRuleBaker.MaxSources];
+
+        private int thermalSignature;
+        private bool thermalSignatureValid;
+        private int thermalTransitionCount;
+        private int thermalSourceCount;
+        private bool thermalRulesValid;
+
         public FluidSolver(SimulationContext context, OperationQueue operationQueue)
         {
             ctx = context;
             opQueue = operationQueue;
+        }
+
+        /// <summary>
+        /// Builds the CP7 defaults from the live SimDriver knobs, sanitizing the ladder
+        /// (freeze &lt;= condense &lt;= melt &lt;= boil) so the default rule set is always baker-valid.
+        /// These are the fallback used per-category when no AffinityGroup authors thermal data.
+        /// </summary>
+        private ThermalDefaults BuildThermalDefaults()
+        {
+            float freezeT = Mathf.Max(0f, ctx.FreezeThreshold);
+            float condenseT = Mathf.Max(freezeT, ctx.CondenseThreshold);
+            float meltT = Mathf.Max(condenseT, ctx.MeltThreshold);
+            float boilT = Mathf.Max(meltT, ctx.BoilThreshold);
+
+            return new ThermalDefaults
+            {
+                fireHeatEmissionRate = Mathf.Max(0f, ctx.FireHeatEmissionRate),
+                fireHeatFuelCost = Mathf.Max(0f, ctx.FireHeatFuelCost),
+
+                condenseThreshold = condenseT,
+                condenseRate = Mathf.Max(0f, ctx.CondenseRate),
+                condenseHeatRelease = Mathf.Max(0f, ctx.CondenseHeatRelease),
+
+                freezeThreshold = freezeT,
+                freezeRate = Mathf.Max(0f, ctx.FreezeRate),
+
+                meltThreshold = meltT,
+                meltRate = Mathf.Max(0f, ctx.MeltRate),
+                meltHeatCost = Mathf.Max(0f, ctx.MeltHeatCost),
+
+                boilThreshold = boilT,
+                boilRate = Mathf.Max(0f, ctx.BoilRate),
+                boilHeatCost = Mathf.Max(0f, ctx.BoilHeatCost),
+            };
+        }
+
+        /// <summary>
+        /// Re-bakes the global thermal rule set and re-uploads the GPU buffers, but ONLY when the
+        /// inputs actually changed. Bakes ONCE across all active groups (not per group).
+        /// </summary>
+        private void UpdateThermalRules(ThermalDefaults defaults)
+        {
+            int sig = ThermalInputSignature(defaults);
+            if (thermalSignatureValid && sig == thermalSignature)
+                return;
+
+            thermalSignature = sig;
+            thermalSignatureValid = true;
+
+            ThermalRuleSet rules = ThermalRuleBaker.Bake(ctx.AffinityGroups, defaults);
+            thermalRulesValid = rules.IsValid;
+
+            if (!rules.IsValid)
+            {
+                thermalTransitionCount = 0;
+                thermalSourceCount = 0;
+                Debug.LogError($"[ThermalInteractions] Thermal rules are INVALID — the pass is inert " +
+                               $"(no phase changes will run): {rules.Error}");
+                return;
+            }
+
+            foreach (string w in rules.Warnings)
+                Debug.LogWarning($"[ThermalInteractions] {w}");
+
+            thermalTransitionCount = ThermalRuleBaker.ToGpu(rules, thermalTransitionScratch);
+            thermalSourceCount = ThermalRuleBaker.ToGpu(rules, thermalSourceScratch);
+
+            // Buffers are fixed-capacity; upload the full array and let the counts bound the loops.
+            ctx.ThermalTransitionBuffer.SetData(thermalTransitionScratch);
+            ctx.ThermalSourceBuffer.SetData(thermalSourceScratch);
+        }
+
+        /// <summary>Allocation-free change detector over everything that can affect the baked rules.</summary>
+        private int ThermalInputSignature(in ThermalDefaults d)
+        {
+            unchecked
+            {
+                int h = 17;
+                h = h * 31 + d.fireHeatEmissionRate.GetHashCode();
+                h = h * 31 + d.fireHeatFuelCost.GetHashCode();
+                h = h * 31 + d.condenseThreshold.GetHashCode();
+                h = h * 31 + d.condenseRate.GetHashCode();
+                h = h * 31 + d.condenseHeatRelease.GetHashCode();
+                h = h * 31 + d.freezeThreshold.GetHashCode();
+                h = h * 31 + d.freezeRate.GetHashCode();
+                h = h * 31 + d.meltThreshold.GetHashCode();
+                h = h * 31 + d.meltRate.GetHashCode();
+                h = h * 31 + d.meltHeatCost.GetHashCode();
+                h = h * 31 + d.boilThreshold.GetHashCode();
+                h = h * 31 + d.boilRate.GetHashCode();
+                h = h * 31 + d.boilHeatCost.GetHashCode();
+
+                AffinityGroup[] groups = ctx.AffinityGroups;
+                if (groups == null) return h;
+
+                for (int gi = 0; gi < groups.Length; gi++)
+                {
+                    AffinityGroup g = groups[gi];
+                    if (g == null) { h = h * 31; continue; }
+                    h = h * 31 + g.GetInstanceID();
+
+                    // Slot -> field resolution depends on the assigned inks.
+                    InkTypeDef[] inks = g.inks;
+                    if (inks != null)
+                        for (int i = 0; i < inks.Length; i++)
+                            h = h * 31 + (inks[i] != null ? (int)inks[i].inkType : -1);
+
+                    ThermalTransition[] ts = g.thermalTransitions;
+                    h = h * 31 + (ts != null ? ts.Length : 0);
+                    if (ts != null)
+                    {
+                        for (int i = 0; i < ts.Length; i++)
+                        {
+                            ThermalTransition t = ts[i];
+                            if (t == null) { h = h * 31; continue; }
+                            h = h * 31 + t.fromSlot;
+                            h = h * 31 + t.toSlot;
+                            h = h * 31 + (int)t.regime;
+                            h = h * 31 + t.threshold.GetHashCode();
+                            h = h * 31 + t.rate.GetHashCode();
+                            h = h * 31 + t.heatCost.GetHashCode();
+                            h = h * 31 + t.heatRelease.GetHashCode();
+                        }
+                    }
+
+                    ThermalSource[] ss = g.thermalSources;
+                    h = h * 31 + (ss != null ? ss.Length : 0);
+                    if (ss != null)
+                    {
+                        for (int i = 0; i < ss.Length; i++)
+                        {
+                            ThermalSource s = ss[i];
+                            if (s == null) { h = h * 31; continue; }
+                            h = h * 31 + s.slot;
+                            h = h * 31 + s.heatEmissionRate.GetHashCode();
+                            h = h * 31 + s.fuelCost.GetHashCode();
+                        }
+                    }
+                }
+
+                return h;
+            }
         }
 
         /// <summary>
@@ -587,48 +744,48 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 }
             }
 
-            // 1c. Thermal interactions (CP5): heat-driven LOCAL phase changes (ice->water->steam,
-            // steam->water). Opt-in — default off, so not dispatched and baseline is byte-identical.
-            // Runs after heat transport (heat is fresh) using the current particle field; reads/writes
-            // both the particle buffer and the heat layer, and swaps both. LOCAL only (no neighbor
-            // sampling) so it cannot mint mass. Sanitized thresholds enforce condense <= melt <= boil.
+            // 1c. Thermal interactions (CP7d): heat-driven LOCAL phase changes, fully DATA-DRIVEN.
+            // Opt-in — default off, so not dispatched and baseline is byte-identical. Runs after heat
+            // transport (heat is fresh) using the current particle field; reads/writes both the
+            // particle buffer and the heat layer, and swaps both. LOCAL only (no neighbor sampling)
+            // so it cannot mint mass.
+            //
+            // The rules come from ThermalRuleBaker: every active AffinityGroup's authored thermal data
+            // (falling back per-category to the CP7 defaults built from the SimDriver knobs) is baked
+            // into ONE ordered rule set and dispatched ONCE. Heat is a single global scalar field, so a
+            // per-group dispatch would break snapshot/cold/hot phase coherence.
             if (ctx.EnableThermalInteractions && ctx.KernelThermalInteractions >= 0
                 && ctx.ThermalInteractionsCompute != null && ctx.Heat != null
+                && ctx.ThermalTransitionBuffer != null && ctx.ThermalSourceBuffer != null
                 && ctx.ParticlesBuffer != null && ctx.ParticlesBuffer[ctx.ParticleReadIndex] != null)
             {
                 var tc = ctx.ThermalInteractionsCompute;
                 int k = ctx.KernelThermalInteractions;
 
-                // Sanitize the thermal ladder: freeze <= condense <= melt <= boil.
-                float freezeT = Mathf.Max(0f, ctx.FreezeThreshold);
-                float condenseT = Mathf.Max(freezeT, ctx.CondenseThreshold);
-                float meltT = Mathf.Max(condenseT, ctx.MeltThreshold);
-                float boilT = Mathf.Max(meltT, ctx.BoilThreshold);
                 float ambient = ctx.AmbientTemperature;
                 float maxHeat = Mathf.Max(ambient, ctx.MaxHeat);
+
+                // Re-bake + re-upload ONLY when the authored data or the SimDriver knobs actually
+                // change (signature compare) — no per-frame Bake allocation or GPU upload churn.
+                UpdateThermalRules(BuildThermalDefaults());
 
                 tc.SetInt("_Resolution", ctx.Resolution);
                 tc.SetFloat("_FrameDeltaTime", ctx.FrameDeltaTime);
                 tc.SetInt("_EnableThermalInteractions", 1);
-                tc.SetFloat("_FreezeThreshold", freezeT);
-                tc.SetFloat("_CondenseThreshold", condenseT);
-                tc.SetFloat("_MeltThreshold", meltT);
-                tc.SetFloat("_BoilThreshold", boilT);
-                tc.SetFloat("_MeltRate", Mathf.Max(0f, ctx.MeltRate));
-                tc.SetFloat("_BoilRate", Mathf.Max(0f, ctx.BoilRate));
-                tc.SetFloat("_CondenseRate", Mathf.Max(0f, ctx.CondenseRate));
-                tc.SetFloat("_FreezeRate", Mathf.Max(0f, ctx.FreezeRate));
-                tc.SetFloat("_MeltHeatCost", Mathf.Max(0f, ctx.MeltHeatCost));
-                tc.SetFloat("_BoilHeatCost", Mathf.Max(0f, ctx.BoilHeatCost));
-                tc.SetFloat("_CondenseHeatRelease", Mathf.Max(0f, ctx.CondenseHeatRelease));
                 tc.SetFloat("_AmbientTemperature", ambient);
                 tc.SetFloat("_MaxHeat", maxHeat);
 
-                // Fuel-like fire (CP7b): this pass owns fire->heat emission while thermal is enabled.
+                // Fuel-like fire (CP7b): this pass owns ink->heat emission while thermal is enabled
+                // (FluidSolver skips the InkTools AddHeatSources pass — see the double-source guard).
                 // Timing: emitted heat can drive phase changes in THIS dispatch, then advects next step.
                 tc.SetInt("_EnableHeatSources", ctx.EnableHeatSources ? 1 : 0);
-                tc.SetFloat("_FireHeatEmissionRate", Mathf.Max(0f, ctx.FireHeatEmissionRate));
-                tc.SetFloat("_FireHeatFuelCost", Mathf.Max(0f, ctx.FireHeatFuelCost));
+
+                // An invalid baked set => inert pass-through in the kernel, never partially applied.
+                tc.SetInt("_ThermalRulesValid", thermalRulesValid ? 1 : 0);
+                tc.SetInt("_ThermalTransitionCount", thermalTransitionCount);
+                tc.SetInt("_ThermalSourceCount", thermalSourceCount);
+                tc.SetBuffer(k, "_ThermalTransitions", ctx.ThermalTransitionBuffer);
+                tc.SetBuffer(k, "_ThermalSources", ctx.ThermalSourceBuffer);
 
                 tc.SetBuffer(k, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
                 tc.SetBuffer(k, "_ParticlesWrite", ctx.ParticlesBuffer[ctx.ParticleWriteIndex]);

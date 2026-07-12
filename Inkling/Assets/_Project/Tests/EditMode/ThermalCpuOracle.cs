@@ -70,7 +70,9 @@ namespace Magi.Inkling.Tests.EditMode
                 if (t.regime != ThermalRegime.Cold) continue;
                 if (c.Heat >= t.threshold) continue;
 
-                float src = c.Inks[t.fromField];
+                // Clamp the source first: a negative source would give conv < 0, draining the
+                // destination and inverting the heat release. (Matches the kernel.)
+                float src = Mathf.Max(0f, c.Inks[t.fromField]);
                 float conv = Mathf.Min(src, src * t.rate * dt);
                 c.Inks[t.fromField] = src - conv;
                 c.Inks[t.toField] += conv;
@@ -83,8 +85,11 @@ namespace Magi.Inkling.Tests.EditMode
             {
                 if (t.regime != ThermalRegime.Hot) continue;
 
+                // Clamp the source first: a negative source would give conv < 0, which drains the
+                // destination AND inverts the heat budget (heat -= conv*cost would ADD heat, minting
+                // energy from an underflow). (Matches the kernel.)
                 float excess = Mathf.Max(0f, c.Heat - t.threshold);
-                float src = c.Inks[t.fromField];
+                float src = Mathf.Max(0f, c.Inks[t.fromField]);
                 float conv = Mathf.Min(src, Mathf.Min(src * t.rate * dt, excess / Mathf.Max(t.heatCost, EPS)));
                 c.Inks[t.fromField] = src - conv;
                 c.Inks[t.toField] += conv;

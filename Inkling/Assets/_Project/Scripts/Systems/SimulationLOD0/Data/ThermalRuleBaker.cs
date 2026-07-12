@@ -1,9 +1,45 @@
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using UnityEngine;
 using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {
+    /// <summary>
+    /// GPU upload layout for a baked transition. MUST match `struct GpuThermalTransition` in
+    /// ThermalInteractions.compute field-for-field. Explicitly padded to 32 bytes (a 16-byte
+    /// multiple) rather than relying on an implicit stride.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GpuThermalTransition
+    {
+        public int fromField;
+        public int toField;
+        public int regime;      // 0 = Cold, 1 = Hot
+        public int pad0;
+        public float threshold;
+        public float rate;
+        public float heatCost;
+        public float heatRelease;
+
+        public const int Stride = 32;
+    }
+
+    /// <summary>
+    /// GPU upload layout for a baked heat source. MUST match `struct GpuThermalSource` in
+    /// ThermalInteractions.compute field-for-field. Padded to 16 bytes.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GpuThermalSource
+    {
+        public int field;
+        public float heatEmissionRate;
+        public float fuelCost;
+        public int pad0;
+
+        public const int Stride = 16;
+    }
+
     /// <summary>Global thermal knobs + the CP7b/CP7c defaults used when nothing is authored.</summary>
     public struct ThermalDefaults
     {
@@ -89,6 +125,54 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     {
         public const int MaxTransitions = 8;   // 4 slots x 2 regimes under the one-outgoing invariant
         public const int MaxSources = 4;       // one per slot
+
+        /// <summary>
+        /// Fills caller-owned arrays with the GPU layout (no allocation). Returns the element count.
+        /// An INVALID rule set yields 0 — the runtime must then flag the set invalid so the kernel
+        /// passes through inert rather than partially applying anything.
+        /// </summary>
+        public static int ToGpu(ThermalRuleSet rules, GpuThermalTransition[] dst)
+        {
+            if (rules == null || !rules.IsValid || dst == null) return 0;
+
+            int n = Mathf.Min(rules.Transitions.Count, dst.Length);
+            for (int i = 0; i < n; i++)
+            {
+                BakedThermalTransition t = rules.Transitions[i];
+                dst[i] = new GpuThermalTransition
+                {
+                    fromField = t.fromField,
+                    toField = t.toField,
+                    regime = (int)t.regime,
+                    pad0 = 0,
+                    threshold = t.threshold,
+                    rate = t.rate,
+                    heatCost = t.heatCost,
+                    heatRelease = t.heatRelease,
+                };
+            }
+            return n;
+        }
+
+        /// <summary>Fills caller-owned arrays with the GPU layout (no allocation). Returns the element count.</summary>
+        public static int ToGpu(ThermalRuleSet rules, GpuThermalSource[] dst)
+        {
+            if (rules == null || !rules.IsValid || dst == null) return 0;
+
+            int n = Mathf.Min(rules.Sources.Count, dst.Length);
+            for (int i = 0; i < n; i++)
+            {
+                BakedThermalSource s = rules.Sources[i];
+                dst[i] = new GpuThermalSource
+                {
+                    field = s.field,
+                    heatEmissionRate = s.heatEmissionRate,
+                    fuelCost = s.fuelCost,
+                    pad0 = 0,
+                };
+            }
+            return n;
+        }
 
         public static ThermalRuleSet Bake(IReadOnlyList<AffinityGroup> groups, ThermalDefaults defaults)
         {

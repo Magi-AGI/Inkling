@@ -7,6 +7,7 @@ using UnityEngine.TestTools;
 using UnityEditor;
 #endif
 using Magi.InkTools.Simulation;
+using Magi.Inkling.Systems.SimulationLOD0;
 
 namespace Magi.Inkling.Tests.PlayMode
 {
@@ -38,6 +39,13 @@ namespace Magi.Inkling.Tests.PlayMode
             var rt = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf) { enableRandomWrite = true };
             rt.Create();
             var t = new Texture2D(res, res, TextureFormat.RGBAFloat, false);
+
+            // Graphics.Blit SETS RenderTexture.active to its destination and leaves it set. If we don't
+            // restore it, `active` stays pointing at this RT — ReadHeatAll then captures that stale value
+            // as its "previous" target and restores it, so the RT is still active when we Release() it,
+            // which is what produced the repeated "Releasing render texture that is set to be
+            // RenderTexture.active!" warnings.
+            var prev = RenderTexture.active;
             try
             {
                 for (int y = 0; y < res; y++)
@@ -46,7 +54,11 @@ namespace Magi.Inkling.Tests.PlayMode
                 t.Apply();
                 Graphics.Blit(t, rt);
             }
-            finally { Object.DestroyImmediate(t); }
+            finally
+            {
+                RenderTexture.active = prev;
+                Object.DestroyImmediate(t);
+            }
             return rt;
         }
 
@@ -68,7 +80,44 @@ namespace Magi.Inkling.Tests.PlayMode
             finally { RenderTexture.active = prev; Object.DestroyImmediate(tex); }
         }
 
+        // TP -> the CP7 defaults the baker turns into the default rule set. Every pre-CP7d test keeps
+        // its original TP inputs and expected numbers, so they now serve as the DEFAULT-RULE PARITY
+        // suite: identical results, but produced through the buffer-driven path.
+        private static ThermalDefaults ToDefaults(TP tp) => new ThermalDefaults
+        {
+            fireHeatEmissionRate = tp.fireEmissionRate,
+            fireHeatFuelCost = tp.fireFuelCost,
+            condenseThreshold = tp.condenseT,
+            condenseRate = tp.condenseRate,
+            condenseHeatRelease = tp.condenseRelease,
+            freezeThreshold = tp.freezeT,
+            freezeRate = tp.freezeRate,
+            meltThreshold = tp.meltT,
+            meltRate = tp.meltRate,
+            meltHeatCost = tp.meltCost,
+            boilThreshold = tp.boilT,
+            boilRate = tp.boilRate,
+            boilHeatCost = tp.boilCost,
+        };
+
+        // Bakes the default rules from TP and dispatches through the buffer path.
         private static iparticle[] Run(iparticle[] particles, float[] heat, int res, TP tp, out float[] heatOut)
+        {
+            ThermalRuleSet rules = ThermalRuleBaker.Bake(null, ToDefaults(tp));
+            return RunRules(particles, heat, res, tp, rules, out heatOut);
+        }
+
+        /// <summary>
+        /// Dispatches ThermalInteractions with an EXPLICIT baked rule set uploaded as StructuredBuffers.
+        /// This is the CP7d slice-2 path: no per-phase uniforms remain.
+        /// </summary>
+        /// <param name="forceValid">
+        /// Overrides the `_ThermalRulesValid` flag independently of the rule set. This lets a test
+        /// upload REAL populated buffers (non-zero counts) while telling the kernel the set is invalid,
+        /// proving the pass is inert because of the flag — not merely because the buffers were empty.
+        /// </param>
+        private static iparticle[] RunRules(iparticle[] particles, float[] heat, int res, TP tp,
+            ThermalRuleSet rules, out float[] heatOut, int? forceValid = null)
         {
             var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Assets/_Project/Scripts/Systems/SimulationLOD0/ThermalInteractions.compute");
@@ -78,6 +127,13 @@ namespace Magi.Inkling.Tests.PlayMode
             int count = res * res;
             var readBuf = new ComputeBuffer(count, Marshal.SizeOf<iparticle>());
             var writeBuf = new ComputeBuffer(count, Marshal.SizeOf<iparticle>());
+
+            // Fixed-capacity rule buffers, exactly like the runtime.
+            var transitionBuf = new ComputeBuffer(
+                ThermalRuleBaker.MaxTransitions, GpuThermalTransition.Stride, ComputeBufferType.Structured);
+            var sourceBuf = new ComputeBuffer(
+                ThermalRuleBaker.MaxSources, GpuThermalSource.Stride, ComputeBufferType.Structured);
+
             var heatRead = MakeHeatRT(res, heat);
             var heatWrite = MakeHeatRT(res, new float[count]);
             try
@@ -85,25 +141,25 @@ namespace Magi.Inkling.Tests.PlayMode
                 readBuf.SetData(particles);
                 writeBuf.SetData(particles);
 
+                var tScratch = new GpuThermalTransition[ThermalRuleBaker.MaxTransitions];
+                var sScratch = new GpuThermalSource[ThermalRuleBaker.MaxSources];
+                int tCount = ThermalRuleBaker.ToGpu(rules, tScratch);
+                int sCount = ThermalRuleBaker.ToGpu(rules, sScratch);
+                transitionBuf.SetData(tScratch);
+                sourceBuf.SetData(sScratch);
+
                 cs.SetInt("_Resolution", res);
                 cs.SetFloat("_FrameDeltaTime", tp.dt);
                 cs.SetInt("_EnableThermalInteractions", tp.enable);
-                cs.SetFloat("_FreezeThreshold", tp.freezeT);
-                cs.SetFloat("_CondenseThreshold", tp.condenseT);
-                cs.SetFloat("_MeltThreshold", tp.meltT);
-                cs.SetFloat("_BoilThreshold", tp.boilT);
-                cs.SetFloat("_MeltRate", tp.meltRate);
-                cs.SetFloat("_BoilRate", tp.boilRate);
-                cs.SetFloat("_CondenseRate", tp.condenseRate);
-                cs.SetFloat("_FreezeRate", tp.freezeRate);
-                cs.SetFloat("_MeltHeatCost", tp.meltCost);
-                cs.SetFloat("_BoilHeatCost", tp.boilCost);
-                cs.SetFloat("_CondenseHeatRelease", tp.condenseRelease);
+                cs.SetInt("_EnableHeatSources", tp.enableHeatSources);
                 cs.SetFloat("_AmbientTemperature", tp.ambient);
                 cs.SetFloat("_MaxHeat", tp.maxHeat);
-                cs.SetInt("_EnableHeatSources", tp.enableHeatSources);
-                cs.SetFloat("_FireHeatEmissionRate", tp.fireEmissionRate);
-                cs.SetFloat("_FireHeatFuelCost", tp.fireFuelCost);
+
+                cs.SetInt("_ThermalRulesValid", forceValid ?? (rules != null && rules.IsValid ? 1 : 0));
+                cs.SetInt("_ThermalTransitionCount", tCount);
+                cs.SetInt("_ThermalSourceCount", sCount);
+                cs.SetBuffer(kernel, "_ThermalTransitions", transitionBuf);
+                cs.SetBuffer(kernel, "_ThermalSources", sourceBuf);
 
                 cs.SetBuffer(kernel, "_ParticlesRead", readBuf);
                 cs.SetBuffer(kernel, "_ParticlesWrite", writeBuf);
@@ -122,11 +178,27 @@ namespace Magi.Inkling.Tests.PlayMode
             {
                 readBuf.Release();
                 writeBuf.Release();
+                transitionBuf.Release();
+                sourceBuf.Release();
+
+                // Never release an RT that is still bound as the active render target.
+                RenderTexture.active = null;
                 heatRead.Release();
                 heatWrite.Release();
                 Object.DestroyImmediate(heatRead);
                 Object.DestroyImmediate(heatWrite);
             }
+        }
+
+        // Builds a rule set directly from baked rules (bypassing AffinityGroup authoring) so custom
+        // non-default fields can be exercised without touching any shipped asset.
+        private static ThermalRuleSet CustomRules(
+            BakedThermalTransition[] transitions, BakedThermalSource[] sources)
+        {
+            var rs = new ThermalRuleSet();
+            if (transitions != null) rs.Transitions.AddRange(transitions);
+            if (sources != null) rs.Sources.AddRange(sources);
+            return rs;
         }
 #endif
 
@@ -243,26 +315,33 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
-        // 6. Codex hazard: boiling lowers running heat below condenseThreshold, but the newly-boiled
-        // steam must NOT condense this pass (condensation ran first on steam0 == 0).
+        // 6. Codex hazard: newly-boiled steam must NOT condense (or condense-then-freeze) in the same
+        // pass. Uses a VALID ladder (freeze/condense 0.3 <= melt 0.4 <= boil 0.5) — the old fixture
+        // (condense 0.5 > boil 0.4) violated the ladder, so the baker now rightly rejects it and the
+        // pass goes inert. "Invalid ladder is inert" is covered separately by InvalidRuleSet_IsInert.
+        //
+        // Boil converts all the water and draws heat down to EXACTLY the boil threshold — never below
+        // it, because the heat-budget cap gives conv <= excess/heatCost. With the ladder guaranteeing
+        // every cold threshold <= every hot threshold, heat can therefore never fall back into the
+        // condense band within a pass. Cold-before-hot ordering is belt-and-braces on top of that.
         [UnityTest]
         public IEnumerator BoilDoesNotTriggerSamePassCondensation()
         {
 #if UNITY_EDITOR
             var p = new iparticle[1]; p[0].water = 1f; // steam0 == 0
-            // condenseT high (0.5) so post-boil heat (0.4) sits inside the condense range;
-            // boilT low (0.4) so all water boils and drops heat to 0.4.
-            var tp = new TP { condenseT = 0.5f, meltT = 0.5f, boilT = 0.4f };
-            var outp = Run(p, new[] { 0.9f }, 1, tp, out float[] heatOut);
+            var tp = new TP { freezeT = 0.3f, condenseT = 0.3f, meltT = 0.4f, boilT = 0.5f };
+            var outp = Run(p, new[] { 1f }, 1, tp, out float[] heatOut);
             yield return null;
 
             Assert.That(outp[0].steam, Is.EqualTo(1f).Within(4e-2f),
-                "Newly-boiled steam must remain steam (condensation ran first on steam0=0).");
+                "Newly-boiled steam must remain steam (cold ran first, on steam0 = 0).");
             Assert.That(outp[0].water, Is.EqualTo(0f).Within(4e-2f), "All water boiled away");
             Assert.That(outp[0].ice, Is.EqualTo(0f).Within(1e-3f),
                 "Newly-boiled steam must not condense-then-freeze in the same pass either (CP7c).");
-            Assert.That(heatOut[0], Is.LessThan(0.5f),
-                "Sanity: final heat is below condenseThreshold, yet no condensation occurred.");
+            Assert.That(heatOut[0], Is.EqualTo(0.5f).Within(3e-2f),
+                "Boil draws heat down TO its threshold, not below it.");
+            Assert.That(heatOut[0], Is.GreaterThanOrEqualTo(tp.condenseT - 3e-2f),
+                "…so heat can never re-enter the condense band within the pass.");
 #else
             yield break;
 #endif
@@ -300,11 +379,17 @@ namespace Magi.Inkling.Tests.PlayMode
             Assert.That(outHeat[0].water, Is.EqualTo(0.1f).Within(3e-2f), "Melt capped by heat budget (excess/cost)");
 
             // Ink-capped: tiny ice, huge excess/rate => melt <= ice.
+            // boilRate = 0 ISOLATES the melt. Without it, heat 1.0 sits above the default boil
+            // threshold (0.7), so the freshly-melted water immediately boils away (correct hot-cascade
+            // behaviour — see Cascade_HotIceMeltsThenBoils) and `water` would read 0, telling us nothing
+            // about the ice cap. This is the assertion Hermes saw fail; the cascade is right, the
+            // fixture was not isolating what it claimed to measure.
             var pInk = new iparticle[1]; pInk[0].ice = 0.05f;
             var outInk = Run(pInk, new[] { 1f }, 1,
-                new TP { meltRate = 10f, meltCost = 0.1f }, out _);
+                new TP { meltRate = 10f, meltCost = 0.1f, boilRate = 0f }, out _);
             Assert.That(outInk[0].water, Is.EqualTo(0.05f).Within(2e-2f), "Melt capped by available ice");
             Assert.That(outInk[0].ice, Is.EqualTo(0f).Within(1e-2f), "Ice fully consumed");
+            Assert.That(outInk[0].steam, Is.EqualTo(0f).Within(1e-3f), "Boil disabled: melt is isolated");
 #else
             yield break;
 #endif
@@ -591,25 +676,264 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
-        // 22. Runtime wiring guard (CP7c): direct shader tests can pass while the runtime path never
-        // uploads the freeze uniforms, so freezing would silently no-op in play. Pin the upload AND the
-        // ordered freeze <= condense <= melt <= boil sanitization.
+        // 22. Runtime wiring guard (CP7d slice 2): the direct shader tests above can all pass while the
+        // RUNTIME path never bakes/uploads the rules — freezing would then silently no-op in play (the
+        // exact bug class caught in CP7c). Pin that FluidSolver bakes once and uploads the buffers,
+        // and that the ladder is still sanitized when building the defaults.
         [Test]
-        public void FluidSolver_UploadsFreezeUniforms_ForRuntimeThermalInteractions()
+        public void FluidSolver_BakesAndUploadsThermalRuleBuffers()
         {
 #if UNITY_EDITOR
             const string path = "Assets/_Project/Scripts/Systems/SimulationLOD0/Core/FluidSolver.cs";
             string src = System.IO.File.ReadAllText(path);
 
-            StringAssert.Contains("\"_FreezeThreshold\"", src, "FluidSolver must upload _FreezeThreshold");
-            StringAssert.Contains("\"_FreezeRate\"", src, "FluidSolver must upload _FreezeRate");
+            StringAssert.Contains("ThermalRuleBaker.Bake(ctx.AffinityGroups", src,
+                "FluidSolver must bake ONCE across all active groups (not per group)");
+            StringAssert.Contains("\"_ThermalTransitions\"", src, "must bind the transition buffer");
+            StringAssert.Contains("\"_ThermalTransitionCount\"", src, "must upload the transition count");
+            StringAssert.Contains("\"_ThermalSources\"", src, "must bind the source buffer");
+            StringAssert.Contains("\"_ThermalSourceCount\"", src, "must upload the source count");
+            StringAssert.Contains("\"_ThermalRulesValid\"", src, "must pass the validity flag to the shader");
+
+            // The default rule set must still be built from the sanitized ladder.
             StringAssert.Contains("Mathf.Max(0f, ctx.FreezeThreshold)", src,
                 "freezeT must be the floor of the sanitized thermal ladder");
             StringAssert.Contains("Mathf.Max(freezeT, ctx.CondenseThreshold)", src,
                 "condenseT must be sanitized to >= freezeT (freeze <= condense <= melt <= boil)");
-            StringAssert.Contains("Mathf.Max(0f, ctx.FreezeRate)", src, "freezeRate must be clamped non-negative");
+
+            // The old hardcoded per-phase uniforms must be GONE from the runtime path.
+            Assert.IsFalse(src.Contains("\"_MeltThreshold\""),
+                "Hardcoded per-phase uniforms must be replaced by the buffer-driven rule set");
+            Assert.IsFalse(src.Contains("\"_FireHeatFuelCost\""),
+                "Fuel cost is now carried by the baked source buffer, not a uniform");
 #else
             Assert.Ignore("Editor-only source assertion");
+#endif
+        }
+
+        // 23. GPU struct strides must match the HLSL layout exactly, or every rule is garbage.
+        [Test]
+        public void GpuThermalStructs_MatchDeclaredStrides()
+        {
+#if UNITY_EDITOR
+            Assert.AreEqual(GpuThermalTransition.Stride, Marshal.SizeOf<GpuThermalTransition>(),
+                "GpuThermalTransition must be 32 bytes to match the HLSL struct");
+            Assert.AreEqual(GpuThermalSource.Stride, Marshal.SizeOf<GpuThermalSource>(),
+                "GpuThermalSource must be 16 bytes to match the HLSL struct");
+#else
+            Assert.Ignore("Editor-only");
+#endif
+        }
+
+        // 24. A buffered source on a NON-default field emits heat and burns only for heat actually added.
+        // PlantSeeded(0.5) @ rate 1, fuelCost 2, dt 1 => rawEmission 0.5, fuel cap 0.5/2 = 0.25,
+        // headroom 1 => heatAdded 0.25, burn 0.25*2 = 0.5 => PlantSeeded 0.
+        [UnityTest]
+        public IEnumerator CustomBufferedSource_OnNonDefaultField_EmitsAndBurns()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].plantSeeded = 0.5f;
+            var rules = CustomRules(null, new[]
+            {
+                new BakedThermalSource
+                {
+                    field = (int)InkTypeId.PlantSeeded, heatEmissionRate = 1f, fuelCost = 2f
+                }
+            });
+
+            var tp = new TP { enableHeatSources = 1, maxHeat = 1f };
+            var outp = RunRules(p, new[] { 0f }, 1, tp, rules, out float[] heatOut);
+            yield return null;
+
+            Assert.That(heatOut[0], Is.EqualTo(0.25f).Within(2e-2f), "Heat capped by fuel/fuelCost");
+            Assert.That(outp[0].plantSeeded, Is.EqualTo(0f).Within(2e-2f), "PlantSeeded fully burned");
+            Assert.That(outp[0].fire, Is.EqualTo(0f).Within(1e-3f), "Fire is not a source in this rule set");
+#else
+            yield break;
+#endif
+        }
+
+        // 25. A buffered HOT transition on NON-default fields converts per the heat budget.
+        // PlantSeeded(1) -> PlantGrown, thr 0.4, rate 1, heatCost 0.5, heat 1 =>
+        // excess 0.6, cap 0.6/0.5 = 1.2, rate cap 1 => conv 1 => PlantGrown 1, heat 1 - 0.5 = 0.5.
+        [UnityTest]
+        public IEnumerator CustomBufferedHotTransition_OnNonDefaultFields_Converts()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].plantSeeded = 1f;
+            var rules = CustomRules(new[]
+            {
+                new BakedThermalTransition
+                {
+                    fromField = (int)InkTypeId.PlantSeeded,
+                    toField = (int)InkTypeId.PlantGrown,
+                    regime = ThermalRegime.Hot,
+                    threshold = 0.4f, rate = 1f, heatCost = 0.5f, heatRelease = 0f
+                }
+            }, null);
+
+            var tp = new TP { enableHeatSources = 0, maxHeat = 1f };
+            var outp = RunRules(p, new[] { 1f }, 1, tp, rules, out float[] heatOut);
+            yield return null;
+
+            Assert.That(outp[0].plantGrown, Is.EqualTo(1f).Within(3e-2f), "PlantSeeded converted to PlantGrown");
+            Assert.That(outp[0].plantSeeded, Is.EqualTo(0f).Within(3e-2f), "Source consumed");
+            Assert.That(heatOut[0], Is.EqualTo(0.5f).Within(3e-2f), "Heat drawn by conv * heatCost");
+            Assert.That(outp[0].water, Is.EqualTo(0f).Within(1e-3f), "Default rules are NOT applied");
+#else
+            yield break;
+#endif
+        }
+
+        // ── Negative-source underflow regressions (Codex blocker) ────────────────────────────
+        // A transition source that has underflowed below 0 must not produce a NEGATIVE conversion.
+        // Unclamped, conv < 0 would (a) drain the DESTINATION ink and (b) for hot transitions INVERT
+        // the heat budget (`heat -= conv*cost` ADDS heat), minting energy.
+        //
+        // The source magnitude is -0.1 (NOT -0.01) so every pre-fix deviation is 0.05..0.1 — i.e.
+        // 2.5x..5x the 0.02 tolerance. Each expected value below is annotated with what the PRE-FIX
+        // kernel produced, and every one of those is outside tolerance, so these tests genuinely FAIL
+        // on the broken kernel rather than passing vacuously.
+
+        // 27a. COLD: negative source must not drain the destination or invert the heat release.
+        // Isolated to a freeze-only rule so the negative water reaches the freeze source directly
+        // (under the default rules, condense's destination-write clamps water to 0 first, which would
+        // mask the bug entirely).
+        //   PRE-FIX: conv = -0.1  =>  ice 0.4 -> 0.3,  heat 0.1 -> 0.05
+        //   POST-FIX: conv = 0    =>  ice 0.4,         heat 0.1,   water clamped to 0
+        [UnityTest]
+        public IEnumerator NegativeSource_ColdTransition_DoesNotDrainDestinationOrHeat()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1];
+            p[0].water = -0.1f;   // underflowed source
+            p[0].ice = 0.4f;      // destination starts non-zero: an unclamped conv would drain it
+
+            var rules = CustomRules(new[]
+            {
+                new BakedThermalTransition
+                {
+                    fromField = (int)InkTypeId.Water, toField = (int)InkTypeId.Ice,
+                    regime = ThermalRegime.Cold, threshold = 0.2f, rate = 1f, heatRelease = 0.5f
+                }
+            }, null);
+
+            var tp = new TP { enableHeatSources = 0, maxHeat = 1f };
+            var outp = RunRules(p, new[] { 0.1f }, 1, tp, rules, out float[] heatOut);
+            yield return null;
+
+            Assert.That(outp[0].ice, Is.EqualTo(0.4f).Within(2e-2f),
+                "Destination must NOT be drained by a negative source (pre-fix: 0.3)");
+            Assert.That(outp[0].water, Is.EqualTo(0f).Within(2e-2f), "Underflowed source clamps to 0");
+            Assert.That(heatOut[0], Is.EqualTo(0.1f).Within(2e-2f),
+                "Heat release must not be inverted into a heat LOSS (pre-fix: 0.05)");
+#else
+            yield break;
+#endif
+        }
+
+        // 27b. HOT (default rules): negative ice in the melt band must not drain water or MINT heat.
+        //   PRE-FIX: conv = -0.1  =>  water 0.3 -> 0.2,  heat 0.6 -> 0.65 (energy created)
+        //   POST-FIX: conv = 0    =>  water 0.3,         heat 0.6,        ice clamped to 0
+        // heat 0.6 sits above melt (0.4) and below boil (0.7), so melt fires and boil does not.
+        [UnityTest]
+        public IEnumerator NegativeSource_HotTransition_DoesNotDrainDestinationOrMintHeat()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1];
+            p[0].ice = -0.1f;     // underflowed melt source
+            p[0].water = 0.3f;    // melt destination, non-zero so a drain is observable
+
+            var outp = Run(p, new[] { 0.6f }, 1, new TP(), out float[] heatOut);
+            yield return null;
+
+            Assert.That(outp[0].water, Is.EqualTo(0.3f).Within(2e-2f),
+                "Destination must NOT be drained by a negative source (pre-fix: 0.2)");
+            Assert.That(outp[0].ice, Is.EqualTo(0f).Within(2e-2f), "Underflowed source clamps to 0");
+            Assert.That(heatOut[0], Is.EqualTo(0.6f).Within(2e-2f),
+                "Heat must NOT be minted by a negative conversion (pre-fix: 0.65)");
+            Assert.That(outp[0].steam, Is.EqualTo(0f).Within(1e-3f), "Below boil threshold: no boil");
+#else
+            yield break;
+#endif
+        }
+
+        // 27c. Custom buffered transition on NON-default fields, negative source.
+        // maxHeat = 2 so the pre-fix heat gain (1.0 -> 1.05) is observable rather than clamped away.
+        //   PRE-FIX: conv = -0.1  =>  plantGrown 0.5 -> 0.4,  heat 1.0 -> 1.05
+        //   POST-FIX: conv = 0    =>  plantGrown 0.5,         heat 1.0
+        [UnityTest]
+        public IEnumerator NegativeSource_CustomBufferedTransition_DoesNotDrainOrMint()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1];
+            p[0].plantSeeded = -0.1f;   // underflowed source
+            p[0].plantGrown = 0.5f;     // destination, non-zero
+
+            var rules = CustomRules(new[]
+            {
+                new BakedThermalTransition
+                {
+                    fromField = (int)InkTypeId.PlantSeeded,
+                    toField = (int)InkTypeId.PlantGrown,
+                    regime = ThermalRegime.Hot,
+                    threshold = 0.4f, rate = 1f, heatCost = 0.5f
+                }
+            }, null);
+
+            var tp = new TP { enableHeatSources = 0, maxHeat = 2f };
+            var outp = RunRules(p, new[] { 1f }, 1, tp, rules, out float[] heatOut);
+            yield return null;
+
+            Assert.That(outp[0].plantGrown, Is.EqualTo(0.5f).Within(2e-2f),
+                "Destination must NOT be drained (pre-fix: 0.4)");
+            Assert.That(outp[0].plantSeeded, Is.EqualTo(0f).Within(2e-2f), "Underflowed source clamps to 0");
+            Assert.That(heatOut[0], Is.EqualTo(1f).Within(2e-2f),
+                "Heat must NOT be minted (pre-fix: 1.05)");
+#else
+            yield break;
+#endif
+        }
+
+        // 26. An INVALID rule set is inert: particles and heat pass through unchanged even though the
+        // buffers still contain values. Never partially applied.
+        [UnityTest]
+        public IEnumerator InvalidRuleSet_IsInert_PassThrough()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1];
+            p[0].ice = 0.5f; p[0].water = 0.3f; p[0].fire = 0.2f;
+
+            // A VALID rule set (so the buffers are genuinely populated and the counts are non-zero),
+            // dispatched with the validity flag forced to 0. If the kernel honoured the buffers instead
+            // of the flag, this ice WOULD melt and this fire WOULD burn — so the assertions below prove
+            // inertness comes from the flag, not from empty buffers.
+            var rules = CustomRules(new[]
+            {
+                new BakedThermalTransition
+                {
+                    fromField = (int)InkTypeId.Ice, toField = (int)InkTypeId.Water,
+                    regime = ThermalRegime.Hot, threshold = 0.1f, rate = 1f, heatCost = 0.1f
+                }
+            }, new[]
+            {
+                new BakedThermalSource
+                {
+                    field = (int)InkTypeId.Fire, heatEmissionRate = 1f, fuelCost = 1f
+                }
+            });
+            Assume.That(rules.IsValid, "fixture must be valid so the buffers are populated");
+
+            var tp = new TP { enableHeatSources = 1, maxHeat = 1f };
+            var outp = RunRules(p, new[] { 0.9f }, 1, tp, rules, out float[] heatOut, forceValid: 0);
+            yield return null;
+
+            Assert.That(outp[0].ice, Is.EqualTo(0.5f).Within(2e-2f), "Ice unchanged");
+            Assert.That(outp[0].water, Is.EqualTo(0.3f).Within(2e-2f), "Water unchanged");
+            Assert.That(outp[0].fire, Is.EqualTo(0.2f).Within(2e-2f), "Fire unchanged (no emission)");
+            Assert.That(heatOut[0], Is.EqualTo(0.9f).Within(2e-2f), "Heat unchanged");
+#else
+            yield break;
 #endif
         }
     }

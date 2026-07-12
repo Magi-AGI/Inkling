@@ -41,6 +41,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public RenderTexture ChannelRT1Down;
         public RenderTexture ChannelRT2Down;
 
+        // ── Thermal rule buffers (CP7d slice 2) ─────────────────────────────
+        // Fixed-capacity (MaxTransitions / MaxSources), allocated once and re-uploaded only when the
+        // baked rule set actually changes — so there is no per-frame allocation or upload churn.
+        public ComputeBuffer ThermalTransitionBuffer;
+        public ComputeBuffer ThermalSourceBuffer;
+
         // ── Particle buffers ────────────────────────────────────────────────
         public ComputeBuffer[] ParticlesBuffer;
         public int ParticleReadIndex;
