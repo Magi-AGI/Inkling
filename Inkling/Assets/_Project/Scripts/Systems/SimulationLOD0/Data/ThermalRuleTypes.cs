@@ -1,0 +1,74 @@
+using System;
+using UnityEngine;
+
+namespace Magi.Inkling.Systems.SimulationLOD0
+{
+    /// <summary>
+    /// Which side of the thermal ladder a transition fires on.
+    /// Cold: gated by `heat &lt; threshold`, rate-limited, may RELEASE heat.
+    /// Hot:  gated by excess `heat - threshold`, additionally capped by `excess / heatCost` (heat budget).
+    /// </summary>
+    public enum ThermalRegime
+    {
+        Cold = 0,
+        Hot = 1,
+    }
+
+    /// <summary>
+    /// A LOCAL, heat-gated directed transition: one source ink converts into one destination ink
+    /// within the SAME cell, driven by that cell's own heat. This is NOT a pairwise adjacency
+    /// product (see AffinityGroup.productMatrix for those) — there is no neighbour sampling, so a
+    /// transition can never mint mass: every conversion is a paired `from-- / to++`.
+    ///
+    /// ORDER IS LOAD-BEARING. Transitions execute: emission -> snapshot -> all Cold (in authored
+    /// order) -> all Hot (in authored order) -> clamp. That ordering is what makes condensation run
+    /// before boiling can produce steam (the ckpt-024 same-pass hazard fix) and lets cold cascade
+    /// steam -> water -> ice in one dispatch.
+    /// </summary>
+    [Serializable]
+    public class ThermalTransition
+    {
+        [Tooltip("Source slot index into the owning AffinityGroup.inks[] (0..3). Consumed by this transition.")]
+        [Range(0, 3)] public int fromSlot;
+
+        [Tooltip("Destination slot index into the owning AffinityGroup.inks[] (0..3). Produced by this transition.")]
+        [Range(0, 3)] public int toSlot;
+
+        [Tooltip("Cold = fires when heat < threshold. Hot = fires on excess heat above threshold.")]
+        public ThermalRegime regime = ThermalRegime.Hot;
+
+        [Tooltip("Heat threshold. Cold fires below it; Hot fires above it. " +
+                 "Ladder invariant: every cold threshold must be <= every hot threshold.")]
+        [Min(0f)] public float threshold;
+
+        [Tooltip("Fraction of the source ink converted per second.")]
+        [Min(0f)] public float rate = 1f;
+
+        [Tooltip("HOT only: heat consumed per unit converted. Also caps conversion to excess/heatCost " +
+                 "(the heat budget). 0 means the conversion is limited only by rate and available ink.")]
+        [Min(0f)] public float heatCost;
+
+        [Tooltip("COLD only: latent heat released per unit converted (clamped to maxHeat). " +
+                 "Keep 0 to avoid cold->hot feedback.")]
+        [Min(0f)] public float heatRelease;
+    }
+
+    /// <summary>
+    /// A LOCAL heat source: an ink emits heat into its own cell, optionally burning itself as fuel.
+    /// Energy is never minted — heat is added only up to the field's remaining headroom AND only as
+    /// much as the local fuel supports, and fuel is burned in proportion to the heat ACTUALLY added.
+    /// `fuelCost == 0` means add-only emission (the ink is not consumed).
+    /// </summary>
+    [Serializable]
+    public class ThermalSource
+    {
+        [Tooltip("Slot index into the owning AffinityGroup.inks[] (0..3) that emits heat.")]
+        [Range(0, 3)] public int slot;
+
+        [Tooltip("Raw heat emitted per unit of this ink per second (before headroom/fuel capping).")]
+        [Min(0f)] public float heatEmissionRate = 1f;
+
+        [Tooltip("Ink burned per unit of heat ACTUALLY added. 0 = add-only (ink is not consumed).")]
+        [Min(0f)] public float fuelCost;
+    }
+}

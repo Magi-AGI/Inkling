@@ -41,6 +41,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Reaction impulse matrix column 5: motion for pair 2×3")]
         public Vector4 reactionImpulseCol5 = Vector4.zero;
 
+        [Header("Thermal Transitions (local, heat-driven, ORDERED)")]
+        [Tooltip("Ordered list of LOCAL directed transitions (A -> B in the same cell) gated by that " +
+                 "cell's own heat. NOT a pairwise adjacency product matrix — no neighbour sampling, so " +
+                 "these cannot mint mass. ORDER IS LOAD-BEARING: all Cold transitions run in authored " +
+                 "order, then all Hot transitions in authored order. Leave empty to use the built-in " +
+                 "CP7 defaults (condense, freeze, melt, boil).")]
+        public ThermalTransition[] thermalTransitions = new ThermalTransition[0];
+
+        [Tooltip("Local heat sources: an ink emits heat into its own cell, optionally burning itself " +
+                 "as fuel. Leave empty to use the built-in CP7 default (Fire emits heat).")]
+        public ThermalSource[] thermalSources = new ThermalSource[0];
+
         [Header("Rate Settings")]
         [Tooltip("Global multiplier for reaction rates. Reference uses ~10-20 for visible effects.")]
         [Range(0.1f, 50f)]

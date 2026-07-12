@@ -18,9 +18,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
         private SerializedProperty selfWeight;
         private SerializedProperty cardinalWeight;
         private SerializedProperty diagonalWeight;
+        private SerializedProperty thermalTransitions;
+        private SerializedProperty thermalSources;
 
         private bool showProductMatrix = true;
         private bool showReactionImpulseMatrix = true;
+        private bool showThermal = true;
 
         private void OnEnable()
         {
@@ -36,6 +39,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
             selfWeight = serializedObject.FindProperty("selfWeight");
             cardinalWeight = serializedObject.FindProperty("cardinalWeight");
             diagonalWeight = serializedObject.FindProperty("diagonalWeight");
+            thermalTransitions = serializedObject.FindProperty("thermalTransitions");
+            thermalSources = serializedObject.FindProperty("thermalSources");
         }
 
         public override void OnInspectorGUI()
@@ -86,6 +91,28 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
 
                 // Same 6 ink-pair columns as the product matrix (labels hoisted above).
                 DrawProductMatrix(reactionImpulseMatrix, reactionImpulseCol4, reactionImpulseCol5, inkNames, productLabels);
+            }
+
+            EditorGUILayout.Space(10);
+
+            // Thermal Transitions — CP7d slice 1a: minimal exposure only. This custom OnInspectorGUI
+            // would otherwise hide the new serialized fields entirely. Matrix-styled preview grids and
+            // a reorderable list come in slice 1b.
+            showThermal = EditorGUILayout.Foldout(showThermal, "Thermal Transitions (local, heat-driven, ORDERED)", true, EditorStyles.foldoutHeader);
+            if (showThermal)
+            {
+                EditorGUILayout.HelpBox(
+                    "LOCAL, heat-gated directed transitions (A → B within the same cell), driven by that " +
+                    "cell's own heat. These are NOT pairwise adjacency products — do not confuse them with " +
+                    "the Product/Impulse matrices above.\n\n" +
+                    "ORDER IS LOAD-BEARING: all Cold transitions run in authored order, then all Hot ones. " +
+                    "Leave both lists empty to use the built-in CP7 defaults (condense, freeze, melt, boil, " +
+                    "fire heat source).\n\n" +
+                    "Matrix-styled preview UI arrives in a later slice.",
+                    MessageType.Info);
+
+                if (thermalTransitions != null) EditorGUILayout.PropertyField(thermalTransitions, true);
+                if (thermalSources != null) EditorGUILayout.PropertyField(thermalSources, true);
             }
 
             EditorGUILayout.Space(10);
