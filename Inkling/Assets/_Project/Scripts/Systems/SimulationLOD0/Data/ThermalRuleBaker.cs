@@ -49,7 +49,39 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float meltThreshold, meltRate, meltHeatCost;
         public float boilThreshold, boilRate, boilHeatCost;
 
-        /// <summary>Mirrors the current SimDriver serialized defaults (CP5 + CP7b + CP7c).</summary>
+        /// <summary>
+        /// CP8a SHIPPED layout — mirrors the SimDriver serialized defaults. Thresholds are placed
+        /// around a NEUTRAL (room) temperature of 0.5 so that water is the stable phase:
+        ///
+        ///     min 0 .. freeze .15 .. melt .35 .. [NEUTRAL .5] .. condense .65 .. boil .85 .. max 1
+        ///
+        /// At neutral: water neither freezes (needs &lt; .15) nor boils (needs &gt; .85); ice melts
+        /// (.5 &gt; .35); steam condenses (.5 &lt; .65). Note condense sits ABOVE melt — physically
+        /// required, and only legal because the baker validates per-INVERSE-PAIR rather than with a
+        /// global "all cold &lt;= all hot" ladder.
+        /// </summary>
+        public static ThermalDefaults Cp8Defaults => new ThermalDefaults
+        {
+            fireHeatEmissionRate = 1f,
+            fireHeatFuelCost = 0f,
+            condenseThreshold = 0.65f,
+            condenseRate = 1f,
+            condenseHeatRelease = 0f,
+            freezeThreshold = 0.15f,
+            freezeRate = 1f,
+            meltThreshold = 0.35f,
+            meltRate = 1f,
+            meltHeatCost = 0.5f,
+            boilThreshold = 0.85f,
+            boilRate = 1f,
+            boilHeatCost = 0.5f,
+        };
+
+        /// <summary>
+        /// LEGACY zero-baseline layout (pre-CP8a). Retained as a fixture for the kernel-mechanics
+        /// tests, which pin numeric conversion behaviour against these thresholds. NOT the shipped
+        /// defaults — see <see cref="Cp8Defaults"/>.
+        /// </summary>
         public static ThermalDefaults Cp7Defaults => new ThermalDefaults
         {
             fireHeatEmissionRate = 1f,
@@ -297,17 +329,35 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                                 "Per-category replacement: author both, or neither, to avoid surprises.");
             }
 
-            // ── 5. Ladder invariant over the FINAL set: every cold threshold <= every hot ──
-            float maxCold = float.NegativeInfinity, minHot = float.PositiveInfinity;
-            bool hasCold = false, hasHot = false;
-            foreach (var t in rs.Transitions)
+            // ── 5. Cycle invariant over the FINAL set (CP8a) ──────────────────────────────
+            // The hazard is a CYCLE, not a global ordering: a cold A->B whose exact INVERSE hot B->A
+            // can also fire would churn A<->B forever. So for every inverse pair we require
+            //     cold(A->B).threshold <= hot(B->A).threshold
+            // (i.e. the "freeze below, melt above" band must not overlap).
+            //
+            // This REPLACES the old global "max(cold) <= min(hot)" ladder, which was strictly stronger
+            // than the real hazard and rejected the physically correct room-temperature layout: at
+            // neutral, BOTH steam->water (condense) and ice->water (melt) must be active, which forces
+            // condense ABOVE melt. Those two are not inverses — they both PRODUCE water, so they can
+            // safely co-fire. Only true inverses can oscillate.
+            foreach (var cold in rs.Transitions)
             {
-                if (t.regime == ThermalRegime.Cold) { hasCold = true; maxCold = Mathf.Max(maxCold, t.threshold); }
-                else { hasHot = true; minHot = Mathf.Min(minHot, t.threshold); }
+                if (cold.regime != ThermalRegime.Cold) continue;
+
+                foreach (var hot in rs.Transitions)
+                {
+                    if (hot.regime != ThermalRegime.Hot) continue;
+                    // Inverse pair? hot must run exactly backwards along the cold edge.
+                    if (hot.fromField != cold.toField || hot.toField != cold.fromField) continue;
+
+                    if (cold.threshold > hot.threshold)
+                        return rs.Fail(
+                            $"Thermal cycle violated: cold transition (field {cold.fromField} -> {cold.toField}, " +
+                            $"threshold {cold.threshold}) sits ABOVE its inverse hot transition " +
+                            $"(field {hot.fromField} -> {hot.toField}, threshold {hot.threshold}). " +
+                            "A cell between them would convert back and forth forever.");
+                }
             }
-            if (hasCold && hasHot && maxCold > minHot)
-                return rs.Fail($"Thermal ladder violated: highest cold threshold ({maxCold}) exceeds lowest hot threshold ({minHot}). " +
-                               "A cell could both freeze and melt in one pass.");
 
             return rs;
         }

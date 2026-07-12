@@ -45,17 +45,37 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             opQueue = operationQueue;
         }
 
+        // ── CP8a temperature bounds ─────────────────────────────────────────────────────
+        // Sanitized so that: minTemperature <= neutralTemperature <= maxTemperature.
+        // These three are used CONSISTENTLY for heat init/clear, the transport relaxation target,
+        // the thermal clamp floor, and the emission headroom ceiling.
+
+        private float SanitizedMin() => Mathf.Min(ctx.MinTemperature, ctx.MaxHeat);
+
+        private float SanitizedMax() => Mathf.Max(SanitizedMin(), ctx.MaxHeat);
+
+        private float SanitizedNeutral() => Mathf.Clamp(ctx.NeutralTemperature, SanitizedMin(), SanitizedMax());
+
         /// <summary>
-        /// Builds the CP7 defaults from the live SimDriver knobs, sanitizing the ladder
-        /// (freeze &lt;= condense &lt;= melt &lt;= boil) so the default rule set is always baker-valid.
-        /// These are the fallback used per-category when no AffinityGroup authors thermal data.
+        /// Builds the default thermal rules from the live SimDriver knobs. Thresholds are sanitized
+        /// PER INVERSE CYCLE — freeze &lt;= melt (the water&lt;-&gt;ice cycle) and condense &lt;= boil
+        /// (the water&lt;-&gt;steam cycle) — NOT with the old global "cold &lt;= hot" ladder.
+        ///
+        /// Deliberately does NOT force condense &lt;= melt: the room-temperature layout needs condense
+        /// ABOVE melt so that at neutral both steam->water and ice->water run, making water the stable
+        /// phase. Those two are not inverses, so they cannot oscillate.
+        ///
+        /// These defaults are the per-category fallback when no AffinityGroup authors thermal data.
         /// </summary>
         private ThermalDefaults BuildThermalDefaults()
         {
+            // water <-> ice cycle
             float freezeT = Mathf.Max(0f, ctx.FreezeThreshold);
-            float condenseT = Mathf.Max(freezeT, ctx.CondenseThreshold);
-            float meltT = Mathf.Max(condenseT, ctx.MeltThreshold);
-            float boilT = Mathf.Max(meltT, ctx.BoilThreshold);
+            float meltT = Mathf.Max(freezeT, ctx.MeltThreshold);
+
+            // water <-> steam cycle (independent of the ice cycle)
+            float condenseT = Mathf.Max(0f, ctx.CondenseThreshold);
+            float boilT = Mathf.Max(condenseT, ctx.BoilThreshold);
 
             return new ThermalDefaults
             {
@@ -319,12 +339,27 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // inert (near-persistent, no diffusion, ambient 0) so CP1 has no observable effect.
             fc.SetFloat("_ThermalDissipation", HalfLifeToPerSecond(ctx.ThermalDissipationHalfLife));
             fc.SetFloat("_ThermalDiffusion", Mathf.Clamp01(ctx.ThermalDiffusion));
-            fc.SetFloat("_AmbientTemperature", ctx.AmbientTemperature);
+            // Heat TRANSPORT relaxes toward the NEUTRAL (room) temperature. The InkTools uniform keeps
+            // its historical name _AmbientTemperature — it has always meant "the value heat decays
+            // toward", which is exactly the neutral.
+            fc.SetFloat("_AmbientTemperature", SanitizedNeutral());
+
+            // ...but the neutral is ONLY the relaxation target, never the floor. Transport also needs
+            // the valid temperature RANGE: with thermal interactions disabled, the InkTools heat kernels
+            // are the ONLY writers of the heat field, so without a floor/ceiling here an out-of-range
+            // value would persist forever. InkTools clamps every heat write to [_MinTemperature,
+            // _MaxHeat] (Heat.hlsl ClampTemperature), so both uniforms must be uploaded.
+            //
+            // The floor must NOT be the neutral: that would make room temperature the coldest attainable
+            // state and ice could never form. Sub-neutral temperatures are valid and must survive.
+            fc.SetFloat("_MinTemperature", SanitizedMin());
 
             // Heat sources (CP3): fire emits heat. Add-only; does not modify particles.
             fc.SetInt("_EnableHeatSources", ctx.EnableHeatSources ? 1 : 0);
             fc.SetFloat("_FireHeatEmissionRate", Mathf.Max(0f, ctx.FireHeatEmissionRate));
-            fc.SetFloat("_MaxHeat", Mathf.Max(0f, ctx.MaxHeat));
+            // Sanitized so the transport clamp range is exactly the same [min, max] the thermal
+            // kernel uses — a mismatch would let one pass undo the other's clamp.
+            fc.SetFloat("_MaxHeat", SanitizedMax());
 
             fc.SetVector("_TexelSize", new Vector4(1f / ctx.Resolution, 1f / ctx.Resolution, ctx.Resolution, ctx.Resolution));
         }
@@ -503,9 +538,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 ctx.FluidCompute.Dispatch(k, threadGroups, threadGroups, 1);
             }
 
-            // Heat is a persistent field (not cleared per-step); zero BOTH ping-pong sides here so a
-            // mid-run reset can't inherit stale temperature. Clear(Color) clears Read and Write.
-            ctx.Heat?.Clear(Color.clear);
+            // Heat is a persistent field (not cleared per-step). Initialise BOTH ping-pong sides to the
+            // NEUTRAL (room) temperature so a mid-run reset can't inherit stale temperature.
+            //
+            // CP8a: this must be NEUTRAL, not zero. Clearing to 0 would put every cell below
+            // freezeThreshold, so the frame after a reset would flash-freeze all water before the
+            // end-of-pass clamp could rescue it. Clear(Color) clears Read and Write.
+            float neutral = SanitizedNeutral();
+            ctx.Heat?.Clear(new Color(neutral, 0f, 0f, 0f));
 
             int particleCount = ctx.Resolution * ctx.Resolution;
             if (ctx.GpuPromotesHalf)
@@ -762,8 +802,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 var tc = ctx.ThermalInteractionsCompute;
                 int k = ctx.KernelThermalInteractions;
 
-                float ambient = ctx.AmbientTemperature;
-                float maxHeat = Mathf.Max(ambient, ctx.MaxHeat);
+                // CP8a: the thermal clamp floor is MIN temperature, not neutral. Neutral is only the
+                // relaxation/init target (see SanitizedNeutral usage in SetConstants and ClearAll).
+                float minTemp = SanitizedMin();
+                float maxHeat = SanitizedMax();
 
                 // Re-bake + re-upload ONLY when the authored data or the SimDriver knobs actually
                 // change (signature compare) — no per-frame Bake allocation or GPU upload churn.
@@ -772,7 +814,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 tc.SetInt("_Resolution", ctx.Resolution);
                 tc.SetFloat("_FrameDeltaTime", ctx.FrameDeltaTime);
                 tc.SetInt("_EnableThermalInteractions", 1);
-                tc.SetFloat("_AmbientTemperature", ambient);
+                tc.SetFloat("_MinTemperature", minTemp);
                 tc.SetFloat("_MaxHeat", maxHeat);
 
                 // Fuel-like fire (CP7b): this pass owns ink->heat emission while thermal is enabled

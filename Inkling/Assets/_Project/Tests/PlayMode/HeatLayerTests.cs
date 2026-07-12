@@ -110,6 +110,8 @@ namespace Magi.Inkling.Tests.PlayMode
             }
             finally
             {
+                // Never release an RT that is still bound as the active render target.
+                RenderTexture.active = null;
                 buf.Release();
                 hr.Release();
                 hw.Release();
@@ -124,6 +126,13 @@ namespace Magi.Inkling.Tests.PlayMode
             var rt = new RenderTexture(res, res, 0, fmt) { enableRandomWrite = true };
             rt.Create();
             var t = new Texture2D(res, res, TextureFormat.RGBAFloat, false);
+
+            // Graphics.Blit SETS RenderTexture.active to its destination and LEAVES it set. If we don't
+            // restore it, `active` stays pointing at this RT — ReadAllR then captures that stale value
+            // as its "previous" target and dutifully restores it, so the RT is still active when the
+            // caller Release()s it. That is what produced the repeated
+            // "Releasing render texture that is set to be RenderTexture.active!" warnings.
+            var prev = RenderTexture.active;
             try
             {
                 for (int y = 0; y < res; y++)
@@ -132,7 +141,11 @@ namespace Magi.Inkling.Tests.PlayMode
                 t.Apply();
                 Graphics.Blit(t, rt);
             }
-            finally { Object.DestroyImmediate(t); }
+            finally
+            {
+                RenderTexture.active = prev;
+                Object.DestroyImmediate(t);
+            }
             return rt;
         }
 
@@ -156,8 +169,11 @@ namespace Magi.Inkling.Tests.PlayMode
         }
 
         // Dispatch AdvectHeat over a grid with an obstacle mask; returns the resulting heat grid.
+        // CP8a: transport now clamps every write to [minTemp, maxHeat]. `ambient` is the NEUTRAL
+        // relaxation target and is deliberately NOT the floor — sub-neutral temperatures are valid.
         private static float[] DispatchAdvectHeatGrid(float[] heat, float[] obstacle, Vector2 vel,
-            int res, float dt, float dissipation, float ambient)
+            int res, float dt, float dissipation, float ambient,
+            float minTemp = 0f, float maxHeat = 1f)
         {
             var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.inktools.sim/Compute/Fluids.compute");
@@ -175,6 +191,8 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetFloat("_FrameDeltaTime", dt);
                 cs.SetFloat("_ThermalDissipation", dissipation);
                 cs.SetFloat("_AmbientTemperature", ambient);
+                cs.SetFloat("_MinTemperature", minTemp);
+                cs.SetFloat("_MaxHeat", maxHeat);
                 cs.SetTexture(kernel, "_VelocityRead", velRT);
                 cs.SetTexture(kernel, "_HeatRead", hr);
                 cs.SetTexture(kernel, "_HeatWrite", hw);
@@ -185,6 +203,8 @@ namespace Magi.Inkling.Tests.PlayMode
             }
             finally
             {
+                // Never release an RT that is still bound as the active render target.
+                RenderTexture.active = null;
                 hr.Release(); hw.Release(); obs.Release(); velRT.Release();
                 Object.DestroyImmediate(hr); Object.DestroyImmediate(hw);
                 Object.DestroyImmediate(obs); Object.DestroyImmediate(velRT);
@@ -192,7 +212,8 @@ namespace Magi.Inkling.Tests.PlayMode
         }
 
         // Dispatch DiffuseHeat over a grid with an obstacle mask; returns the resulting heat grid.
-        private static float[] DispatchDiffuseHeatGrid(float[] heat, float[] obstacle, int res, float diffusion)
+        private static float[] DispatchDiffuseHeatGrid(float[] heat, float[] obstacle, int res, float diffusion,
+            float minTemp = 0f, float maxHeat = 1f)
         {
             var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
                 "Packages/com.inktools.sim/Compute/Fluids.compute");
@@ -205,6 +226,8 @@ namespace Magi.Inkling.Tests.PlayMode
             {
                 cs.SetVector("_SimulationSize", new Vector2(res, res));
                 cs.SetFloat("_ThermalDiffusion", diffusion);
+                cs.SetFloat("_MinTemperature", minTemp);
+                cs.SetFloat("_MaxHeat", maxHeat);
                 cs.SetTexture(kernel, "_HeatRead", hr);
                 cs.SetTexture(kernel, "_HeatWrite", hw);
                 cs.SetTexture(kernel, "_ObstacleRead", obs);
@@ -214,6 +237,8 @@ namespace Magi.Inkling.Tests.PlayMode
             }
             finally
             {
+                // Never release an RT that is still bound as the active render target.
+                RenderTexture.active = null;
                 hr.Release(); hw.Release(); obs.Release();
                 Object.DestroyImmediate(hr); Object.DestroyImmediate(hw); Object.DestroyImmediate(obs);
             }
@@ -272,11 +297,24 @@ namespace Magi.Inkling.Tests.PlayMode
         }
 
         // 3. FluidSolver.ClearAll() clears both heat ping-pong sides.
+        // CP8a: ClearAll must init the heat field to the NEUTRAL (room) temperature, not zero.
+        // Clearing to 0 puts every cell below freezeThreshold, so the first frame after a reset would
+        // flash-freeze all water before the end-of-pass clamp could rescue it.
+        //
+        // The neutral value used here is deliberately NON-DEFAULT (0.42, not 0.5) so this test cannot
+        // pass against a hardcoded constant — it proves ClearAll reads the configured neutral.
         [UnityTest]
-        public IEnumerator FluidSolverClearAll_ClearsBothHeatSides()
+        public IEnumerator FluidSolverClearAll_InitsBothHeatSidesToNeutral()
         {
 #if UNITY_EDITOR
-            var ctx = new SimulationContext { Resolution = 32 };
+            const float customNeutral = 0.42f;
+            var ctx = new SimulationContext
+            {
+                Resolution = 32,
+                NeutralTemperature = customNeutral,
+                MinTemperature = 0f,
+                MaxHeat = 1f,
+            };
             var resources = new SimulationResources();
             try
             {
@@ -292,17 +330,17 @@ namespace Magi.Inkling.Tests.PlayMode
                 bool kernelsOk = solver.InitializeKernels();
                 Assert.IsTrue(kernelsOk, "Fluid kernels should initialize");
 
-                // Seed both heat sides non-zero, then ClearAll must zero both.
-                FillRT(ctx.Heat.Read, new Color(0.6f, 0f, 0f, 0f));
-                FillRT(ctx.Heat.Write, new Color(0.4f, 0f, 0f, 0f));
+                // Seed both heat sides with values that are neither zero nor the neutral.
+                FillRT(ctx.Heat.Read, new Color(0.9f, 0f, 0f, 0f));
+                FillRT(ctx.Heat.Write, new Color(0.1f, 0f, 0f, 0f));
 
                 solver.ClearAll();
                 yield return null;
 
-                Assert.That(ReadCenterR(ctx.Heat.Read), Is.EqualTo(0f).Within(1e-3f),
-                    "ClearAll must clear Heat.Read");
-                Assert.That(ReadCenterR(ctx.Heat.Write), Is.EqualTo(0f).Within(1e-3f),
-                    "ClearAll must clear Heat.Write");
+                Assert.That(ReadCenterR(ctx.Heat.Read), Is.EqualTo(customNeutral).Within(3e-3f),
+                    "ClearAll must init Heat.Read to the configured neutral temperature (not 0)");
+                Assert.That(ReadCenterR(ctx.Heat.Write), Is.EqualTo(customNeutral).Within(3e-3f),
+                    "ClearAll must init Heat.Write to the configured neutral temperature (not 0)");
             }
             finally
             {
@@ -393,6 +431,8 @@ namespace Magi.Inkling.Tests.PlayMode
             }
             finally
             {
+                // Never release an RT that is still bound as the active render target.
+                RenderTexture.active = null;
                 velocity.Release();
                 heatRead.Release();
                 heatWrite.Release();
@@ -457,6 +497,8 @@ namespace Magi.Inkling.Tests.PlayMode
             }
             finally
             {
+                // Never release an RT that is still bound as the active render target.
+                RenderTexture.active = null;
                 buf.Release();
                 heat.Release();
                 ch0.Release();
@@ -517,6 +559,70 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
+        // ── CP8a: heat TRANSPORT must keep the field inside [minTemp, maxHeat] ───────────────
+        // With thermal interactions DISABLED, these transport kernels are the ONLY writers of the heat
+        // field — nothing downstream clamps. Pre-fix they wrote unclamped, so an out-of-range value
+        // (from a seed, a stale buffer, or a knob change) would persist forever.
+        //
+        // The floor is minTemp, NOT the neutral: a valid sub-neutral temperature must survive transport
+        // untouched, or ice could never form.
+
+        [UnityTest]
+        public IEnumerator AdvectHeat_ClampsToRange_ButPreservesSubNeutral()
+        {
+#if UNITY_EDITOR
+            const int res = 3;
+            const float minTemp = 0.1f, maxHeat = 0.9f, neutral = 0.5f;
+
+            // Zero velocity + retention 1 => transport is a pure copy, so ONLY the clamp can change a value.
+            var heat = new float[res * res];
+            heat[0] = -0.5f;   // below min  => must clamp UP to 0.1
+            heat[1] = 1.5f;    // above max  => must clamp DOWN to 0.9
+            heat[2] = 0.25f;   // sub-neutral but IN range => must be preserved exactly
+            var open = new float[res * res];
+
+            float[] outp = DispatchAdvectHeatGrid(heat, open, Vector2.zero, res,
+                dt: 1f, dissipation: 1f, ambient: neutral, minTemp: minTemp, maxHeat: maxHeat);
+            yield return null;
+
+            Assert.That(outp[0], Is.EqualTo(minTemp).Within(2e-2f), "Below-min must clamp up to minTemperature");
+            Assert.That(outp[1], Is.EqualTo(maxHeat).Within(2e-2f), "Above-max must clamp down to maxHeat");
+            Assert.That(outp[2], Is.EqualTo(0.25f).Within(2e-2f),
+                "A valid sub-neutral temperature must survive transport (neutral is NOT the floor)");
+            Assert.That(outp[2], Is.LessThan(neutral - 2e-2f), "…and must remain sub-neutral");
+#else
+            yield break;
+#endif
+        }
+
+        [UnityTest]
+        public IEnumerator DiffuseHeat_ClampsToRange_ButPreservesSubNeutral()
+        {
+#if UNITY_EDITOR
+            const int res = 3;
+            const float minTemp = 0.1f, maxHeat = 0.9f, neutral = 0.5f;
+
+            // diffusion = 0 => output is a pure copy of the centre, so ONLY the clamp can change a value.
+            var heat = new float[res * res];
+            heat[0] = -0.5f;   // below min
+            heat[1] = 1.5f;    // above max
+            heat[2] = 0.25f;   // sub-neutral, in range
+            var open = new float[res * res];
+
+            float[] outp = DispatchDiffuseHeatGrid(heat, open, res,
+                diffusion: 0f, minTemp: minTemp, maxHeat: maxHeat);
+            yield return null;
+
+            Assert.That(outp[0], Is.EqualTo(minTemp).Within(2e-2f), "Below-min must clamp up to minTemperature");
+            Assert.That(outp[1], Is.EqualTo(maxHeat).Within(2e-2f), "Above-max must clamp down to maxHeat");
+            Assert.That(outp[2], Is.EqualTo(0.25f).Within(2e-2f),
+                "A valid sub-neutral temperature must survive diffusion (neutral is NOT the floor)");
+            Assert.That(outp[2], Is.LessThan(neutral - 2e-2f), "…and must remain sub-neutral");
+#else
+            yield break;
+#endif
+        }
+
         // 8. SimDriver serializes the CP3 thermal fields (source-level assertion — the fields are
         // private [SerializeField], so verify their declarations exist and copy into the context).
         [Test]
@@ -525,12 +631,17 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
             const string path = "Assets/_Project/Scripts/Systems/SimulationLOD0/SimDriver.cs";
             string src = System.IO.File.ReadAllText(path);
+            // CP8a: `ambientTemperature` is split into `neutralTemperature` (relaxation target /
+            // room temperature) and `minTemperature` (the clamp floor). They must NOT be the same
+            // value, or nothing can get colder than room temperature and ice can never form.
             foreach (var field in new[] { "thermalDissipationHalfLife", "thermalDiffusion",
-                "ambientTemperature", "enableHeatSources", "fireHeatEmissionRate", "maxHeat" })
+                "neutralTemperature", "minTemperature", "enableHeatSources", "fireHeatEmissionRate", "maxHeat" })
             {
                 StringAssert.Contains(field, src, $"SimDriver should serialize {field}");
                 StringAssert.Contains($"ctx.", src); // sanity: context copy block present
             }
+            Assert.IsFalse(src.Contains("ambientTemperature"),
+                "CP8a: ambientTemperature must be replaced by neutralTemperature + minTemperature");
             StringAssert.Contains("ctx.FireHeatEmissionRate = fireHeatEmissionRate", src,
                 "SimDriver must copy thermal source fields into the context");
 #else

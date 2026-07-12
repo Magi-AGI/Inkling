@@ -134,15 +134,25 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Range(0f, 8f)]
         [SerializeField] private float reactionImpulseGain = 1f;
 
-        [Header("Heat / Thermal (CP3: diagnostic only, not gameplay)")]
-        [Tooltip("Seconds for heat to fade 50% toward ambient. Large ≈ persistent. Frame-rate independent.")]
+        [Header("Heat / Thermal (temperature field)")]
+        [Tooltip("Seconds for temperature to fade 50% toward NEUTRAL. Large ≈ persistent. Frame-rate independent.")]
         [Min(0.25f)]
         [SerializeField] private float thermalDissipationHalfLife = 1000f;
-        [Tooltip("How fast heat spreads to neighbors per step (0 = none). Heat can diffuse faster than pigments.")]
+        [Tooltip("Thermal conduction: how fast temperature spreads to neighbours per step (0 = none). " +
+                 "This is what lets fire warm — and ice chill — the region AROUND them rather than only " +
+                 "their own cell. Keep small; heat conducts faster than pigments diffuse.")]
         [Range(0f, 1f)]
-        [SerializeField] private float thermalDiffusion = 0f;
-        [Tooltip("Temperature heat decays toward (default 0).")]
-        [SerializeField] private float ambientTemperature = 0f;
+        [SerializeField] private float thermalDiffusion = 0.05f;
+        [Tooltip("NEUTRAL (room) temperature. Temperature relaxes toward this, and the heat field is " +
+                 "INITIALISED to it. Water is the stable phase here: it neither freezes nor boils. " +
+                 "Thresholds are laid out around it (freeze/melt below, condense/boil above).")]
+        [Range(0f, 1f)]
+        [SerializeField] private float neutralTemperature = 0.5f;
+        [Tooltip("Absolute lower clamp for temperature. Must stay BELOW neutral — if this were the " +
+                 "neutral value, nothing could ever get colder than room temperature and ice could " +
+                 "never form.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float minTemperature = 0f;
         [Tooltip("When true, fire concentration emits heat into the heat layer (add-only; does not modify " +
                  "particles). Diagnostic in CP3 — visible only in the Heat debug view, not Combined rendering.")]
         [SerializeField] private bool enableHeatSources = true;
@@ -159,18 +169,25 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                  "state, so baseline is unchanged until enabled. Local-only conversions (no neighbor " +
                  "sampling) are conservation-safe.")]
         [SerializeField] private bool enableThermalInteractions = false;
-        [Tooltip("Heat below which water freezes to ice. Sanitized to <= condenseThreshold.")]
+        // CP8a layout around neutral 0.5:
+        //   freeze .15 .. melt .35 .. [NEUTRAL .5] .. condense .65 .. boil .85
+        // Sanitized PER CYCLE (freeze <= melt, condense <= boil). Condense is deliberately ABOVE melt:
+        // at room temperature both steam->water and ice->water must run, which is what makes water the
+        // stable phase. They are not inverses, so they cannot oscillate.
+        [Tooltip("Temperature below which water freezes to ice. Sanitized to <= meltThreshold (its inverse).")]
         [Range(0f, 1f)]
-        [SerializeField] private float freezeThreshold = 0.2f;
-        [Tooltip("Heat below which steam condenses to water. Sanitized to freeze <= this <= melt.")]
+        [SerializeField] private float freezeThreshold = 0.15f;
+        [Tooltip("Temperature above which ice melts to water. Sanitized to >= freezeThreshold (its inverse). " +
+                 "Sits BELOW neutral so ice melts at room temperature.")]
         [Range(0f, 1f)]
-        [SerializeField] private float condenseThreshold = 0.2f;
-        [Tooltip("Heat above which ice melts to water. Sanitized to condense <= this <= boil.")]
+        [SerializeField] private float meltThreshold = 0.35f;
+        [Tooltip("Temperature below which steam condenses to water. Sanitized to <= boilThreshold (its " +
+                 "inverse). Sits ABOVE neutral so steam condenses at room temperature.")]
         [Range(0f, 1f)]
-        [SerializeField] private float meltThreshold = 0.4f;
-        [Tooltip("Heat above which water boils to steam. Sanitized to >= meltThreshold.")]
+        [SerializeField] private float condenseThreshold = 0.65f;
+        [Tooltip("Temperature above which water boils to steam. Sanitized to >= condenseThreshold (its inverse).")]
         [Range(0f, 1f)]
-        [SerializeField] private float boilThreshold = 0.7f;
+        [SerializeField] private float boilThreshold = 0.85f;
         [Tooltip("Melt/boil/condense conversion rates (fraction of the source ink per second).")]
         [Min(0f)]
         [SerializeField] private float meltRate = 1f;
@@ -443,7 +460,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             ctx.ThermalDissipationHalfLife = thermalDissipationHalfLife;
             ctx.ThermalDiffusion = thermalDiffusion;
-            ctx.AmbientTemperature = ambientTemperature;
+            ctx.NeutralTemperature = neutralTemperature;
+            ctx.MinTemperature = minTemperature;
             ctx.EnableHeatSources = enableHeatSources;
             ctx.FireHeatEmissionRate = fireHeatEmissionRate;
             ctx.MaxHeat = maxHeat;

@@ -28,9 +28,86 @@ namespace Magi.Inkling.Tests.EditMode
         }
 
         // Sources off unless a fuel test needs them (matches the GPU tests, where phase tests keep fire at 0).
+        // CP8a: the 4th arg is the CLAMP FLOOR (minTemperature), NOT the neutral/room temperature.
+        // Neutral is the relaxation target used by heat TRANSPORT; it must never be the clamp floor,
+        // or nothing could ever get colder than room temperature and ice could never form.
         private static void Step(ThermalCpuOracle.Cell c, ThermalRuleSet r, float dt = 1f,
-            float maxHeat = 1f, bool sources = false) =>
-            ThermalCpuOracle.Apply(c, r, dt, 0f, maxHeat, sources);
+            float maxHeat = 1f, bool sources = false, float minTemp = 0f) =>
+            ThermalCpuOracle.Apply(c, r, dt, minTemp, maxHeat, sources);
+
+        // ── CP8a: neutral (room-temperature) baseline ───────────────────────────────────────
+        // Shipped layout (Cp8Defaults): freeze .15 < melt .35 < NEUTRAL .5 < condense .65 < boil .85.
+        // Cp7Defaults is kept as the legacy fixture for the kernel-mechanics tests above.
+        private const float Neutral = 0.5f;
+
+        private static ThermalRuleSet NeutralRules() =>
+            ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
+
+        [Test]
+        public void AtNeutral_WaterIsStable_NeitherFreezesNorBoils()
+        {
+            var c = Cell(water: 1f, heat: Neutral);
+            Step(c, NeutralRules());
+
+            Assert.That(c[InkTypeId.Water], Is.EqualTo(1f).Within(Tol),
+                "Water is the stable phase at room temperature");
+            Assert.That(c[InkTypeId.Ice], Is.EqualTo(0f).Within(Tol), "No freeze at neutral (needs < .15)");
+            Assert.That(c[InkTypeId.Steam], Is.EqualTo(0f).Within(Tol), "No boil at neutral (needs > .85)");
+            Assert.That(c.Heat, Is.EqualTo(Neutral).Within(Tol), "No phase change => no heat drawn");
+        }
+
+        [Test]
+        public void AtNeutral_IceMelts()
+        {
+            var c = Cell(ice: 1f, heat: Neutral);   // .5 > melt .35
+            Step(c, NeutralRules());
+
+            Assert.That(c[InkTypeId.Water], Is.GreaterThan(0f), "Ice melts at room temperature");
+            Assert.That(c[InkTypeId.Ice], Is.LessThan(1f), "Ice consumed");
+            Assert.That(c.Heat, Is.LessThan(Neutral), "Melting draws heat (latent)");
+        }
+
+        [Test]
+        public void AtNeutral_SteamCondenses()
+        {
+            var c = Cell(steam: 1f, heat: Neutral);  // .5 < condense .65
+            Step(c, NeutralRules());
+
+            Assert.That(c[InkTypeId.Water], Is.GreaterThan(0f), "Steam condenses at room temperature");
+            Assert.That(c[InkTypeId.Steam], Is.LessThan(1f), "Steam consumed");
+        }
+
+        [Test]
+        public void NeutralIsNotTheClampFloor_TemperatureCanFallBelowNeutral()
+        {
+            // THE critical CP8a guard. If neutral (.5) were used as the clamp floor, a cell could never
+            // be colder than room temperature and ice could NEVER form. Start at .1 (below neutral,
+            // above minTemp 0) and assert it stays there rather than being clamped up to neutral.
+            var c = Cell(water: 0f, heat: 0.1f);
+            Step(c, NeutralRules(), minTemp: 0f);
+
+            Assert.That(c.Heat, Is.EqualTo(0.1f).Within(Tol),
+                "A sub-neutral temperature must NOT be clamped up to neutral");
+        }
+
+        [Test]
+        public void BelowMinTemperature_ClampsUpToMin_NotToNeutral()
+        {
+            var c = Cell(heat: -0.2f);
+            Step(c, NeutralRules(), minTemp: 0f);
+
+            Assert.That(c.Heat, Is.EqualTo(0f).Within(Tol), "Clamps to minTemperature (0), not neutral (.5)");
+        }
+
+        [Test]
+        public void ColdCell_FreezesWater_ProvingSubNeutralIsReachable()
+        {
+            // The end-to-end consequence of the clamp split: a genuinely cold cell still freezes.
+            var c = Cell(water: 1f, heat: 0.1f);   // < freeze .15
+            Step(c, NeutralRules(), minTemp: 0f);
+
+            Assert.That(c[InkTypeId.Ice], Is.GreaterThan(0f), "Cold water still freezes under the neutral baseline");
+        }
 
         // ── Phase-change parity (mirrors ThermalInteractionsTests GPU expectations) ──────────
 
@@ -133,10 +210,17 @@ namespace Magi.Inkling.Tests.EditMode
         /// STRUCTURAL INVARIANT (discovered while writing the oracle): a hot transition can never drive
         /// heat below its OWN threshold, because the heat-budget cap limits conversion to
         /// `excess / heatCost`, so `heat_after = heat - conv*heatCost >= heat - (heat - threshold) = threshold`.
-        /// Combined with the baker's ladder rule (every cold threshold <= every hot threshold), heat after
-        /// the hot phase is always >= every cold threshold. So the "boiled steam immediately re-condenses"
-        /// hazard is IMPOSSIBLE under a valid ladder — the cold-before-hot phase ordering is belt-and-braces,
-        /// not the sole defence. This test pins that guarantee.
+        ///
+        /// CP8a: combine that with the baker's PER-INVERSE-CYCLE rule — for a hot B->A, its inverse cold
+        /// A->B satisfies `cold.threshold <= hot.threshold` — and it follows that after a hot transition
+        /// fires, heat is still >= the threshold of the cold transition that would undo it. So the
+        /// "boiled steam immediately re-condenses" hazard is IMPOSSIBLE for the cycle that matters; the
+        /// cold-before-hot phase ordering is belt-and-braces, not the sole defence.
+        ///
+        /// (The guarantee is now stated per-cycle rather than globally, which is the correct scope: only
+        /// a transition's own inverse can undo it. Non-inverse cold transitions may sit above a hot
+        /// threshold — that is exactly the room-temperature layout — and they cannot oscillate with it.)
+        /// This test pins that guarantee.
         /// </summary>
         [Test]
         public void HotTransition_NeverDrivesHeatBelowItsOwnThreshold()
@@ -291,7 +375,7 @@ namespace Magi.Inkling.Tests.EditMode
             {
                 fromField = (int)InkTypeId.PlantSeeded, toField = (int)InkTypeId.PlantGrown,
                 regime = ThermalRegime.Hot, threshold = 0.4f, rate = 1f, heatCost = 0.5f
-            }), dt: 1f, ambient: 0f, maxHeat: 2f, enableHeatSources: false);
+            }), dt: 1f, minTemp: 0f, maxHeat: 2f, enableHeatSources: false);
 
             Assert.That(c[InkTypeId.PlantGrown], Is.EqualTo(0.5f).Within(Tol), "Destination not drained (pre-fix: 0.4)");
             Assert.That(c[InkTypeId.PlantSeeded], Is.EqualTo(0f).Within(Tol), "Underflowed source clamps to 0");

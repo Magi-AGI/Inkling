@@ -67,7 +67,11 @@ int _EnableThermalInteractions;
 int _EnableHeatSources;
 
 // Clamp bounds (ambient <= maxHeat, sanitized C#-side).
-float _AmbientTemperature;
+// CP8a: the clamp FLOOR is the absolute minimum temperature, NOT the neutral/room temperature.
+// (Pre-CP8a this was `_AmbientTemperature`, which doubled as the heat-transport relaxation target.
+// Using neutral as the floor would make room temperature the coldest attainable state — ice could
+// never form. Neutral lives on in the InkTools transport kernels; only the clamp moved here.)
+float _MinTemperature;
 float _MaxHeat;
 
 #define REGIME_COLD 0
@@ -202,7 +206,7 @@ void ThermalInteractions(uint3 id : SV_DispatchThreadID)
         heat -= conv * t.heatCost;
     }
 
-    heat = clamp(heat, _AmbientTemperature, _MaxHeat);
+    heat = clamp(heat, _MinTemperature, _MaxHeat);
 
     _ParticlesWrite[idx] = p;
     _HeatWrite[int2(id.xy)] = heat;

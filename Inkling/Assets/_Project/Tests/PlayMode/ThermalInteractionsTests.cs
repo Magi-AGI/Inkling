@@ -27,7 +27,8 @@ namespace Magi.Inkling.Tests.PlayMode
             public float freezeT = 0.2f, condenseT = 0.2f, meltT = 0.4f, boilT = 0.7f;
             public float meltRate = 1f, boilRate = 1f, condenseRate = 1f, freezeRate = 1f;
             public float meltCost = 0.5f, boilCost = 0.5f, condenseRelease = 0f;
-            public float ambient = 0f, maxHeat = 1f;
+            // CP8a: this is the CLAMP FLOOR (minTemperature), not the neutral/room temperature.
+            public float minTemp = 0f, maxHeat = 1f;
             // CP7b fuel-like fire. Sources default OFF so all pre-CP7b phase tests are unaffected.
             public int enableHeatSources = 0;
             public float fireEmissionRate = 1f;
@@ -152,7 +153,7 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetFloat("_FrameDeltaTime", tp.dt);
                 cs.SetInt("_EnableThermalInteractions", tp.enable);
                 cs.SetInt("_EnableHeatSources", tp.enableHeatSources);
-                cs.SetFloat("_AmbientTemperature", tp.ambient);
+                cs.SetFloat("_MinTemperature", tp.minTemp);
                 cs.SetFloat("_MaxHeat", tp.maxHeat);
 
                 cs.SetInt("_ThermalRulesValid", forceValid ?? (rules != null && rules.IsValid ? 1 : 0));
@@ -316,14 +317,14 @@ namespace Magi.Inkling.Tests.PlayMode
         }
 
         // 6. Codex hazard: newly-boiled steam must NOT condense (or condense-then-freeze) in the same
-        // pass. Uses a VALID ladder (freeze/condense 0.3 <= melt 0.4 <= boil 0.5) — the old fixture
-        // (condense 0.5 > boil 0.4) violated the ladder, so the baker now rightly rejects it and the
-        // pass goes inert. "Invalid ladder is inert" is covered separately by InvalidRuleSet_IsInert.
+        // pass. The fixture uses condense 0.3 <= boil 0.5, i.e. a VALID water<->steam inverse cycle.
+        // (The original fixture had condense 0.5 > boil 0.4 — a genuine cycle violation — so the baker
+        // rejects it and the pass goes inert. "Invalid rules are inert" is covered by InvalidRuleSet_IsInert.)
         //
         // Boil converts all the water and draws heat down to EXACTLY the boil threshold — never below
-        // it, because the heat-budget cap gives conv <= excess/heatCost. With the ladder guaranteeing
-        // every cold threshold <= every hot threshold, heat can therefore never fall back into the
-        // condense band within a pass. Cold-before-hot ordering is belt-and-braces on top of that.
+        // it, because the heat-budget cap gives conv <= excess/heatCost. Since the cycle invariant
+        // guarantees condense <= boil, heat can therefore never fall back into the condense band within
+        // a pass. Cold-before-hot ordering is belt-and-braces on top of that.
         [UnityTest]
         public IEnumerator BoilDoesNotTriggerSamePassCondensation()
         {
@@ -461,6 +462,44 @@ namespace Magi.Inkling.Tests.PlayMode
             Assert.That(heatOut[0], Is.LessThanOrEqualTo(1f + 2e-2f), "Heat clamped to _MaxHeat despite large release");
             Assert.That(outp[0].steam, Is.GreaterThanOrEqualTo(0f), "Steam never negative");
             Assert.That(outp[0].water, Is.GreaterThanOrEqualTo(0f), "Water never negative");
+#else
+            yield break;
+#endif
+        }
+
+        // 10b. CP8a: the kernel's clamp FLOOR is _MinTemperature — NOT the neutral/room temperature.
+        // This is the single most consequential CP8a invariant: if neutral (0.5) were the floor, nothing
+        // could ever be colder than room temperature and ice could NEVER form. The CPU oracle covers this,
+        // and the runtime wiring is pinned by a source assertion — but neither proves the KERNEL honours
+        // it, so this closes that gap directly on the GPU.
+        //
+        // An empty-but-valid rule set is used deliberately: no transitions and no sources fire, so the
+        // final clamp is the only thing under test.
+        [UnityTest]
+        public IEnumerator MinTemperature_ClampsBelowMin_ButDoesNotClampToNeutral()
+        {
+#if UNITY_EDITOR
+            var emptyValidRules = CustomRules(null, null);
+            Assume.That(emptyValidRules.IsValid, "an empty rule set must still be valid, so the pass runs");
+
+            var tp = new TP { enableHeatSources = 0, minTemp = 0.1f, maxHeat = 1f };
+
+            // (a) Below the floor => clamps UP to minTemperature.
+            var below = new iparticle[1];
+            RunRules(below, new[] { -0.2f }, 1, tp, emptyValidRules, out float[] belowOut);
+            yield return null;
+            Assert.That(belowOut[0], Is.EqualTo(0.1f).Within(2e-2f),
+                "A temperature below the floor must clamp UP to minTemperature");
+
+            // (b) Above the floor but BELOW neutral (0.5) => must stay put. If the kernel were still
+            // clamping to neutral/ambient, this would be dragged up to 0.5 and the test would fail.
+            var subNeutral = new iparticle[1];
+            RunRules(subNeutral, new[] { 0.25f }, 1, tp, emptyValidRules, out float[] subOut);
+            yield return null;
+            Assert.That(subOut[0], Is.EqualTo(0.25f).Within(2e-2f),
+                "A sub-neutral temperature must NOT be clamped up to neutral (0.5) — ice could never form");
+            Assert.That(subOut[0], Is.LessThan(0.5f - 2e-2f),
+                "Sub-neutral must remain sub-neutral: neutral is the relaxation target, never the clamp floor");
 #else
             yield break;
 #endif
@@ -679,7 +718,7 @@ namespace Magi.Inkling.Tests.PlayMode
         // 22. Runtime wiring guard (CP7d slice 2): the direct shader tests above can all pass while the
         // RUNTIME path never bakes/uploads the rules — freezing would then silently no-op in play (the
         // exact bug class caught in CP7c). Pin that FluidSolver bakes once and uploads the buffers,
-        // and that the ladder is still sanitized when building the defaults.
+        // and that the defaults are still sanitized per inverse cycle when building them (CP8a).
         [Test]
         public void FluidSolver_BakesAndUploadsThermalRuleBuffers()
         {
@@ -695,11 +734,36 @@ namespace Magi.Inkling.Tests.PlayMode
             StringAssert.Contains("\"_ThermalSourceCount\"", src, "must upload the source count");
             StringAssert.Contains("\"_ThermalRulesValid\"", src, "must pass the validity flag to the shader");
 
-            // The default rule set must still be built from the sanitized ladder.
-            StringAssert.Contains("Mathf.Max(0f, ctx.FreezeThreshold)", src,
-                "freezeT must be the floor of the sanitized thermal ladder");
-            StringAssert.Contains("Mathf.Max(freezeT, ctx.CondenseThreshold)", src,
-                "condenseT must be sanitized to >= freezeT (freeze <= condense <= melt <= boil)");
+            // CP8a runtime wiring: the clamp floor must be MIN temperature, and the heat field must be
+            // initialised to NEUTRAL. Getting either wrong is silent — the kernel would be correct while
+            // the runtime freezes the world (the CP7c bug class).
+            StringAssert.Contains("\"_MinTemperature\"", src,
+                "FluidSolver must upload the min-temperature clamp floor to the thermal kernel");
+            Assert.IsFalse(src.Contains("tc.SetFloat(\"_AmbientTemperature\""),
+                "CP8a: the thermal kernel must NOT be clamped to ambient/neutral — that would make room " +
+                "temperature the coldest attainable state and ice could never form");
+            StringAssert.Contains("SanitizedNeutral()", src,
+                "Heat transport target and ClearAll init must both use the sanitized neutral temperature");
+
+            // CP8a: the default rule set must be sanitized PER INVERSE CYCLE, not with the old global
+            // "freeze <= condense <= melt <= boil" ladder.
+            //   water <-> ice   cycle:  freeze <= melt
+            //   water <-> steam cycle:  condense <= boil   (independent of the ice cycle)
+            StringAssert.Contains("Mathf.Max(freezeT, ctx.MeltThreshold)", src,
+                "meltT must be sanitized to >= freezeT (the water<->ice inverse cycle)");
+            StringAssert.Contains("Mathf.Max(condenseT, ctx.BoilThreshold)", src,
+                "boilT must be sanitized to >= condenseT (the water<->steam inverse cycle)");
+
+            // condense must be seeded INDEPENDENTLY of the freeze/melt cycle. The room-temperature
+            // layout requires condense (.65) ABOVE melt (.35), so any coupling of condense to freeze
+            // would clamp it back down and silently destroy water stability at neutral.
+            StringAssert.Contains("Mathf.Max(0f, ctx.CondenseThreshold)", src,
+                "condenseT must be seeded from 0, independent of the freeze/melt cycle");
+            Assert.IsFalse(src.Contains("Mathf.Max(freezeT, ctx.CondenseThreshold)"),
+                "CP8a REGRESSION: condenseT must NOT be coupled to freezeT — that reinstates the global " +
+                "ladder and forces condense <= melt, which breaks room-temperature water stability");
+            Assert.IsFalse(src.Contains("Mathf.Max(condenseT, ctx.MeltThreshold)"),
+                "CP8a REGRESSION: meltT must NOT be coupled to condenseT — melt belongs to the ice cycle");
 
             // The old hardcoded per-phase uniforms must be GONE from the runtime path.
             Assert.IsFalse(src.Contains("\"_MeltThreshold\""),

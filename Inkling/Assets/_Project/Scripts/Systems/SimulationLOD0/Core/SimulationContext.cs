@@ -122,12 +122,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float ReactionImpulseGain;
 
         // ── Heat layer parameters (CP1: inert defaults) ─────────────────────
-        // ThermalDissipationHalfLife: seconds for heat to fade 50% toward ambient (large ≈ persistent).
-        // ThermalDiffusion: 0..1 blend toward neighbor average per step (0 = no spread).
-        // AmbientTemperature: value heat decays toward. Defaults keep the field inert & stable.
+        // ThermalDissipationHalfLife: seconds for heat to fade 50% toward NEUTRAL (large ≈ persistent).
+        // ThermalDiffusion: 0..1 conduction — blend toward neighbour average per step. Non-zero so fire
+        //   and ice actually modulate the temperature AROUND them, not just their own cell.
+        //
+        // CP8a — these two were ONE field (`AmbientTemperature`) and must stay separate:
+        //   NeutralTemperature: room temperature. The value heat RELAXES TOWARD, and what the heat
+        //     field is initialised/cleared to. Water is the stable phase here.
+        //   MinTemperature: the absolute clamp FLOOR. Must NOT be the neutral, or nothing could ever
+        //     get colder than room temperature and ice could never form.
         public float ThermalDissipationHalfLife = 1000f;
-        public float ThermalDiffusion = 0f;
-        public float AmbientTemperature = 0f;
+        public float ThermalDiffusion = 0.05f;
+        public float NeutralTemperature = 0.5f;
+        public float MinTemperature = 0f;
         // Heat sources (CP3): fire emits heat (add-only, diagnostic — heat drives nothing yet).
         public bool EnableHeatSources = true;
         public float FireHeatEmissionRate = 1f;
@@ -136,11 +143,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // Thermal interactions (CP5): heat-driven LOCAL phase changes. Default OFF (opt-in) —
         // this is the first pass that alters ink state, so baseline stays unchanged until enabled.
         public bool EnableThermalInteractions = false;
-        // Thermal ladder: freeze <= condense <= melt <= boil (sanitized before upload).
-        public float FreezeThreshold = 0.2f;
-        public float CondenseThreshold = 0.2f;
-        public float MeltThreshold = 0.4f;
-        public float BoilThreshold = 0.7f;
+        // CP8a thermal layout, placed around the NEUTRAL (room) temperature of 0.5:
+        //   min 0 .. freeze .15 .. melt .35 .. [NEUTRAL .5] .. condense .65 .. boil .85 .. max 1
+        // At neutral water is stable, ice melts, steam condenses. Condense sits ABOVE melt — required,
+        // and legal because the baker validates per-inverse-pair, not with a global cold<=hot ladder.
+        // Sanitized per-cycle before upload: freeze <= melt, condense <= boil.
+        public float FreezeThreshold = 0.15f;
+        public float MeltThreshold = 0.35f;
+        public float CondenseThreshold = 0.65f;
+        public float BoilThreshold = 0.85f;
         public float MeltRate = 1f;
         public float BoilRate = 1f;
         public float CondenseRate = 1f;

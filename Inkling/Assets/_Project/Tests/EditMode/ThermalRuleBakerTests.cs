@@ -212,18 +212,97 @@ namespace Magi.Inkling.Tests.EditMode
             Assert.IsFalse(rs.IsValid);
         }
 
+        // ── CP8a: the ladder is now PER-INVERSE-PAIR, not a global "all cold <= all hot" ──────
+        // The real hazard is a CYCLE: a cold A->B whose exact inverse hot B->A can also fire. Two
+        // transitions that merely happen to be cold/hot but are NOT inverses can safely co-fire — and
+        // the neutral-baseline layout REQUIRES it: at room temperature both steam->water (condense)
+        // and ice->water (melt) are active, so condense sits ABOVE melt.
+
         [Test]
-        public void LadderViolation_ColdAboveHot_IsHardError()
+        public void NeutralLayout_CondenseAboveMelt_IsAccepted()
         {
+            // CP8a room-temperature layout: freeze .15 < melt .35 < NEUTRAL .5 < condense .65 < boil .85.
+            // The OLD global ladder rejected this (max cold .65 > min hot .35). It must now be valid.
             var g = ThermalGroup();
             g.thermalTransitions = new[]
             {
-                T(2, 1, ThermalRegime.Cold, threshold: 0.9f),                  // cold at 0.9
-                T(3, 1, ThermalRegime.Hot, threshold: 0.4f, heatCost: 0.5f),   // hot at 0.4  => violation
+                T(2, 1, ThermalRegime.Cold, threshold: 0.65f),                  // Steam->Water (condense)
+                T(1, 3, ThermalRegime.Cold, threshold: 0.15f),                  // Water->Ice   (freeze)
+                T(3, 1, ThermalRegime.Hot, threshold: 0.35f, heatCost: 0.5f),   // Ice->Water   (melt)
+                T(1, 2, ThermalRegime.Hot, threshold: 0.85f, heatCost: 0.5f),   // Water->Steam (boil)
             };
             var rs = ThermalRuleBaker.Bake(Groups(g), ThermalDefaults.Cp7Defaults);
-            Assert.IsFalse(rs.IsValid, "A cell could both freeze and melt in one pass");
+
+            Assert.IsTrue(rs.IsValid,
+                "Room-temperature layout (condense above melt) must be accepted: " + rs.Error);
+            Assert.AreEqual(4, rs.Transitions.Count);
+        }
+
+        [Test]
+        public void NonInverseColdAboveHot_IsAccepted()
+        {
+            // Cold Steam->Water (.65) and hot Ice->Water (.35) are NOT inverses — both PRODUCE water,
+            // so co-firing is correct physics, not oscillation. (The old global ladder rejected this;
+            // note the pre-CP8a ladder test asserted exactly this non-inverse pair, i.e. it was
+            // guarding a hazard that does not exist.)
+            var g = ThermalGroup();
+            g.thermalTransitions = new[]
+            {
+                T(2, 1, ThermalRegime.Cold, threshold: 0.65f),
+                T(3, 1, ThermalRegime.Hot, threshold: 0.35f, heatCost: 0.5f),
+            };
+            var rs = ThermalRuleBaker.Bake(Groups(g), ThermalDefaults.Cp7Defaults);
+            Assert.IsTrue(rs.IsValid, "Non-inverse cold/hot overlap is safe: " + rs.Error);
+        }
+
+        [Test]
+        public void InverseCycle_FreezeAboveMelt_IsHardError()
+        {
+            // Water->Ice (cold, .5) vs its INVERSE Ice->Water (hot, .3): a cell at .4 would freeze and
+            // melt forever. This is the genuine cycle the invariant exists to stop.
+            var g = ThermalGroup();
+            g.thermalTransitions = new[]
+            {
+                T(1, 3, ThermalRegime.Cold, threshold: 0.5f),                   // Water->Ice
+                T(3, 1, ThermalRegime.Hot, threshold: 0.3f, heatCost: 0.5f),    // Ice->Water (inverse)
+            };
+            var rs = ThermalRuleBaker.Bake(Groups(g), ThermalDefaults.Cp7Defaults);
+            Assert.IsFalse(rs.IsValid, "Inverse water<->ice cycle with cold above hot must be rejected");
+            Assert.IsEmpty(rs.Transitions, "An invalid set must be inert");
+        }
+
+        [Test]
+        public void InverseCycle_CondenseAboveBoil_IsHardError()
+        {
+            // Steam->Water (cold, .9) vs its INVERSE Water->Steam (hot, .5): water<->steam churn.
+            var g = ThermalGroup();
+            g.thermalTransitions = new[]
+            {
+                T(2, 1, ThermalRegime.Cold, threshold: 0.9f),                   // Steam->Water
+                T(1, 2, ThermalRegime.Hot, threshold: 0.5f, heatCost: 0.5f),    // Water->Steam (inverse)
+            };
+            var rs = ThermalRuleBaker.Bake(Groups(g), ThermalDefaults.Cp7Defaults);
+            Assert.IsFalse(rs.IsValid, "Inverse water<->steam cycle with cold above hot must be rejected");
             Assert.IsEmpty(rs.Transitions);
+        }
+
+        [Test]
+        public void Cp8Defaults_UseNeutralLayout_AndBakeCleanly()
+        {
+            // Cp8Defaults is the SHIPPED layout (mirrors the SimDriver serialized defaults).
+            // Cp7Defaults is retained as the legacy kernel-mechanics fixture used by the older tests.
+            var rs = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
+            Assert.IsTrue(rs.IsValid, "The shipped neutral defaults must bake cleanly: " + rs.Error);
+
+            // Order is cold-then-hot: [condense, freeze, melt, boil].
+            Assert.AreEqual(0.65f, rs.Transitions[0].threshold, 1e-5f, "condense");
+            Assert.AreEqual(0.15f, rs.Transitions[1].threshold, 1e-5f, "freeze");
+            Assert.AreEqual(0.35f, rs.Transitions[2].threshold, 1e-5f, "melt");
+            Assert.AreEqual(0.85f, rs.Transitions[3].threshold, 1e-5f, "boil");
+
+            // The shipped layout is exactly the one the OLD global ladder would have rejected.
+            Assert.Greater(rs.Transitions[0].threshold, rs.Transitions[2].threshold,
+                "condense must sit ABOVE melt for room-temperature water stability");
         }
 
         [Test]

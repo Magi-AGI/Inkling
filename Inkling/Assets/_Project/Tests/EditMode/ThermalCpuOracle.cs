@@ -32,7 +32,7 @@ namespace Magi.Inkling.Tests.EditMode
         /// matching the runtime contract.
         /// </summary>
         public static void Apply(Cell c, ThermalRuleSet rules, float dt,
-            float ambient, float maxHeat, bool enableHeatSources)
+            float minTemp, float maxHeat, bool enableHeatSources)
         {
             if (rules == null || !rules.IsValid) return;
 
@@ -97,7 +97,9 @@ namespace Magi.Inkling.Tests.EditMode
             }
 
             // 3. Clamp.
-            c.Heat = Mathf.Clamp(c.Heat, ambient, maxHeat);
+            // CP8a: clamp to the absolute MIN temperature, not the neutral/room temperature — using
+            // neutral as the floor would make room temperature the coldest attainable state.
+            c.Heat = Mathf.Clamp(c.Heat, minTemp, maxHeat);
             for (int i = 0; i < c.Inks.Length; i++)
                 c.Inks[i] = Mathf.Max(0f, c.Inks[i]);
         }
