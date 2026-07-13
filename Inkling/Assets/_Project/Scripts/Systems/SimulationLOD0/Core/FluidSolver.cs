@@ -50,11 +50,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // These three are used CONSISTENTLY for heat init/clear, the transport relaxation target,
         // the thermal clamp floor, and the emission headroom ceiling.
 
-        private float SanitizedMin() => Mathf.Min(ctx.MinTemperature, ctx.MaxHeat);
+        // Single source of truth: the context owns the sanitizers, because OperationQueue needs them
+        // too (CP8b injection heat stamping runs before SetConstants). Duplicating the clamp logic here
+        // would risk the two passes clamping against different ranges.
+        private float SanitizedMin() => ctx.SanitizedMinTemperature;
 
-        private float SanitizedMax() => Mathf.Max(SanitizedMin(), ctx.MaxHeat);
+        private float SanitizedMax() => ctx.SanitizedMaxTemperature;
 
-        private float SanitizedNeutral() => Mathf.Clamp(ctx.NeutralTemperature, SanitizedMin(), SanitizedMax());
+        private float SanitizedNeutral() => ctx.SanitizedNeutralTemperature;
 
         /// <summary>
         /// Builds the default thermal rules from the live SimDriver knobs. Thresholds are sanitized
@@ -263,6 +266,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     ctx.FluidKernelAdvectHeat = -1;
                     ctx.FluidKernelDiffuseHeat = -1;
                     ctx.FluidKernelAddHeatSources = -1;
+                }
+
+                // CP8b: injection heat stamp. Separate try so an older InkTools package (without the
+                // kernel) degrades to "no injection temperature" rather than disabling heat transport.
+                try
+                {
+                    ctx.FluidKernelStampInjectionHeat = ctx.FluidCompute.FindKernel("StampInjectionHeat");
+                }
+                catch
+                {
+                    ctx.FluidKernelStampInjectionHeat = -1;
                 }
 
                 // ThermalInteractions is a separate Inkling compute shader (CP5). Always reset the

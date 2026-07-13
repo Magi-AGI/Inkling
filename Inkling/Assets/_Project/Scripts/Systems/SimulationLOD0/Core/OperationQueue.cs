@@ -717,6 +717,47 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             pendingForceInjections.Clear();
         }
 
+        /// <summary>
+        /// CP8b: stamps the injected ink's characteristic temperature into the heat field, using the
+        /// injection's own centre/radius/falloff — Fire at the ceiling, Water at the neutral baseline,
+        /// Ice at the floor (so painting ice immediately creates genuinely sub-neutral cold, which was
+        /// the user-reported gap). Every other ink leaves heat untouched.
+        ///
+        /// This is a ONE-SHOT INITIAL CONDITION per queued injection, not a per-frame source, so it does
+        /// NOT revive the free continuous fire heat that CP7b/CP7d removed — fire's ongoing emission
+        /// stays owned by the thermal-interactions pass, with its fuel cost.
+        ///
+        /// Runs inside ProcessPending(), which is BEFORE FluidSolver.Step() uploads SetConstants(), so
+        /// the clamp bounds must be uploaded here or the kernel would clamp against stale/zero uniforms
+        /// (on the very first frame, to [0,0] — driving the whole field to zero).
+        ///
+        /// Read -> Write -> Swap per injection, so queued injections compose deterministically: a later
+        /// injection sees the temperature stamped by an earlier one.
+        /// </summary>
+        private void StampInjectionHeat(Vector2 uvPosition, int inkTypeIndex, int threadGroups)
+        {
+            if (ctx.Heat == null || ctx.FluidKernelStampInjectionHeat < 0 || ctx.FluidCompute == null)
+                return;
+
+            if (!ctx.TryGetInjectionTemperature(inkTypeIndex, out float target))
+                return;   // this ink has no characteristic temperature: leave the heat field alone
+
+            int k = ctx.FluidKernelStampInjectionHeat;
+            var fc = ctx.FluidCompute;
+
+            fc.SetVector("_SimulationSize", new Vector2(ctx.Resolution, ctx.Resolution));
+            fc.SetVector("_ForcePosition", uvPosition * ctx.Resolution);
+            fc.SetFloat("_ForceRadius", ctx.ForceRadius);
+            fc.SetFloat("_InjectionTargetHeat", target);
+            fc.SetFloat("_MinTemperature", ctx.SanitizedMinTemperature);
+            fc.SetFloat("_MaxHeat", ctx.SanitizedMaxTemperature);
+
+            fc.SetTexture(k, "_HeatRead", ctx.Heat.Read);
+            fc.SetTexture(k, "_HeatWrite", ctx.Heat.Write);
+            fc.Dispatch(k, threadGroups, threadGroups, 1);
+            ctx.Heat.Swap();
+        }
+
         private void ProcessDensityInjections(int threadGroups)
         {
             if (pendingDensityInjections.Count == 0 || ctx.FluidCompute == null || ctx.Density == null) return;
@@ -763,6 +804,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                         ctx.SwapParticleBuffers();
                     }
                 }
+
+                // CP8b: heat stamping is per-injection (the batched injection buffers carry no heat RT),
+                // so dispatch it once per pending injection. Same skip rule as the batch above.
+                foreach (var d in pendingDensityInjections)
+                {
+                    float intensity = Mathf.Max(d.color.r, Mathf.Max(d.color.g, d.color.b));
+                    if (intensity <= 0f) continue;
+                    StampInjectionHeat(d.position, d.inkTypeIndex, threadGroups);
+                }
             }
             else
             {
@@ -792,6 +842,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                         ctx.FluidCompute.Dispatch(ctx.FluidKernelAddParticlesGaussian, threadGroups, threadGroups, 1);
                         ctx.SwapParticleBuffers();
                     }
+
+                    // CP8b: stamp this injection's characteristic temperature. Must come AFTER the
+                    // density/particle dispatches above, which overwrite _ForcePosition/_ForceRadius/
+                    // _SimulationSize on the same compute shader.
+                    StampInjectionHeat(d.position, d.inkTypeIndex, threadGroups);
                 }
             }
             pendingDensityInjections.Clear();

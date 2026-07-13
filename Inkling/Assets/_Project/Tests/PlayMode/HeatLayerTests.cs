@@ -76,7 +76,9 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
         // Dispatches AddHeatSources on a 1-cell grid and returns the resulting center heat.
         // Uses the raw iparticle float layout (stride 56); fire is field index 0.
-        private static float DispatchAddHeatSources(float fire, float heat0, int enable, float rate, float dt, float maxHeat)
+        // minTemp defaults to 0 so the original CP3 expectations (no-fire cell stays at 0) hold.
+        private static float DispatchAddHeatSources(float fire, float heat0, int enable, float rate, float dt,
+            float maxHeat, float minTemp = 0f)
         {
             const int res = 1;
             var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
@@ -100,6 +102,11 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetFloat("_FrameDeltaTime", dt);
                 cs.SetInt("_EnableHeatSources", enable);
                 cs.SetFloat("_FireHeatEmissionRate", rate);
+                // Upload the FULL clamp range, never just the ceiling. Compute-shader uniforms persist
+                // on the shared ComputeShader asset between dispatches, so omitting _MinTemperature made
+                // this helper inherit whatever floor a previously-run test had set (the CP8b stamp tests
+                // set 0.1), silently clamping the no-fire case up off zero. Always set both bounds.
+                cs.SetFloat("_MinTemperature", minTemp);
                 cs.SetFloat("_MaxHeat", maxHeat);
                 cs.SetBuffer(kernel, "_ParticlesRead", buf);
                 cs.SetTexture(kernel, "_HeatRead", hr);
@@ -553,7 +560,143 @@ namespace Magi.Inkling.Tests.PlayMode
             float disabled = DispatchAddHeatSources(1f, 0.25f, 0, 5f, 1f, 1f);
             Assert.That(disabled, Is.EqualTo(0.25f).Within(2e-2f), "Disabled sources must pass heat through");
 
+            // CP8a floor: the kernel clamps on EVERY path, so a below-floor value is lifted to
+            // _MinTemperature — even with no fire and sources enabled.
+            float lifted = DispatchAddHeatSources(0f, 0f, 1, 1f, 1f, 1f, minTemp: 0.2f);
+            Assert.That(lifted, Is.EqualTo(0.2f).Within(2e-2f),
+                "AddHeatSources must clamp up to _MinTemperature on the no-fire path too");
+
+            // UNIFORM-LEAK GUARD: compute-shader uniforms persist on the shared ComputeShader asset
+            // between dispatches. Re-running the no-fire case with an explicit floor of 0 must return 0,
+            // NOT the 0.2 floor left behind by the dispatch above. This is exactly the leak that made
+            // this test fail once the CP8b stamp tests (which set _MinTemperature = 0.1) ran before it.
+            float afterLeak = DispatchAddHeatSources(0f, 0f, 1, 1f, 1f, 1f, minTemp: 0f);
+            Assert.That(afterLeak, Is.EqualTo(0f).Within(1e-3f),
+                "Helper must upload _MinTemperature every dispatch — a stale floor from a prior test must not leak in");
+
             yield return null;
+#else
+            yield break;
+#endif
+        }
+
+        // ── CP8b: injection heat stamping ────────────────────────────────────────────────────
+
+#if UNITY_EDITOR
+        // Dispatch StampInjectionHeat: writes `target` into the heat field with the injection's own
+        // gaussian falloff, clamped to [minTemp, maxHeat]. Cells outside the radius pass through.
+        private static float[] DispatchStampInjectionHeat(float[] heat, int res,
+            Vector2 centerPixel, float radius, float target, float minTemp, float maxHeat)
+        {
+            var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.inktools.sim/Compute/Fluids.compute");
+            Assert.IsNotNull(cs, "Fluids.compute should load");
+            int kernel = cs.FindKernel("StampInjectionHeat");
+
+            var hr = MakeSeededRT(res, RenderTextureFormat.RHalf, heat);
+            var hw = MakeSeededRT(res, RenderTextureFormat.RHalf, new float[res * res]);
+            try
+            {
+                cs.SetVector("_SimulationSize", new Vector2(res, res));
+                cs.SetVector("_ForcePosition", centerPixel);
+                cs.SetFloat("_ForceRadius", radius);
+                cs.SetFloat("_InjectionTargetHeat", target);
+                cs.SetFloat("_MinTemperature", minTemp);
+                cs.SetFloat("_MaxHeat", maxHeat);
+                cs.SetTexture(kernel, "_HeatRead", hr);
+                cs.SetTexture(kernel, "_HeatWrite", hw);
+                int g = Mathf.CeilToInt(res / 8f);
+                cs.Dispatch(kernel, g, g, 1);
+                return ReadAllR(hw, res);
+            }
+            finally
+            {
+                RenderTexture.active = null;
+                hr.Release(); hw.Release();
+                Object.DestroyImmediate(hr); Object.DestroyImmediate(hw);
+            }
+        }
+#endif
+
+        // Ice must stamp the FLOOR — this is the user-reported bug: painting ice never dropped the
+        // temperature below the baseline. The centre must land exactly on minTemperature (sub-neutral),
+        // and a far cell must be untouched.
+        [UnityTest]
+        public IEnumerator StampInjectionHeat_Ice_StampsMinTemperature_SubNeutral()
+        {
+#if UNITY_EDITOR
+            const int res = 8;
+            const float minTemp = 0.1f, maxHeat = 0.9f, neutral = 0.5f;
+
+            var heat = new float[res * res];
+            for (int i = 0; i < heat.Length; i++) heat[i] = neutral;   // world at room temperature
+
+            float[] outp = DispatchStampInjectionHeat(heat, res,
+                centerPixel: new Vector2(4f, 4f), radius: 3f, target: minTemp,
+                minTemp: minTemp, maxHeat: maxHeat);
+            yield return null;
+
+            int centre = 4 * res + 4;
+            Assert.That(outp[centre], Is.EqualTo(minTemp).Within(2e-2f),
+                "Ice injection must stamp the MINIMUM temperature at the centre");
+            Assert.That(outp[centre], Is.LessThan(neutral - 2e-2f),
+                "…which is genuinely sub-neutral — that is the whole point of the fix");
+            Assert.That(outp[0], Is.EqualTo(neutral).Within(2e-2f),
+                "A cell outside the injection radius must pass through unchanged");
+#else
+            yield break;
+#endif
+        }
+
+        [UnityTest]
+        public IEnumerator StampInjectionHeat_Fire_StampsMaxTemperature()
+        {
+#if UNITY_EDITOR
+            const int res = 8;
+            const float minTemp = 0.1f, maxHeat = 0.9f, neutral = 0.5f;
+
+            var heat = new float[res * res];
+            for (int i = 0; i < heat.Length; i++) heat[i] = neutral;
+
+            float[] outp = DispatchStampInjectionHeat(heat, res,
+                centerPixel: new Vector2(4f, 4f), radius: 3f, target: maxHeat,
+                minTemp: minTemp, maxHeat: maxHeat);
+            yield return null;
+
+            Assert.That(outp[4 * res + 4], Is.EqualTo(maxHeat).Within(2e-2f),
+                "Fire injection must stamp the MAXIMUM temperature at the centre");
+            Assert.That(outp[0], Is.EqualTo(neutral).Within(2e-2f), "Outside the radius: unchanged");
+#else
+            yield break;
+#endif
+        }
+
+        [UnityTest]
+        public IEnumerator StampInjectionHeat_Water_StampsNeutral_AndClampsOutOfRangeTarget()
+        {
+#if UNITY_EDITOR
+            const int res = 8;
+            const float minTemp = 0.1f, maxHeat = 0.9f, neutral = 0.5f;
+
+            // Start the world COLD, then paint water: it must be pulled up to the neutral baseline.
+            var heat = new float[res * res];
+            for (int i = 0; i < heat.Length; i++) heat[i] = minTemp;
+
+            float[] outp = DispatchStampInjectionHeat(heat, res,
+                centerPixel: new Vector2(4f, 4f), radius: 3f, target: neutral,
+                minTemp: minTemp, maxHeat: maxHeat);
+            yield return null;
+
+            Assert.That(outp[4 * res + 4], Is.EqualTo(neutral).Within(2e-2f),
+                "Water injection must stamp the NEUTRAL baseline at the centre");
+            Assert.That(outp[0], Is.EqualTo(minTemp).Within(2e-2f), "Outside the radius: unchanged");
+
+            // An out-of-range target must still be clamped into [min, max].
+            float[] clamped = DispatchStampInjectionHeat(heat, res,
+                centerPixel: new Vector2(4f, 4f), radius: 3f, target: 5f,
+                minTemp: minTemp, maxHeat: maxHeat);
+            Assert.That(clamped[4 * res + 4], Is.EqualTo(maxHeat).Within(2e-2f),
+                "An out-of-range stamp target must clamp to maxHeat");
 #else
             yield break;
 #endif
@@ -620,6 +763,61 @@ namespace Magi.Inkling.Tests.PlayMode
             Assert.That(outp[2], Is.LessThan(neutral - 2e-2f), "…and must remain sub-neutral");
 #else
             yield break;
+#endif
+        }
+
+        // CP8b: the kernel above can be perfect while the runtime never dispatches it — the CP7c bug
+        // class. Pin that OperationQueue stamps injection heat on BOTH injection paths (batched and
+        // fallback), uploads the clamp bounds itself (ProcessPending runs BEFORE FluidSolver.Step's
+        // SetConstants, so the uniforms would otherwise be stale/zero), and swaps the heat ping-pong.
+        [Test]
+        public void OperationQueue_StampsInjectionHeat_OnBothInjectionPaths()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Scripts/Systems/SimulationLOD0/Core/OperationQueue.cs";
+            string src = System.IO.File.ReadAllText(path);
+
+            StringAssert.Contains("StampInjectionHeat", src,
+                "OperationQueue must dispatch the injection heat stamp");
+            StringAssert.Contains("TryGetInjectionTemperature", src,
+                "Ink -> temperature mapping must come from the context (Fire=max, Water=neutral, Ice=min)");
+            StringAssert.Contains("\"_InjectionTargetHeat\"", src, "must upload the stamp target");
+            StringAssert.Contains("\"_MinTemperature\"", src,
+                "queue must upload the clamp floor itself — SetConstants has not run yet");
+            StringAssert.Contains("ctx.Heat.Swap()", src,
+                "heat ping-pong must be swapped so the next pass reads the stamped temperature");
+#else
+            Assert.Ignore("Editor-only source assertion");
+#endif
+        }
+
+        // CP8b: fire must NOT regain a free continuous heat source. CP7b/CP7d deliberately skip the
+        // legacy AddHeatSources pass when thermal interactions own fire->heat emission (with fuel cost).
+        [Test]
+        public void CP8b_DoesNotRevive_FreeContinuousFireHeat()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Scripts/Systems/SimulationLOD0/Core/FluidSolver.cs";
+            string src = System.IO.File.ReadAllText(path);
+            StringAssert.Contains("!ctx.EnableThermalInteractions", src,
+                "The AddHeatSources double-source guard must remain: injection stamping is a one-shot " +
+                "initial condition, NOT a revival of free per-frame fire heat");
+#else
+            Assert.Ignore("Editor-only source assertion");
+#endif
+        }
+
+        // CP8b: lower the ice obstacle threshold so ice and inks overlap more.
+        [Test]
+        public void IceAsset_ObstacleThreshold_IsLowered()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Inks/Ice.asset";
+            string src = System.IO.File.ReadAllText(path);
+            StringAssert.Contains("obstacleThreshold: 0.15", src,
+                "Ice obstacle threshold should be lowered from 0.2 to 0.15 for more ink/ice overlap");
+#else
+            Assert.Ignore("Editor-only source assertion");
 #endif
         }
 

@@ -1,5 +1,6 @@
 using UnityEngine;
 using Magi.UnityTools.Core;
+using Magi.InkTools.Simulation;
 
 namespace Magi.Inkling.Systems.SimulationLOD0
 {
@@ -135,6 +136,32 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float ThermalDiffusion = 0.05f;
         public float NeutralTemperature = 0.5f;
         public float MinTemperature = 0f;
+
+        // Sanitized temperature bounds, guaranteeing min <= neutral <= max. These live on the context
+        // (not just FluidSolver) because OperationQueue also needs them: injection heat stamping runs
+        // during ProcessPending(), which is BEFORE FluidSolver.Step() uploads SetConstants() — so the
+        // queue must upload the bounds itself or the clamp would use stale/zero uniforms.
+        public float SanitizedMinTemperature => Mathf.Min(MinTemperature, MaxHeat);
+        public float SanitizedMaxTemperature => Mathf.Max(SanitizedMinTemperature, MaxHeat);
+        public float SanitizedNeutralTemperature =>
+            Mathf.Clamp(NeutralTemperature, SanitizedMinTemperature, SanitizedMaxTemperature);
+
+        /// <summary>
+        /// The temperature an injection of this ink stamps into the heat field (CP8b).
+        /// Fire injects at the ceiling, Water at the neutral/room baseline, Ice at the floor — so ice
+        /// can create genuinely sub-neutral cold the moment it is painted. Every other ink returns
+        /// false and leaves the heat field untouched.
+        /// </summary>
+        public bool TryGetInjectionTemperature(int inkTypeIndex, out float targetTemperature)
+        {
+            switch ((InkTypeId)inkTypeIndex)
+            {
+                case InkTypeId.Fire:  targetTemperature = SanitizedMaxTemperature;     return true;
+                case InkTypeId.Water: targetTemperature = SanitizedNeutralTemperature; return true;
+                case InkTypeId.Ice:   targetTemperature = SanitizedMinTemperature;     return true;
+                default:              targetTemperature = 0f;                          return false;
+            }
+        }
         // Heat sources (CP3): fire emits heat (add-only, diagnostic — heat drives nothing yet).
         public bool EnableHeatSources = true;
         public float FireHeatEmissionRate = 1f;
@@ -202,6 +229,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public int FluidKernelAdvectHeat = -1;
         public int FluidKernelDiffuseHeat = -1;
         public int FluidKernelAddHeatSources = -1;
+        public int FluidKernelStampInjectionHeat = -1;
         public int KernelThermalInteractions = -1;
 
         // ── Helpers ─────────────────────────────────────────────────────────
