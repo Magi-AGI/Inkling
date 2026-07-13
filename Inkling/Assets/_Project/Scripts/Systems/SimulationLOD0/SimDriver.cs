@@ -140,9 +140,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float thermalDissipationHalfLife = 1000f;
         [Tooltip("Thermal conduction: how fast temperature spreads to neighbours per step (0 = none). " +
                  "This is what lets fire warm — and ice chill — the region AROUND them rather than only " +
-                 "their own cell. Keep small; heat conducts faster than pigments diffuse.")]
+                 "their own cell. Conduction ignores the obstacle mask (CP8d), so solid ink conducts " +
+                 "rather than insulating. CP8e raised this from 0.05, which was too subtle to read on " +
+                 "screen: fire heat and ice cold barely reached past their own cells.")]
         [Range(0f, 1f)]
-        [SerializeField] private float thermalDiffusion = 0.05f;
+        [SerializeField] private float thermalDiffusion = 0.2f;
         [Tooltip("NEUTRAL (room) temperature. Temperature relaxes toward this, and the heat field is " +
                  "INITIALISED to it. Water is the stable phase here: it neither freezes nor boils. " +
                  "Thresholds are laid out around it (freeze/melt below, condense/boil above).")]
@@ -211,6 +213,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                  "thermal interactions are enabled — that pass then owns fire->heat emission.")]
         [Min(0f)]
         [SerializeField] private float fireHeatFuelCost = 0f;
+
+        [Tooltip("Temperature above which plant SPONTANEOUSLY COMBUSTS from ambient heat alone. CP8e " +
+                 "raised this to 0.98 — just shy of max heat (1.0) — because heat-only ignition is meant " +
+                 "to be a rare, extreme event, not the normal way fire spreads. Ordinary hot-but-not-" +
+                 "furnace cells (e.g. 0.9) must NOT ignite vegetation. Fire spreading into adjacent " +
+                 "plant is still handled by the legacy Fire x Plant CONTACT reaction in OrganicGroup, " +
+                 "which is unaffected by this threshold.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float plantIgnitionThreshold = 0.98f;
+        [Tooltip("Fraction of local plant converted to fire per second once above the ignition temperature.")]
+        [Min(0f)]
+        [SerializeField] private float plantIgnitionRate = 0.5f;
+        [Tooltip("Heat consumed per unit of plant burned (endothermic pyrolysis). Also bounds how much " +
+                 "plant a hot cell can ignite in one step.")]
+        [Min(0f)]
+        [SerializeField] private float plantIgnitionHeatCost = 0.25f;
 
         [Header("Black Body Ink (Fallback)")]
         [SerializeField] private bool enableBlackBodyClearingFallback = false;
@@ -479,6 +497,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.BoilHeatCost = boilHeatCost;
             ctx.CondenseHeatRelease = condenseHeatRelease;
             ctx.FireHeatFuelCost = fireHeatFuelCost;
+            ctx.PlantIgnitionThreshold = plantIgnitionThreshold;
+            ctx.PlantIgnitionRate = plantIgnitionRate;
+            ctx.PlantIgnitionHeatCost = plantIgnitionHeatCost;
 
             ctx.EnableBlackBodyClearingFallback = enableBlackBodyClearingFallback;
             ctx.BlackBodyThresholdFallback = blackBodyThresholdFallback;

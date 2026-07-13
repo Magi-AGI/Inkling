@@ -807,15 +807,158 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
-        // CP8b: lower the ice obstacle threshold so ice and inks overlap more.
+        // CP8d: the shipped scene must actually be in thermal steam mode, with the CP8 NEUTRAL layout.
+        // The prior playtest config had condenseThreshold 0.2 with neutral 0.5 — meaning steam needed to
+        // be BELOW 0.2 to condense, so at room temperature steam never condensed and accumulated forever.
+        // Steam mode was wired but physically dead. These assertions pin the corrected layout.
         [Test]
-        public void IceAsset_ObstacleThreshold_IsLowered()
+        public void MainScene_IsInThermalSteamMode_WithNeutralLayout()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Scenes/Main.unity";
+            string src = System.IO.File.ReadAllText(path);
+
+            StringAssert.Contains("enableThermalInteractions: 1", src, "Thermal (CP5/CP8) mode must be ON");
+            StringAssert.Contains("useInkInteractions: 1", src, "Organic ink interactions stay ON");
+
+            // Legacy adjacency ThermalGroup must be out of the active list; Organic groups stay.
+            Assert.IsFalse(src.Contains("guid: bb5975a015651cc47aab80f9ac703167"),
+                "Legacy ThermalGroup must be removed from the scene's affinityGroups (asset itself is kept on disk)");
+            StringAssert.Contains("guid: da76efa99d9a5cf4aadca3f811d21554", src, "OrganicGroup must remain");
+            StringAssert.Contains("guid: 3892ae7ecffb33f4cad3ec4e410eee4c", src, "OrganicGroup2 must remain");
+
+            // CP8e: the contact-quench group must be ACTIVE. Fire+Water annihilation lives in the
+            // pairwise product matrix, not the thermal pass, and neither Organic group can express it
+            // (OrganicGroup has Fire/Water but no Steam slot; OrganicGroup2 has Steam but no Fire/Water).
+            // Without this group in the scene there is no quench at all and fire spreads through water.
+            StringAssert.Contains("guid: 7f3c1a9e5b204d64a8e1c6f0d29b4e73", src,
+                "ContactReactionsGroup must be in the scene's affinityGroups, or Fire+Water never quenches");
+
+            // CP8 neutral layout: freeze <= melt < neutral < condense <= boil.
+            StringAssert.Contains("neutralTemperature: 0.5", src);
+            StringAssert.Contains("freezeThreshold: 0.15", src);
+            StringAssert.Contains("meltThreshold: 0.35", src);
+            StringAssert.Contains("condenseThreshold: 0.65", src,
+                "Condense must sit ABOVE neutral, or steam never condenses at room temperature");
+            StringAssert.Contains("boilThreshold: 0.85", src);
+
+            // Conduction must be ON, or fire/ice cannot influence the temperature around them at all.
+            // CP8e raised this from 0.05, which read as almost no conduction on screen.
+            Assert.IsFalse(src.Contains("thermalDiffusion: 0\n") || src.Contains("thermalDiffusion: 0\r\n"),
+                "thermalDiffusion must be non-zero so heat actually conducts");
+            StringAssert.Contains("thermalDiffusion: 0.2", src);
+
+            // CP8e: spontaneous heat-only plant combustion must be a near-max, rare event. Everyday
+            // fire spread is the legacy Fire x Plant CONTACT reaction, which this does not gate.
+            StringAssert.Contains("plantIgnitionThreshold: 0.98", src,
+                "Heat-only plant ignition must be near max heat, not merely 'hot'");
+#else
+            Assert.Ignore("Editor-only source assertion");
+#endif
+        }
+
+#if UNITY_EDITOR
+        // Reads "  eRC: <value>" out of an AffinityGroup YAML matrix block. Row = output slot,
+        // column = pair index — the convention documented on AffinityGroup.productMatrix.
+        private static float ReadMatrixCell(string yaml, string blockKey, int row, int col)
+        {
+            int block = yaml.IndexOf(blockKey + ":", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(block, 0, $"'{blockKey}' block missing from asset");
+
+            var m = System.Text.RegularExpressions.Regex.Match(
+                yaml.Substring(block), $@"e{row}{col}:\s*(-?[0-9.eE+-]+)");
+            Assert.IsTrue(m.Success, $"{blockKey}.e{row}{col} missing");
+            return float.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        }
+#endif
+
+        // CP8e: Fire + Water annihilate ON CONTACT into Steam, so fire cannot spread freely through
+        // water. This is CONTACT CHEMISTRY, not a phase change — it lives in the pairwise product
+        // matrix and fires at ANY temperature, including well below boilThreshold. It could not be
+        // added to either existing active group: productMatrix coefficients are per-slot WITHIN a
+        // group, and OrganicGroup's slots have no Steam while OrganicGroup2's have no Fire/Water.
+        [Test]
+        public void ContactReactionsGroup_QuenchesFireAndWaterIntoSteam_Conservingly()
+        {
+#if UNITY_EDITOR
+            const string path = "Assets/_Project/Inks/ContactReactionsGroup.asset";
+            Assert.IsTrue(System.IO.File.Exists(path), "ContactReactionsGroup.asset must exist");
+            string src = System.IO.File.ReadAllText(path);
+
+            // Slot ORDER is load-bearing: col0 is the pair (slot0 x slot1), so Fire and Water must be
+            // slots 0 and 1, and Steam must be a slot at all for the reaction to have anywhere to go.
+            int fire  = src.IndexOf("b95f0ee9596be374186a08a2bcba1023", System.StringComparison.Ordinal);
+            int water = src.IndexOf("2a479c9de68b35042b619687310e729a", System.StringComparison.Ordinal);
+            int steam = src.IndexOf("84ea5c909487b764c934fad7c76e218d", System.StringComparison.Ordinal);
+            int ice   = src.IndexOf("4d5cac36951b253469623e9d3dcf56dd", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(fire, 0, "slot 0 must be Fire");
+            Assert.Greater(water, fire, "slot 1 must be Water (after Fire)");
+            Assert.Greater(steam, water, "slot 2 must be Steam (after Water)");
+            Assert.Greater(ice, steam, "slot 3 must be Ice (after Steam)");
+
+            // Column 0 = pair 0x1 = Fire x Water. Row = output slot.
+            float dFire  = ReadMatrixCell(src, "productMatrix", 0, 0);
+            float dWater = ReadMatrixCell(src, "productMatrix", 1, 0);
+            float dSteam = ReadMatrixCell(src, "productMatrix", 2, 0);
+            float dIce   = ReadMatrixCell(src, "productMatrix", 3, 0);
+
+            Assert.Less(dFire, 0f, "Quench must CONSUME fire — that is the whole point");
+            Assert.Less(dWater, 0f, "Quench must CONSUME water");
+            Assert.Greater(dSteam, 0f, "Quench must PRODUCE steam");
+            Assert.AreEqual(0f, dIce, 1e-5f, "Quench must not touch ice");
+
+            // CONSERVATION: a zero column-sum is what makes this event mass-conserving under
+            // ApplyLimitedReactionEvent. A positive sum would MINT mass every step at a fire/water front.
+            Assert.AreEqual(0f, dFire + dWater + dSteam + dIce, 1e-5f,
+                "Fire x Water column must have zero sum, or the quench mints mass");
+
+            // Every OTHER pair column must be inert: this group exists only to quench. In particular no
+            // Water x Ice contact freezing yet — freezing stays thermal (cold conducting out of ice).
+            for (int col = 1; col < 4; col++)
+                for (int row = 0; row < 4; row++)
+                    Assert.AreEqual(0f, ReadMatrixCell(src, "productMatrix", row, col), 1e-5f,
+                        $"productMatrix column {col} must be zero — this group only quenches");
+
+            StringAssert.Contains("productCol4: {x: 0, y: 0, z: 0, w: 0}", src, "pair 1x3 (Water x Ice) must be inert");
+            StringAssert.Contains("productCol5: {x: 0, y: 0, z: 0, w: 0}", src, "pair 2x3 (Steam x Ice) must be inert");
+
+            // No reaction MOTION in this slice — prove the chemistry before adding impulse.
+            for (int col = 0; col < 4; col++)
+                for (int row = 0; row < 4; row++)
+                    Assert.AreEqual(0f, ReadMatrixCell(src, "reactionImpulseMatrix", row, col), 1e-5f,
+                        "ContactReactionsGroup must not add reaction motion yet");
+            StringAssert.Contains("reactionImpulseCol4: {x: 0, y: 0, z: 0, w: 0}", src);
+            StringAssert.Contains("reactionImpulseCol5: {x: 0, y: 0, z: 0, w: 0}", src);
+
+            // Thermal arrays MUST stay empty. ThermalRuleBaker replaces defaults per-category the moment
+            // ANY active group authors a transition/source — authoring here would silently drop the
+            // built-in condense/freeze/melt/boil/ignition defaults for the whole sim.
+            StringAssert.Contains("thermalTransitions: []", src,
+                "Authoring thermal rules here would replace the global default transitions");
+            StringAssert.Contains("thermalSources: []", src,
+                "Authoring thermal sources here would replace the global default sources");
+#else
+            Assert.Ignore("Editor-only source assertion");
+#endif
+        }
+
+        // CP8b: lower the ice obstacle threshold so ice and inks overlap more.
+        // Pins the AUTHORED ice obstacle threshold.
+        //
+        // NOTE (CP8d): CP8b committed 0.15 (lower = ice blocks fluid at lower concentration = more
+        // ink/ice overlap). Lake's playtest raised it to 0.5, which is the opposite direction. That was
+        // very likely a workaround for ice acting as a perfect heat INSULATOR — a high threshold means
+        // fewer cells count as obstacles, so less heat got blocked. CP8d removes that root cause
+        // (conduction now ignores obstacles entirely), so the workaround may no longer be needed and
+        // 0.15 may be preferable again. Preserving Lake's playtest value pending confirmation.
+        [Test]
+        public void IceAsset_ObstacleThreshold_IsAuthoredValue()
         {
 #if UNITY_EDITOR
             const string path = "Assets/_Project/Inks/Ice.asset";
             string src = System.IO.File.ReadAllText(path);
-            StringAssert.Contains("obstacleThreshold: 0.15", src,
-                "Ice obstacle threshold should be lowered from 0.2 to 0.15 for more ink/ice overlap");
+            StringAssert.Contains("obstacleThreshold: 0.5", src,
+                "Ice obstacle threshold is the playtest-authored 0.5 (was 0.15 in CP8b) — see note above");
 #else
             Assert.Ignore("Editor-only source assertion");
 #endif
@@ -847,29 +990,40 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
-        // 9. DiffuseHeat no-flux: an obstacle neighbor does not receive heat, and the heated cell
-        // treats that obstacle neighbor as itself. A control run (no obstacle) proves the block is real.
+        // 9. CP8d BEHAVIOUR CHANGE: conduction now IGNORES obstacles.
+        //
+        // This test previously asserted the opposite (obstacle cells were no-flux and received no heat).
+        // That made ink obstacles — plant and ice — PERFECT INSULATORS: fire beside a plant could never
+        // warm it, so heat-driven ignition was impossible and dense ice could not be melted from outside.
+        //
+        // Advection and conduction are different physics. Advection is transport BY THE FLUID, so no flow
+        // through a solid => no advective transport (AdvectHeat keeps its no-flux mask — see the test
+        // below, which still passes). Conduction is transport THROUGH MATTER, and ink obstacles ARE
+        // matter. Ice conducts heat; that is why a flame melts it.
         [UnityTest]
-        public IEnumerator DiffuseHeat_ObstacleBlocksNeighborExchange()
+        public IEnumerator DiffuseHeat_ConductsIntoObstacleCells()
         {
 #if UNITY_EDITOR
             const int res = 3;
             int C = 1 * res + 1;   // (1,1) heated cell
-            int R = 1 * res + 2;   // (2,1) right neighbor / obstacle site
+            int R = 1 * res + 2;   // (2,1) obstacle cell beside it
 
             var heat = new float[res * res]; heat[C] = 1f;
             var wall = new float[res * res]; wall[R] = 1f;
             var open = new float[res * res];
 
-            float[] blocked = DispatchDiffuseHeatGrid(heat, wall, res, 1f);
-            Assert.That(blocked[R], Is.EqualTo(0f).Within(2e-2f),
-                "Obstacle cell must not receive heat from its neighbor (no-flux).");
-            Assert.That(blocked[C], Is.EqualTo(0.25f).Within(3e-2f),
-                "Heated cell treats the obstacle neighbor as itself (retains ~0.25).");
+            float[] withObstacle = DispatchDiffuseHeatGrid(heat, wall, res, 1f);
 
+            Assert.That(withObstacle[R], Is.GreaterThan(2e-2f),
+                "An obstacle cell MUST now absorb heat by conduction — otherwise plant/ice are perfect " +
+                "insulators and can never be ignited or melted from outside.");
+
+            // Conduction is now obstacle-blind, so the obstacle case must match the open case exactly.
             float[] control = DispatchDiffuseHeatGrid(heat, open, res, 1f);
-            Assert.That(control[R], Is.EqualTo(0.25f).Within(3e-2f),
-                "Without an obstacle the neighbor DOES receive heat (~0.25) — proves the block is real.");
+            Assert.That(withObstacle[R], Is.EqualTo(control[R]).Within(2e-2f),
+                "Conduction ignores the obstacle mask entirely: the obstacle result must equal the open result");
+            Assert.That(withObstacle[C], Is.EqualTo(control[C]).Within(2e-2f),
+                "…including for the heated cell, which now genuinely loses heat into its solid neighbour");
 
             yield return null;
 #else

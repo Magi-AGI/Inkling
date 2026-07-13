@@ -56,6 +56,117 @@ namespace Magi.Inkling.Tests.EditMode
             Assert.That(c.Heat, Is.EqualTo(Neutral).Within(Tol), "No phase change => no heat drawn");
         }
 
+        // ── CP8d/CP8e: heat-driven plant ignition ───────────────────────────────────────────
+        // SPONTANEOUS combustion from ambient heat alone. CP8e raised the threshold to 0.98 — just shy
+        // of max heat (1.0) — so this is a rare, furnace-only event. It is NOT the normal way fire
+        // spreads: fire catching adjacent vegetation is still the legacy Fire x Plant CONTACT reaction
+        // in OrganicGroup, which this threshold does not gate.
+        private const float IgnitionThreshold = 0.98f;
+
+        [Test]
+        public void HotPlant_IgnitesToFire_AboveIgnitionThreshold()
+        {
+            var c = new ThermalCpuOracle.Cell();
+            c[InkTypeId.PlantGrown] = 1f;
+            c.Heat = 1f;   // above ignition (0.98)
+            Step(c, NeutralRules(), maxHeat: 1f);
+
+            Assert.That(c[InkTypeId.Fire], Is.GreaterThan(0f), "Hot plant must ignite into fire");
+            Assert.That(c[InkTypeId.PlantGrown], Is.LessThan(1f), "…consuming the plant");
+            Assert.That(c.Heat, Is.LessThan(1f), "…and consuming heat (endothermic pyrolysis)");
+        }
+
+        // CP8e: the whole point of raising the threshold. 0.9 is "hot" — hotter than boiling water —
+        // and used to ignite plant. It must no longer do so, or fire still spreads through vegetation
+        // on ambient heat alone, which is exactly what Lake asked to stop.
+        [Test]
+        public void HotButNotFurnacePlant_DoesNotSpontaneouslyIgnite_AtCp8eThreshold()
+        {
+            var rs = NeutralRules();
+            var ignition = rs.Transitions.Find(t =>
+                t.fromField == (int)InkTypeId.PlantGrown && t.toField == (int)InkTypeId.Fire);
+            Assert.That(ignition.threshold, Is.EqualTo(IgnitionThreshold).Within(Tol),
+                "Shipped heat-only ignition threshold must be near max heat");
+
+            var c = new ThermalCpuOracle.Cell();
+            c[InkTypeId.PlantGrown] = 1f;
+            c.Heat = 0.9f;   // hot — above boiling (0.85) — but below the 0.98 ignition threshold
+            Step(c, rs, maxHeat: 1f);
+
+            Assert.That(c[InkTypeId.Fire], Is.EqualTo(0f).Within(Tol),
+                "Plant at 0.9 must NOT spontaneously combust — only a near-max cell may");
+            Assert.That(c[InkTypeId.PlantGrown], Is.EqualTo(1f).Within(Tol), "Plant untouched");
+        }
+
+        [Test]
+        public void WarmPlant_DoesNotIgnite_BelowIgnitionThreshold()
+        {
+            var c = new ThermalCpuOracle.Cell();
+            c[InkTypeId.PlantSeeded] = 1f;
+            c.Heat = Neutral;   // room temperature: nowhere near ignition
+            Step(c, NeutralRules());
+
+            Assert.That(c[InkTypeId.Fire], Is.EqualTo(0f).Within(Tol),
+                "Plant at room temperature must NOT spontaneously ignite");
+            Assert.That(c[InkTypeId.PlantSeeded], Is.EqualTo(1f).Within(Tol), "Plant untouched");
+        }
+
+        [Test]
+        public void PlantIgnition_IsBoundedByHeatBudget()
+        {
+            // Only just above the threshold => very little excess heat => only a sliver may burn,
+            // capped by excess/heatCost. A hot cell cannot flash all its plant to fire in one step.
+            // NOTE: heat must stay ABOVE the CP8e threshold (0.98) or this test passes VACUOUSLY —
+            // nothing ignites, so "bounded by the budget" would be trivially true and prove nothing.
+            var c = new ThermalCpuOracle.Cell();
+            c[InkTypeId.PlantGrown] = 1f;
+            c.Heat = 0.99f;   // excess over 0.98 is 0.01; heatCost 0.25 => cap 0.04
+            Step(c, NeutralRules(), maxHeat: 1f);
+
+            Assert.That(c[InkTypeId.Fire], Is.GreaterThan(0f),
+                "Guard against a vacuous pass: the cell IS above the ignition threshold, so it must burn");
+            Assert.That(c[InkTypeId.Fire], Is.LessThanOrEqualTo(0.04f + Tol),
+                "Ignition must be bounded by the heat budget (excess / heatCost)");
+            Assert.That(c[InkTypeId.PlantGrown], Is.GreaterThan(0.9f), "Most of the plant survives one step");
+        }
+
+        [Test]
+        public void Cp8dDefaults_KeepWaterIceSteamTransitions_AndAddIgnition()
+        {
+            var rs = NeutralRules();
+            Assert.IsTrue(rs.IsValid, "CP8d defaults must bake cleanly: " + rs.Error);
+            Assert.AreEqual(6, rs.Transitions.Count,
+                "condense + freeze + melt + boil + 2 plant ignitions — the steam/water/ice defaults must NOT be dropped");
+            Assert.LessOrEqual(rs.Transitions.Count, ThermalRuleBaker.MaxTransitions, "under the transition cap");
+        }
+
+        // Plant ignition is opt-in via ThermalDefaults.includePlantIgnition. The LEGACY Cp7Defaults
+        // fixture must not pick it up — it is a frozen fixture the kernel-mechanics tests pin against,
+        // and silently growing it from 4 to 6 transitions changed what those tests were measuring.
+        [Test]
+        public void Cp7Defaults_DoNotIncludePlantIgnition()
+        {
+            var legacy = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp7Defaults);
+            Assert.IsTrue(legacy.IsValid, legacy.Error);
+            Assert.AreEqual(4, legacy.Transitions.Count,
+                "Legacy CP7 fixture bakes exactly condense/freeze/melt/boil — no CP8d plant ignition");
+            foreach (var t in legacy.Transitions)
+                Assert.AreNotEqual((int)InkTypeId.Fire, t.toField,
+                    "No transition in the legacy fixture may produce Fire");
+        }
+
+        // RUNTIME WIRING GUARD: FluidSolver builds its defaults from ctx, NOT from Cp8Defaults. If it
+        // forgets to opt in, ignition silently never fires in play while every oracle test still passes.
+        // (This is the CP7c bug class: correct kernel, dead runtime.)
+        [Test]
+        public void FluidSolver_OptsIntoPlantIgnition_WhenBuildingRuntimeDefaults()
+        {
+            const string path = "Assets/_Project/Scripts/Systems/SimulationLOD0/Core/FluidSolver.cs";
+            string src = System.IO.File.ReadAllText(path);
+            StringAssert.Contains("includePlantIgnition = true", src,
+                "FluidSolver.BuildThermalDefaults must opt into plant ignition, or it never fires at runtime");
+        }
+
         [Test]
         public void AtNeutral_IceMelts()
         {

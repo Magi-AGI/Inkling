@@ -1371,14 +1371,37 @@ MonoBehaviour:
   inkInteractionsDebugMode: 0
   affinityGroups:
   - {fileID: 11400000, guid: da76efa99d9a5cf4aadca3f811d21554, type: 2}
-  - {fileID: 11400000, guid: bb5975a015651cc47aab80f9ac703167, type: 2}
   - {fileID: 11400000, guid: 3892ae7ecffb33f4cad3ec4e410eee4c, type: 2}
+  - {fileID: 11400000, guid: 7f3c1a9e5b204d64a8e1c6f0d29b4e73, type: 2}
   enableReactionImpulse: 1
   reactionImpulseStrength: 40
   reactionImpulseMax: 100
   reactionImpulseCurlBias: 1
   reactionImpulseExpansionBias: 0.35
   reactionImpulseGain: 1
+  thermalDissipationHalfLife: 1000
+  thermalDiffusion: 0.2
+  neutralTemperature: 0.5
+  minTemperature: 0
+  enableHeatSources: 1
+  fireHeatEmissionRate: 1
+  maxHeat: 1
+  enableThermalInteractions: 1
+  freezeThreshold: 0.15
+  meltThreshold: 0.35
+  condenseThreshold: 0.65
+  boilThreshold: 0.85
+  meltRate: 1
+  boilRate: 1
+  condenseRate: 1
+  freezeRate: 1
+  meltHeatCost: 0.5
+  boilHeatCost: 0.5
+  condenseHeatRelease: 0
+  fireHeatFuelCost: 0
+  plantIgnitionThreshold: 0.98
+  plantIgnitionRate: 0.5
+  plantIgnitionHeatCost: 0.25
   enableBlackBodyClearingFallback: 0
   blackBodyThresholdFallback: 0.5
   blackBodyClearingRateFallback: 0.05

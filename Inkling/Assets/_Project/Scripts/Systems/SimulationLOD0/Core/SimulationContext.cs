@@ -125,7 +125,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // ── Heat layer parameters (CP1: inert defaults) ─────────────────────
         // ThermalDissipationHalfLife: seconds for heat to fade 50% toward NEUTRAL (large ≈ persistent).
         // ThermalDiffusion: 0..1 conduction — blend toward neighbour average per step. Non-zero so fire
-        //   and ice actually modulate the temperature AROUND them, not just their own cell.
+        //   and ice actually modulate the temperature AROUND them, not just their own cell. CP8e raised
+        //   this from 0.05, which was too subtle to read: heat barely left the cell that emitted it.
         //
         // CP8a — these two were ONE field (`AmbientTemperature`) and must stay separate:
         //   NeutralTemperature: room temperature. The value heat RELAXES TOWARD, and what the heat
@@ -133,7 +134,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         //   MinTemperature: the absolute clamp FLOOR. Must NOT be the neutral, or nothing could ever
         //     get colder than room temperature and ice could never form.
         public float ThermalDissipationHalfLife = 1000f;
-        public float ThermalDiffusion = 0.05f;
+        public float ThermalDiffusion = 0.2f;
         public float NeutralTemperature = 0.5f;
         public float MinTemperature = 0f;
 
@@ -186,6 +187,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float MeltHeatCost = 0.5f;
         public float BoilHeatCost = 0.5f;
         public float CondenseHeatRelease = 0f;
+        // CP8d/CP8e: SPONTANEOUS combustion (Plant -> Fire) from ambient heat alone. Burning consumes
+        // heat, which also bounds how fast it can convert. CP8e set the threshold to 0.98 — just shy of
+        // max heat — so this is a rare furnace-only event, not the normal route for fire to spread.
+        // Fire catching ADJACENT plant remains the legacy Fire x Plant contact reaction in OrganicGroup.
+        public float PlantIgnitionThreshold = 0.98f;
+        public float PlantIgnitionRate = 0.5f;
+        public float PlantIgnitionHeatCost = 0.25f;
         // Fuel-like fire (CP7b): fire burned per unit heat actually added. 0 = add-only (no burn).
         public float FireHeatFuelCost = 0f;
 

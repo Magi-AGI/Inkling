@@ -99,6 +99,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 boilThreshold = boilT,
                 boilRate = Mathf.Max(0f, ctx.BoilRate),
                 boilHeatCost = Mathf.Max(0f, ctx.BoilHeatCost),
+
+                // CP8d plant ignition. Plant -> Fire has no inverse cold transition, so it is not part
+                // of any cycle and needs no per-cycle sanitization — only a non-negative clamp.
+                // The opt-in flag MUST be set here: the runtime builds its defaults from ctx, not from
+                // ThermalDefaults.Cp8Defaults, so without this ignition would silently never fire in play.
+                includePlantIgnition = true,
+                plantIgnitionThreshold = Mathf.Max(0f, ctx.PlantIgnitionThreshold),
+                plantIgnitionRate = Mathf.Max(0f, ctx.PlantIgnitionRate),
+                plantIgnitionHeatCost = Mathf.Max(0f, ctx.PlantIgnitionHeatCost),
             };
         }
 

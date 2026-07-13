@@ -49,6 +49,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float meltThreshold, meltRate, meltHeatCost;
         public float boilThreshold, boilRate, boilHeatCost;
 
+        // CP8d: heat-driven plant ignition (Plant -> Fire above an ignition temperature).
+        // Gated by an EXPLICIT flag rather than appended unconditionally: the legacy Cp7Defaults is a
+        // frozen fixture for the kernel-mechanics tests and must keep baking exactly its original 4
+        // transitions. Silently growing it to 6 changed what those tests were pinning.
+        public bool includePlantIgnition;
+        public float plantIgnitionThreshold, plantIgnitionRate, plantIgnitionHeatCost;
+
         /// <summary>
         /// CP8a SHIPPED layout — mirrors the SimDriver serialized defaults. Thresholds are placed
         /// around a NEUTRAL (room) temperature of 0.5 so that water is the stable phase:
@@ -75,6 +82,17 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             boilThreshold = 0.85f,
             boilRate = 1f,
             boilHeatCost = 0.5f,
+
+            // CP8e: SPONTANEOUS combustion from ambient heat alone, deliberately set just below max
+            // heat (1.0). This is the rare extreme case — a cell has to be practically a furnace — not
+            // the normal route for fire to spread. Everyday fire spread stays with the legacy
+            // Fire x Plant CONTACT reaction in OrganicGroup, which this threshold does not gate.
+            // Burning consumes heat (endothermic pyrolysis), which also bounds the conversion so a hot
+            // cell cannot flash the whole plant mass to fire in one step.
+            includePlantIgnition = true,
+            plantIgnitionThreshold = 0.98f,
+            plantIgnitionRate = 0.5f,
+            plantIgnitionHeatCost = 0.25f,
         };
 
         /// <summary>
@@ -366,11 +384,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         public static List<BakedThermalTransition> DefaultTransitions(ThermalDefaults d)
         {
+            int fire = (int)InkTypeId.Fire;
             int water = (int)InkTypeId.Water;
             int steam = (int)InkTypeId.Steam;
             int ice = (int)InkTypeId.Ice;
+            int plantSeeded = (int)InkTypeId.PlantSeeded;
+            int plantGrown = (int)InkTypeId.PlantGrown;
 
-            return new List<BakedThermalTransition>
+            var transitions = new List<BakedThermalTransition>
             {
                 // Cold, in authored order: condense, then freeze.
                 new BakedThermalTransition { fromField = steam, toField = water, regime = ThermalRegime.Cold,
@@ -384,6 +405,23 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 new BakedThermalTransition { fromField = water, toField = steam, regime = ThermalRegime.Hot,
                     threshold = d.boilThreshold, rate = d.boilRate, heatCost = d.boilHeatCost },
             };
+
+            // CP8d: heat-driven plant IGNITION — plant must actually get HOT to catch fire. Appended
+            // only when the caller opts in, so the legacy Cp7Defaults fixture keeps baking exactly its
+            // original 4 transitions and the CP7 tests keep pinning what they were written to pin.
+            //
+            // Each plant channel has exactly one outgoing HOT transition, and Fire has no inverse cold
+            // transition back to plant, so neither the one-outgoing-per-source-per-regime rule nor the
+            // inverse-cycle rule is violated. 6 transitions when enabled — under the cap of 8.
+            if (d.includePlantIgnition)
+            {
+                transitions.Add(new BakedThermalTransition { fromField = plantSeeded, toField = fire, regime = ThermalRegime.Hot,
+                    threshold = d.plantIgnitionThreshold, rate = d.plantIgnitionRate, heatCost = d.plantIgnitionHeatCost });
+                transitions.Add(new BakedThermalTransition { fromField = plantGrown, toField = fire, regime = ThermalRegime.Hot,
+                    threshold = d.plantIgnitionThreshold, rate = d.plantIgnitionRate, heatCost = d.plantIgnitionHeatCost });
+            }
+
+            return transitions;
         }
 
         public static List<BakedThermalSource> DefaultSources(ThermalDefaults d)
