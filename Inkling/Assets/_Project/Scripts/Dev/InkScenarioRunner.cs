@@ -18,7 +18,7 @@ namespace Magi.Inkling.Dev
     /// "Inkling/Run Ink Scenarios" menu (in play mode), the component context menu, or by
     /// setting <see cref="runRequested"/> (e.g. from an MCP command).
     /// </summary>
-    public class InkScenarioRunner : MonoBehaviour
+    public partial class InkScenarioRunner : MonoBehaviour
     {
         [Header("Trigger")]
         [SerializeField] private bool runOnStart = false;
@@ -84,6 +84,12 @@ namespace Magi.Inkling.Dev
             {
                 runInkTuningRequested = false;
                 if (!running) StartCoroutine(RunInkTuningPass());
+            }
+            // CP8p: Fire-vs-Ice evaluation harness (see FireIceScenario.cs).
+            if (runFireIceRequested && !running)
+            {
+                runFireIceRequested = false;
+                StartCoroutine(RunFireIceTest());
             }
         }
 
