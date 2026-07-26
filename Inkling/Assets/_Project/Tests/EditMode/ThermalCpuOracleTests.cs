@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using UnityEngine;
 using Magi.Inkling.Systems.SimulationLOD0;
 using Magi.InkTools.Simulation;
 
@@ -36,12 +37,82 @@ namespace Magi.Inkling.Tests.EditMode
             ThermalCpuOracle.Apply(c, r, dt, minTemp, maxHeat, sources);
 
         // ── CP8a: neutral (room-temperature) baseline ───────────────────────────────────────
-        // Shipped layout (Cp8Defaults): freeze .15 < melt .35 < NEUTRAL .5 < condense .65 < boil .85.
+        // Shipped layout (Cp8Defaults): freeze == melt == .15 < NEUTRAL .5 < condense .65 < boil .85.
+        // CP8j collapsed freeze and melt onto one point; the old .15/.35 gap was the dead band.
         // Cp7Defaults is kept as the legacy fixture for the kernel-mechanics tests above.
         private const float Neutral = 0.5f;
 
         private static ThermalRuleSet NeutralRules() =>
             ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
+
+        // CP8o — AMBIENT THAW PROOF (Lake: "I still don't see ... ice melting due to ambient heat").
+        //
+        // The single-cell oracle has no conduction, so this composes the real loop by hand: a 1-D row of
+        // cells, a cold ice blob (heat 0) in a NEUTRAL room (heat 0.5), and NO FIRE ANYWHERE. Each step
+        // applies (a) AdvectHeat's ambient relaxation toward neutral, (b) DiffuseHeat conduction — solid
+        // rate inside ice, fluid rate outside, exactly as the shader selects post-CP8o — then (c) the
+        // oracle's phase pass per cell. The formulas mirror Heat.hlsl / ThermalInteractions.compute.
+        //
+        // It would FAIL if ambient/neutral heat could not thaw ice: the assertion is that the blob strictly
+        // shrinks and eventually melts substantially, with zero fire involved. That is the "real proof, not
+        // prose" the packet demanded — and it also guards the melt→water→refreeze loop Lake suspected, by
+        // asserting ice only ever decreases.
+        [Test]
+        public void AmbientNeutralHeat_ThawsColdIce_WithoutAnyFire()
+        {
+            const int N = 40;
+            const float dt = 1f / 60f, neutral = 0.5f, minT = 0f, maxT = 1f;
+            const float diffFluid = 2f, diffSolid = 12f, iceThermalThreshold = 0.1f;
+            const float thermalHalfLife = 60f;
+            float ambientRetention = Mathf.Pow(Mathf.Pow(0.5f, 1f / thermalHalfLife), dt);
+
+            var rules = NeutralRules();
+            var cells = new ThermalCpuOracle.Cell[N];
+            for (int i = 0; i < N; i++) cells[i] = Cell(heat: neutral);
+            for (int i = 15; i < 25; i++) { cells[i][InkTypeId.Ice] = 0.3f; cells[i].Heat = minT; }  // cold blob
+
+            float IceTotal() { float t = 0; foreach (var c in cells) t += c[InkTypeId.Ice]; return t; }
+            float start = IceTotal(), prev = start;
+
+            for (int step = 0; step < 900; step++)   // 15 s at 60 fps, NO fire injected at any point
+            {
+                // (a) ambient relaxation toward neutral (AdvectHeat, still fluid).
+                for (int i = 0; i < N; i++)
+                    cells[i].Heat = neutral + (cells[i].Heat - neutral) * ambientRetention;
+
+                // (b) conduction: solid rate where ice clears its OWN threshold (the CP8o decoupling).
+                var nh = new float[N];
+                for (int i = 0; i < N; i++)
+                {
+                    float l = cells[Mathf.Max(i - 1, 0)].Heat, r = cells[Mathf.Min(i + 1, N - 1)].Heat;
+                    float avg = (l + r) * 0.5f;
+                    float rate = cells[i][InkTypeId.Ice] >= iceThermalThreshold
+                        ? Mathf.Max(diffSolid, diffFluid) : diffFluid;
+                    float blend = 1f - Mathf.Exp(-rate * dt);
+                    nh[i] = Mathf.Clamp(cells[i].Heat + blend * (avg - cells[i].Heat), minT, maxT);
+                }
+                for (int i = 0; i < N; i++) cells[i].Heat = nh[i];
+
+                // (c) phase pass per cell (sources OFF — nothing emits heat).
+                float ice = 0f;
+                for (int i = 0; i < N; i++)
+                {
+                    ThermalCpuOracle.Apply(cells[i], rules, dt, minT, maxT, false);
+                    ice += cells[i][InkTypeId.Ice];
+                }
+
+                Assert.That(ice, Is.LessThanOrEqualTo(prev + 1e-5f),
+                    $"step {step}: ice must never GROW with no fire present — that would be the " +
+                    "melt->water->refreeze runaway Lake suspected. It does not exist: melt caps heat at " +
+                    "the threshold, never below, so fresh water cannot re-enter the freeze band.");
+                prev = ice;
+            }
+
+            Assert.That(IceTotal(), Is.LessThan(start * 0.5f),
+                "Ambient neutral heat ALONE must visibly thaw cold ice — at least half gone in 15s, no " +
+                "fire. If this fails, the model genuinely cannot thaw ice from room temperature and the " +
+                "fix is a design change (passive thaw), NOT another knob.");
+        }
 
         [Test]
         public void AtNeutral_WaterIsStable_NeitherFreezesNorBoils()
@@ -56,19 +127,231 @@ namespace Magi.Inkling.Tests.EditMode
             Assert.That(c.Heat, Is.EqualTo(Neutral).Within(Tol), "No phase change => no heat drawn");
         }
 
-        // ── CP8d/CP8e: heat-driven plant ignition ───────────────────────────────────────────
-        // SPONTANEOUS combustion from ambient heat alone. CP8e raised the threshold to 0.98 — just shy
-        // of max heat (1.0) — so this is a rare, furnace-only event. It is NOT the normal way fire
-        // spreads: fire catching adjacent vegetation is still the legacy Fire x Plant CONTACT reaction
-        // in OrganicGroup, which this threshold does not gate.
-        private const float IgnitionThreshold = 0.98f;
+        // ── CP8l: the fire/plant deadlock ───────────────────────────────────────────────────
+        // Lake: "plant is hardly reactive with fire, smoldering only and often not catching on fire at
+        // all." The cause was an ORDERING defect between two CP8k/CP8e thresholds, not a weak number.
+        //
+        // A plant cell adjacent to one max-heat fire cell converges to its neighbour average, which is
+        // (1.0 + 0.5*3)/4 = 0.625. That single fact broke fire twice over:
+        //
+        //   * plantIgnitionThreshold was 0.98 — UNREACHABLE by conduction. Thermal ignition was dead.
+        //   * fireSinkThreshold was 0.85 — ABOVE 0.625, so fire spreading into a plant cell was
+        //     EXTINGUISHED BY THE SINK before it could establish and heat its own cell. CP8k's cold-fire
+        //     sink was strangling the fire it was meant to only cull when adrift in the cold.
+        //
+        // These assertions pin the ordering, not the specific numbers, so a future retune cannot silently
+        // recreate the deadlock.
+        private const float PlantCellNextToFire = 0.625f;   // (1.0 + 0.5*3) / 4
+
+        [Test]
+        public void FireSinkThreshold_IsBelowWhatAFireAdjacentCellReaches_OrFireStranglesItself()
+        {
+            var ctx = new SimulationContext();
+
+            Assert.That(ctx.FireSinkThreshold, Is.LessThan(PlantCellNextToFire),
+                "The cold-fire sink must sit BELOW the temperature a fire-adjacent cell settles at " +
+                $"({PlantCellNextToFire}), or fire spreading into that cell is extinguished before it can " +
+                "establish — fire smoulders and never catches");
+
+            Assert.That(ctx.FireSinkThreshold, Is.GreaterThan(ctx.NeutralTemperature),
+                "…but still ABOVE room temperature, or fire adrift in cold/neutral fluid would never go " +
+                "out and CP8k's whole point is lost");
+        }
+
+        [Test]
+        public void PlantIgnitionThreshold_IsReachableByConduction_ButWellAboveAmbient()
+        {
+            var ctx = new SimulationContext();
+
+            Assert.That(ctx.PlantIgnitionThreshold, Is.LessThanOrEqualTo(0.75f + Tol),
+                "Heat-only plant ignition must be REACHABLE. At 0.98 it never fired: a plant cell beside " +
+                $"a max-heat fire converges to {PlantCellNextToFire} and simply cannot get there.");
+
+            Assert.That(ctx.PlantIgnitionThreshold, Is.GreaterThan(ctx.NeutralTemperature + 0.2f),
+                "…but far enough above room temperature that plant never spontaneously combusts in " +
+                "ordinary ambient heat, which is what CP8e was protecting");
+        }
+
+        // ── CP8k: cold fire GOES OUT, and the heat ratchet is broken ────────────────────────
+        // Lake: "Fire should probably dissipate rapidly if the temperature drops under 85 or so."
+        // Implemented as a SINK transition (Fire -> removed), not a conversion: a guttering flame must
+        // not mint smoke or a puddle.
+
+        [Test]
+        public void ColdFire_IsRemovedEntirely_NotConvertedIntoAnything()
+        {
+            var c = new ThermalCpuOracle.Cell();
+            c[InkTypeId.Fire] = 1f;
+            c.Heat = 0.5f;                          // room temperature: below the 0.6 sink threshold
+            Step(c, NeutralRules(), maxHeat: 1f);   // sources OFF, so fire cannot reheat its own cell
+
+            Assert.That(c[InkTypeId.Fire], Is.LessThan(0.05f),
+                "Fire below the sink threshold must go out RAPIDLY (rate 4/s)");
+
+            // THE POINT OF A SINK: the fire is gone, and it became NOTHING. Lake explicitly ruled out
+            // smoke/steam for general cold-fire decay. If this ever converted instead of removing, a
+            // cooling world would silently fill up with steam or water.
+            Assert.That(c[InkTypeId.Steam], Is.EqualTo(0f).Within(Tol), "Dying fire must NOT mint steam/smoke");
+            Assert.That(c[InkTypeId.Water], Is.EqualTo(0f).Within(Tol), "…nor water");
+            Assert.That(c[InkTypeId.Ice], Is.EqualTo(0f).Within(Tol), "…nor anything else");
+
+            // Heat-neutral by design: fire going out must not itself chill the cell, or the sink would
+            // just be the heat ratchet again under a new name.
+            Assert.That(c.Heat, Is.EqualTo(0.5f).Within(Tol),
+                "Extinguishing must not consume or release heat");
+        }
+
+        [Test]
+        public void HotFire_IsNotExtinguished_BySink()
+        {
+            var c = new ThermalCpuOracle.Cell();
+            c[InkTypeId.Fire] = 1f;
+            c.Heat = 0.9f;   // above the 0.6 sink threshold: this flame is healthy
+            Step(c, NeutralRules(), maxHeat: 1f);
+
+            Assert.That(c[InkTypeId.Fire], Is.EqualTo(1f).Within(Tol),
+                "Fire in a genuinely hot cell must survive — fire heats its own cell, so a burning " +
+                "flame holds itself above the threshold. The sink culls fire that DRIFTED somewhere cold.");
+        }
+
+        // The CP8k root-cause regression. Every thermal transition removes heat and none returns it, so
+        // a water -> ice -> water round trip used to destroy 1.0 + 0.5 = 1.5 units of heat and put the
+        // matter back exactly where it started — a perpetual refrigerator that dragged the whole field
+        // to frozen.
+        //
+        // The invariant that actually matters is the ROUND-TRIP COST, not the relative size of the two
+        // legs. (An earlier version of this test asserted `freeze < melt`; CP8l cut meltHeatCost to 0.15,
+        // which makes that false — and it was never the real safety property anyway. Freeze and melt are
+        // BOTH sinks; which of the two is larger says nothing about whether the loop runs away. What
+        // matters is that a full cycle costs little enough for the thermostat to make it back.)
+        [Test]
+        public void FreezeThawCycle_DoesNotDestroyRunawayHeat()
+        {
+            var rs = NeutralRules();
+            var freeze = rs.Transitions.Find(t =>
+                t.fromField == (int)InkTypeId.Water && t.toField == (int)InkTypeId.Ice);
+            var melt = rs.Transitions.Find(t =>
+                t.fromField == (int)InkTypeId.Ice && t.toField == (int)InkTypeId.Water);
+
+            // Both legs are real latent heat and must stay real — zeroing them would be a different bug.
+            Assert.That(freeze.heatCost, Is.GreaterThan(0f), "Forming ice still chills its cell (CP8g)");
+            Assert.That(melt.heatCost, Is.GreaterThan(0f), "Melting still draws latent heat");
+
+            // THE RATCHET GUARD. A water -> ice -> water round trip returns the matter to its starting
+            // state, so whatever heat it consumed is destroyed outright — no transition anywhere returns
+            // heat. At 1.5 per cycle that outran the thermostat and the world could only freeze. Cap the
+            // cycle well below that; the exact split between the two legs is a tuning choice.
+            float cycleCost = freeze.heatCost + melt.heatCost;
+            Assert.That(cycleCost, Is.LessThan(0.5f),
+                $"A freeze/thaw round trip costs {cycleCost} heat and returns the matter to where it " +
+                "started — that heat is destroyed outright, since no transition ever returns any. It used " +
+                "to be 1.5, which outran the thermostat and dragged the entire field to frozen.");
+
+            // And the specific CP8l consequence Lake asked for: cheap melting means heat already
+            // delivered keeps eating ice, instead of every unit of ice demanding a fresh half-unit of heat.
+            Assert.That(melt.heatCost, Is.LessThanOrEqualTo(0.15f + Tol),
+                "Melting must be CHEAP in heat, or ice needs a constant fire stream to make any progress");
+        }
+
+        // ── CP8g: ice is a cold source WHEN IT FORMS ────────────────────────────────────────
+        // Lake: "Ice should be a cold source, but only when it forms, whether by painting or growing."
+        // Painted ice cools via the CP8b injection stamp; GROWN ice cools via the freeze transition's
+        // heatCost. The cooling scales with the amount CONVERTED, which is what makes it a formation
+        // event rather than a standing emitter.
+
+        [Test]
+        public void Cp8DefaultFreeze_ChillsWhenIceForms()
+        {
+            var c = Cell(water: 1f, heat: 0.1f);   // below freeze (.15)
+            Step(c, NeutralRules(), minTemp: 0f);
+
+            // CP8u slowed freeze (Lake: "make ice formation a bit slower"): freezeRate 1 -> 0.4, freezeHeatCost 0.2 -> 0.1.
+            // A COLD transition converts min(src, src*rate*dt), so one step freezes 0.4 water and removes 0.4*0.1 = 0.04
+            // heat: 0.1 -> 0.06 (earlier this assumed a full unit froze and expected 0.0). The chill guarantee is unchanged.
+            Assert.That(c[InkTypeId.Ice], Is.EqualTo(0.4f).Within(1e-2f), "Cold water freezes into ice at freezeRate 0.4");
+            Assert.That(c[InkTypeId.Water], Is.EqualTo(0.6f).Within(1e-2f), "…consuming that much water");
+            Assert.That(c.Heat, Is.EqualTo(0.06f).Within(1e-2f),
+                "Forming ice CHILLS its cell: 0.1 - (0.4 frozen * 0.1 cost) = 0.06");
+            Assert.That(c.Heat, Is.LessThan(0.1f),
+                "…and be genuinely colder than it started, not merely unchanged");
+        }
+
+        // THE CORE CP8g GUARANTEE, now stated at a temperature that is genuinely COLD. Ice that already
+        // exists, with no water left to freeze, must not keep pulling its own temperature down —
+        // otherwise ice fields would run away to the floor forever. No conversion => no cooling. Ice is
+        // deliberately NOT a standing cold emitter the way Fire is a standing heat source (Fire is a
+        // ThermalSource; Ice is not, and must not become one).
+        //
+        // CP8j NOTE: this test used to sit at heat 0.2 and assert ice persists. Under the old layout
+        // (melt 0.35) that passed — but 0.2 is ABOVE the freezing point (0.15), so it was pinning
+        // exactly the bug Lake reported: ice hanging around at a temperature that is not cold. The
+        // guarantee is real, so it is kept; it just has to be asserted BELOW freezing to mean anything.
+        [Test]
+        public void ExistingIce_BelowFreezing_DoesNotContinuouslyCool_WhenNoNewIceForms()
+        {
+            var c = Cell(ice: 1f, heat: 0.1f);   // genuinely cold: below freeze (.15), above the floor
+            Step(c, NeutralRules(), minTemp: 0f);
+
+            Assert.That(c[InkTypeId.Ice], Is.EqualTo(1f).Within(Tol),
+                "Ice below the freezing point persists — it is cold, so it has every right to be there");
+            Assert.That(c[InkTypeId.Water], Is.EqualTo(0f).Within(Tol), "…and none of it melts");
+            Assert.That(c.Heat, Is.EqualTo(0.1f).Within(Tol),
+                "Settled ice must NOT keep cooling — the chill happens at FORMATION only, so with no " +
+                "water left to freeze there is no conversion and therefore no heat drawn");
+        }
+
+        // CP8j. Lake: "we can't have it be a radically different temperature than it appears. For
+        // example, ice above the freezing point should simply melt."
+        //
+        // The counterpart to the test above: the moment ice is warmer than freezing, it must go. Melting
+        // pays for itself out of the local heat (latent), pulling the cell back DOWN toward the freezing
+        // point — which is also why this cannot become the "forever feedback loop of expanding cold"
+        // Lake warned about. The melt is capped by excess/heatCost, so it consumes exactly the heat that
+        // was above freezing and then stalls AT freezing. It cannot chill past that point, and it stops
+        // entirely once the ice is gone.
+        [Test]
+        public void ExistingIce_AboveFreezing_MeltsAndPaysHeatTowardFreezePoint()
+        {
+            var c = Cell(ice: 1f, heat: 0.2f);   // above freeze (.15) — this must NOT survive
+            Step(c, NeutralRules(), minTemp: 0f);
+
+            // excess = 0.2 - 0.15 = 0.05; CP8ad meltHeatCost 0.10 => conv capped at 0.05/0.10 = 0.5.
+            // The cost has fallen 0.5 (Cp7) -> 0.15 (CP8l) -> 0.10 (CP8ad), so the SAME deposited heat now
+            // melts 5x more ice than the legacy 0.5 cost — that is the point of CP8ad: ice keeps melting
+            // from heat already delivered instead of needing a constant fire stream, so obstacle walls are
+            // less stubborn. Note the heat still lands on exactly 0.15 regardless of cost; only the amount
+            // of ice bought with it changed.
+            Assert.That(c[InkTypeId.Ice], Is.EqualTo(0.5f).Within(1e-2f),
+                "Ice above the freezing point must MELT — bounded by the heat available above freezing");
+            Assert.That(c[InkTypeId.Water], Is.EqualTo(0.5f).Within(1e-2f), "…into exactly that much water");
+            Assert.That(c[InkTypeId.Ice] + c[InkTypeId.Water], Is.EqualTo(1f).Within(Tol), "ice + water conserved");
+
+            Assert.That(c.Heat, Is.EqualTo(0.15f).Within(Tol),
+                "Melting pays latent heat, drawing the cell back down to EXACTLY the freezing point — " +
+                "not below it. Ice cannot chill its surroundings past freezing, so no runaway cold loop.");
+            Assert.That(c.Heat, Is.GreaterThanOrEqualTo(0.15f - Tol),
+                "…and it must never undershoot into the freeze band, or the fresh water would re-freeze " +
+                "and the cell would churn ice<->water forever");
+        }
+
+        // ── CP8d/CP8e/CP8l: heat-driven plant ignition ──────────────────────────────────────
+        // SPONTANEOUS combustion from ambient heat alone. It is NOT the normal way fire spreads — fire
+        // catching ADJACENT vegetation is the legacy Fire x Plant CONTACT reaction in OrganicGroup, which
+        // this threshold does not gate.
+        //
+        // CP8e set this to 0.98 to keep it rare. CP8l lowered it to 0.75 because 0.98 turned out to be
+        // UNREACHABLE, not merely rare: a plant cell beside a max-heat fire converges to its neighbour
+        // average, (1.0 + 0.5*3)/4 = 0.625, and can never climb to 0.98. Thermal ignition was dead code.
+        // 0.75 is reachable when plant is well-surrounded by fire, yet still far above ambient (0.5), so
+        // the CP8e intent — no spontaneous combustion in ordinary heat — is preserved.
+        private const float IgnitionThreshold = 0.75f;
 
         [Test]
         public void HotPlant_IgnitesToFire_AboveIgnitionThreshold()
         {
             var c = new ThermalCpuOracle.Cell();
             c[InkTypeId.PlantGrown] = 1f;
-            c.Heat = 1f;   // above ignition (0.98)
+            c.Heat = 1f;   // above ignition (0.75)
             Step(c, NeutralRules(), maxHeat: 1f);
 
             Assert.That(c[InkTypeId.Fire], Is.GreaterThan(0f), "Hot plant must ignite into fire");
@@ -76,25 +359,24 @@ namespace Magi.Inkling.Tests.EditMode
             Assert.That(c.Heat, Is.LessThan(1f), "…and consuming heat (endothermic pyrolysis)");
         }
 
-        // CP8e: the whole point of raising the threshold. 0.9 is "hot" — hotter than boiling water —
-        // and used to ignite plant. It must no longer do so, or fire still spreads through vegetation
-        // on ambient heat alone, which is exactly what Lake asked to stop.
+        // The CP8e intent, restated at the CP8l threshold: plant must not combust in ORDINARY warmth.
+        // 0.7 is comfortably above room temperature (0.5) and must still not ignite anything.
         [Test]
-        public void HotButNotFurnacePlant_DoesNotSpontaneouslyIgnite_AtCp8eThreshold()
+        public void WarmButNotFireHotPlant_DoesNotSpontaneouslyIgnite()
         {
             var rs = NeutralRules();
             var ignition = rs.Transitions.Find(t =>
                 t.fromField == (int)InkTypeId.PlantGrown && t.toField == (int)InkTypeId.Fire);
             Assert.That(ignition.threshold, Is.EqualTo(IgnitionThreshold).Within(Tol),
-                "Shipped heat-only ignition threshold must be near max heat");
+                "Shipped heat-only ignition threshold");
 
             var c = new ThermalCpuOracle.Cell();
             c[InkTypeId.PlantGrown] = 1f;
-            c.Heat = 0.9f;   // hot — above boiling (0.85) — but below the 0.98 ignition threshold
+            c.Heat = 0.7f;   // warm — well above ambient 0.5 — but below the 0.75 ignition threshold
             Step(c, rs, maxHeat: 1f);
 
             Assert.That(c[InkTypeId.Fire], Is.EqualTo(0f).Within(Tol),
-                "Plant at 0.9 must NOT spontaneously combust — only a near-max cell may");
+                "Plant merely WARM must not spontaneously combust — it has to be genuinely fire-hot");
             Assert.That(c[InkTypeId.PlantGrown], Is.EqualTo(1f).Within(Tol), "Plant untouched");
         }
 
@@ -116,18 +398,18 @@ namespace Magi.Inkling.Tests.EditMode
         {
             // Only just above the threshold => very little excess heat => only a sliver may burn,
             // capped by excess/heatCost. A hot cell cannot flash all its plant to fire in one step.
-            // NOTE: heat must stay ABOVE the CP8e threshold (0.98) or this test passes VACUOUSLY —
+            // NOTE: heat must stay ABOVE the ignition threshold (0.75) or this test passes VACUOUSLY —
             // nothing ignites, so "bounded by the budget" would be trivially true and prove nothing.
             var c = new ThermalCpuOracle.Cell();
             c[InkTypeId.PlantGrown] = 1f;
-            c.Heat = 0.99f;   // excess over 0.98 is 0.01; heatCost 0.25 => cap 0.04
+            c.Heat = 0.8f;   // excess over 0.75 is 0.05; heatCost 0.25 => cap 0.2
             Step(c, NeutralRules(), maxHeat: 1f);
 
             Assert.That(c[InkTypeId.Fire], Is.GreaterThan(0f),
                 "Guard against a vacuous pass: the cell IS above the ignition threshold, so it must burn");
-            Assert.That(c[InkTypeId.Fire], Is.LessThanOrEqualTo(0.04f + Tol),
+            Assert.That(c[InkTypeId.Fire], Is.LessThanOrEqualTo(0.2f + Tol),
                 "Ignition must be bounded by the heat budget (excess / heatCost)");
-            Assert.That(c[InkTypeId.PlantGrown], Is.GreaterThan(0.9f), "Most of the plant survives one step");
+            Assert.That(c[InkTypeId.PlantGrown], Is.GreaterThan(0.5f), "Most of the plant survives one step");
         }
 
         [Test]
@@ -135,8 +417,9 @@ namespace Magi.Inkling.Tests.EditMode
         {
             var rs = NeutralRules();
             Assert.IsTrue(rs.IsValid, "CP8d defaults must bake cleanly: " + rs.Error);
-            Assert.AreEqual(6, rs.Transitions.Count,
-                "condense + freeze + melt + boil + 2 plant ignitions — the steam/water/ice defaults must NOT be dropped");
+            Assert.AreEqual(7, rs.Transitions.Count,
+                "condense + freeze + melt + boil + 2 plant ignitions + CP8k cold-fire sink — the " +
+                "steam/water/ice defaults must NOT be dropped");
             Assert.LessOrEqual(rs.Transitions.Count, ThermalRuleBaker.MaxTransitions, "under the transition cap");
         }
 
@@ -170,7 +453,7 @@ namespace Magi.Inkling.Tests.EditMode
         [Test]
         public void AtNeutral_IceMelts()
         {
-            var c = Cell(ice: 1f, heat: Neutral);   // .5 > melt .35
+            var c = Cell(ice: 1f, heat: Neutral);   // .5 > melt .15
             Step(c, NeutralRules());
 
             Assert.That(c[InkTypeId.Water], Is.GreaterThan(0f), "Ice melts at room temperature");
@@ -178,14 +461,24 @@ namespace Magi.Inkling.Tests.EditMode
             Assert.That(c.Heat, Is.LessThan(Neutral), "Melting draws heat (latent)");
         }
 
+        // CP8h: steam still condenses at room temperature — but GENTLY. Lake: "the steam should
+        // dissipate into water at a lesser rate. Only a little bit of water should form from cooling
+        // steam." The exact numbers matter: a `> 0` assertion would pass just as happily on the old
+        // full-collapse behaviour, so it would not pin the thing we actually changed.
         [Test]
-        public void AtNeutral_SteamCondenses()
+        public void AtNeutral_SteamCondenses_GentlyNotWholesale()
         {
             var c = Cell(steam: 1f, heat: Neutral);  // .5 < condense .65
             Step(c, NeutralRules());
 
-            Assert.That(c[InkTypeId.Water], Is.GreaterThan(0f), "Steam condenses at room temperature");
-            Assert.That(c[InkTypeId.Steam], Is.LessThan(1f), "Steam consumed");
+            Assert.That(c[InkTypeId.Water], Is.EqualTo(0.15f).Within(Tol),
+                "Only a LITTLE water forms per second (condenseRate 0.15), not a wholesale collapse");
+            Assert.That(c[InkTypeId.Steam], Is.EqualTo(0.85f).Within(Tol),
+                "…and most of the steam survives the step to keep drifting");
+            Assert.That(c[InkTypeId.Water] + c[InkTypeId.Steam], Is.EqualTo(1f).Within(Tol),
+                "steam + water conserved");
+            Assert.That(c[InkTypeId.Ice], Is.EqualTo(0f).Within(Tol),
+                "The condensed water must not then freeze — neutral (.5) is well above freeze (.15)");
         }
 
         [Test]

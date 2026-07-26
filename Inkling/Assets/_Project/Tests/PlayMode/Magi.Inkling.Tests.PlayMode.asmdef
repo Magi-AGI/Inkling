@@ -3,6 +3,7 @@
     "rootNamespace": "Magi.Inkling.Tests",
     "references": [
         "Magi.Inkling",
+        "Magi.Inkling.Brush",
         "Magi.Inkling.Gestures",
         "Magi.Inkling.Capture",
         "Magi.Inkling.Tests",

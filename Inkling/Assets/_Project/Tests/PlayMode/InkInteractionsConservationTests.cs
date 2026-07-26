@@ -47,6 +47,14 @@ namespace Magi.Inkling.Tests.PlayMode
             var impulseRT = new RenderTexture(res, res, 0, RenderTextureFormat.RGFloat);
             impulseRT.enableRandomWrite = true;
             impulseRT.Create();
+            // CP8r (CKPT-102): the kernel now also declares _HeatRead/_HeatWrite, so they must be bound
+            // on every dispatch for the same reason _ReactionImpulseRW is — Unity validates declared
+            // resources at dispatch, not at the shader's uniform branch. Cooling stays disabled here
+            // (_QuenchCoolingPerUnit = 0), so heat is untouched; these only satisfy the binding.
+            var heatReadRT = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf);
+            heatReadRT.enableRandomWrite = true; heatReadRT.Create();
+            var heatWriteRT = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf);
+            heatWriteRT.enableRandomWrite = true; heatWriteRT.Create();
 
             try
             {
@@ -72,6 +80,11 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetInt("_AccumulateReactionImpulse", 0);
                 cs.SetFloat("_ReactionImpulseGain", 0f);
                 cs.SetTexture(kernel, "_ReactionImpulseRW", impulseRT);
+                cs.SetTexture(kernel, "_HeatRead", heatReadRT);
+                cs.SetTexture(kernel, "_HeatWrite", heatWriteRT);
+                cs.SetFloat("_QuenchCoolingPerUnit", 0f);   // cooling OFF: conservation only
+                cs.SetFloat("_MinTemperature", 0f);
+                cs.SetFloat("_MaxHeat", 1f);
 
                 cs.SetBuffer(kernel, "_ParticlesRead", readBuf);
                 cs.SetBuffer(kernel, "_ParticlesWrite", writeBuf);
@@ -88,6 +101,8 @@ namespace Magi.Inkling.Tests.PlayMode
                 readBuf.Release();
                 writeBuf.Release();
                 impulseRT.Release();
+                heatReadRT.Release();
+                heatWriteRT.Release();
             }
         }
 
@@ -107,6 +122,14 @@ namespace Magi.Inkling.Tests.PlayMode
             var impulseRT = new RenderTexture(res, res, 0, RenderTextureFormat.RGFloat);
             impulseRT.enableRandomWrite = true;
             impulseRT.Create();
+            // CP8r (CKPT-102): the kernel now also declares _HeatRead/_HeatWrite, so they must be bound
+            // on every dispatch for the same reason _ReactionImpulseRW is — Unity validates declared
+            // resources at dispatch, not at the shader's uniform branch. Cooling stays disabled here
+            // (_QuenchCoolingPerUnit = 0), so heat is untouched; these only satisfy the binding.
+            var heatReadRT = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf);
+            heatReadRT.enableRandomWrite = true; heatReadRT.Create();
+            var heatWriteRT = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf);
+            heatWriteRT.enableRandomWrite = true; heatWriteRT.Create();
 
             try
             {
@@ -134,6 +157,11 @@ namespace Magi.Inkling.Tests.PlayMode
                 cs.SetVector("_ReactionImpulseCol4", Vector4.zero);
                 cs.SetVector("_ReactionImpulseCol5", Vector4.zero);
                 cs.SetTexture(kernel, "_ReactionImpulseRW", impulseRT);
+                cs.SetTexture(kernel, "_HeatRead", heatReadRT);
+                cs.SetTexture(kernel, "_HeatWrite", heatWriteRT);
+                cs.SetFloat("_QuenchCoolingPerUnit", 0f);   // cooling OFF: conservation only
+                cs.SetFloat("_MinTemperature", 0f);
+                cs.SetFloat("_MaxHeat", 1f);
 
                 cs.SetBuffer(kernel, "_ParticlesRead", readBuf);
                 cs.SetBuffer(kernel, "_ParticlesWrite", writeBuf);
@@ -169,6 +197,8 @@ namespace Magi.Inkling.Tests.PlayMode
                 readBuf.Release();
                 writeBuf.Release();
                 impulseRT.Release();
+                heatReadRT.Release();
+                heatWriteRT.Release();
                 Object.DestroyImmediate(impulseRT);
             }
         }

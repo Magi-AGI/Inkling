@@ -75,8 +75,21 @@ namespace Magi.Inkling.Tests.EditMode
                 float src = Mathf.Max(0f, c.Inks[t.fromField]);
                 float conv = Mathf.Min(src, src * t.rate * dt);
                 c.Inks[t.fromField] = src - conv;
-                c.Inks[t.toField] += conv;
-                c.Heat = Mathf.Min(maxHeat, c.Heat + conv * t.heatRelease);
+
+                // CP8k: toField < 0 is the SINK sentinel — the ink is REMOVED, not converted, so there
+                // is no destination to credit (and indexing Inks[-1] would throw). This is how cold fire
+                // goes out without minting smoke or water. (Matches the kernel.)
+                if (t.toField >= 0)
+                    c.Inks[t.toField] += conv;
+
+                // CP8g: signed net of both terms, scaled by what actually converted. heatCost is the
+                // ONE-SHOT cooling of FORMING the destination material (water->ice chills its cell as
+                // the ice forms); heatRelease is latent heat given back. conv >= 0 (src is clamped), so
+                // heatCost can only cool. No conversion => conv == 0 => no cooling, which is what makes
+                // this a formation event rather than a continuous cold emitter. (Matches the kernel.)
+                // Clamp BOTH ends (matches the kernel): cold heatCost can drive heat DOWN, so the floor
+                // must be enforced here, not only in the final pass clamp.
+                c.Heat = Mathf.Clamp(c.Heat + conv * t.heatRelease - conv * t.heatCost, minTemp, maxHeat);
             }
 
             // 2. Hot phase, authored order. Each transition re-derives its excess against its OWN
@@ -92,7 +105,11 @@ namespace Magi.Inkling.Tests.EditMode
                 float src = Mathf.Max(0f, c.Inks[t.fromField]);
                 float conv = Mathf.Min(src, Mathf.Min(src * t.rate * dt, excess / Mathf.Max(t.heatCost, EPS)));
                 c.Inks[t.fromField] = src - conv;
-                c.Inks[t.toField] += conv;
+
+                // CP8k SINK sentinel (see the cold loop). Supported here for symmetry. (Matches the kernel.)
+                if (t.toField >= 0)
+                    c.Inks[t.toField] += conv;
+
                 c.Heat -= conv * t.heatCost;
             }
 

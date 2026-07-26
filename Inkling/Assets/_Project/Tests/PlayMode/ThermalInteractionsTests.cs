@@ -27,6 +27,9 @@ namespace Magi.Inkling.Tests.PlayMode
             public float freezeT = 0.2f, condenseT = 0.2f, meltT = 0.4f, boilT = 0.7f;
             public float meltRate = 1f, boilRate = 1f, condenseRate = 1f, freezeRate = 1f;
             public float meltCost = 0.5f, boilCost = 0.5f, condenseRelease = 0f;
+            // CP8g: one-shot chill as Water -> Ice forms. Defaults to 0 so every pre-CP8g test keeps its
+            // original heat numbers; the CP8g tests opt in explicitly.
+            public float freezeHeatCost = 0f;
             // CP8a: this is the CLAMP FLOOR (minTemperature), not the neutral/room temperature.
             public float minTemp = 0f, maxHeat = 1f;
             // CP7b fuel-like fire. Sources default OFF so all pre-CP7b phase tests are unaffected.
@@ -93,6 +96,7 @@ namespace Magi.Inkling.Tests.PlayMode
             condenseHeatRelease = tp.condenseRelease,
             freezeThreshold = tp.freezeT,
             freezeRate = tp.freezeRate,
+            freezeHeatCost = tp.freezeHeatCost,
             meltThreshold = tp.meltT,
             meltRate = tp.meltRate,
             meltHeatCost = tp.meltCost,
@@ -193,6 +197,77 @@ namespace Magi.Inkling.Tests.PlayMode
 
         // Builds a rule set directly from baked rules (bypassing AffinityGroup authoring) so custom
         // non-default fields can be exercised without touching any shipped asset.
+        // CP8i: dispatches the REAL DiffuseHeat kernel (InkTools Fluids.compute) so a test can compose
+        // conduction with ThermalInteractions exactly as FluidSolver.Step does: heat transport first,
+        // then the thermal pass reads the freshly-diffused heat. `obstacle` is bound because ice
+        // actsAsObstacle — and CP8d deliberately made conduction IGNORE that mask, so heat still enters
+        // solid ice. Binding it with the ice cell masked is what proves that end of the contract.
+        /// <summary>
+        /// CP8q: extended with the CP8l/CP8o parameters this helper predates — `dt` (conduction is a
+        /// PER-SECOND rate converted by 1-exp(-rate*dt)), `diffusionSolid`, and the ice-concentration
+        /// thermal-solid threshold with its particle buffer.
+        ///
+        /// Setting them EVERY call is mandatory, not tidiness: compute uniforms and buffers persist
+        /// between dispatches, so without this a prior test's threshold leaks in and the kernel can read
+        /// an unbound particle buffer — the same stale-uniform class CP8 has now hit three times.
+        /// Defaults keep every pre-CP8q caller byte-identical (threshold 0 => geometry-mask path only).
+        /// </summary>
+        private static float[] DispatchDiffuseHeat(float[] heat, float[] obstacle, int res,
+            float diffusion, float minTemp, float maxHeat,
+            float dt = 1f, float diffusionSolid = -1f, float iceThermalThreshold = 0f, iparticle[] particles = null)
+        {
+            if (diffusionSolid < 0f) diffusionSolid = diffusion;
+            var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(
+                "Packages/com.inktools.sim/Compute/Fluids.compute");
+            Assert.IsNotNull(cs, "Fluids.compute should load");
+            int kernel = cs.FindKernel("DiffuseHeat");
+
+            var hr = MakeHeatRT(res, heat);
+            var hw = MakeHeatRT(res, new float[res * res]);
+
+            var obs = new RenderTexture(res, res, 0, RenderTextureFormat.RFloat) { enableRandomWrite = true };
+            obs.Create();
+            var obsTex = new Texture2D(res, res, TextureFormat.RGBAFloat, false);
+
+            // Always bind a particle buffer so the kernel can never read an unbound SRV.
+            var parts = particles ?? new iparticle[res * res];
+            var partBuf = new ComputeBuffer(res * res, Marshal.SizeOf<iparticle>());
+            partBuf.SetData(parts);
+
+            var prev = RenderTexture.active;
+            try
+            {
+                for (int y = 0; y < res; y++)
+                    for (int x = 0; x < res; x++)
+                        obsTex.SetPixel(x, y, new Color(obstacle[y * res + x], 0f, 0f, 0f));
+                obsTex.Apply();
+                Graphics.Blit(obsTex, obs);
+                RenderTexture.active = prev;   // Blit leaves `active` set; releasing it later would warn.
+
+                cs.SetVector("_SimulationSize", new Vector2(res, res));
+                cs.SetFloat("_ThermalDiffusion", diffusion);
+                cs.SetFloat("_ThermalDiffusionSolid", diffusionSolid);
+                cs.SetFloat("_ThermalSolidThresholdIce", iceThermalThreshold);   // ALWAYS set — no leak
+                cs.SetFloat("_FrameDeltaTime", dt);
+                cs.SetFloat("_MinTemperature", minTemp);
+                cs.SetFloat("_MaxHeat", maxHeat);
+                cs.SetTexture(kernel, "_HeatRead", hr);
+                cs.SetTexture(kernel, "_HeatWrite", hw);
+                cs.SetTexture(kernel, "_ObstacleRead", obs);
+                cs.SetBuffer(kernel, "_ParticlesRead", partBuf);                 // ALWAYS bound
+                int g = Mathf.CeilToInt(res / 8f);
+                cs.Dispatch(kernel, g, g, 1);
+                return ReadHeatAll(hw, res);
+            }
+            finally
+            {
+                RenderTexture.active = null;
+                hr.Release(); hw.Release(); obs.Release(); partBuf.Release();
+                Object.DestroyImmediate(hr); Object.DestroyImmediate(hw);
+                Object.DestroyImmediate(obs); Object.DestroyImmediate(obsTex);
+            }
+        }
+
         private static ThermalRuleSet CustomRules(
             BakedThermalTransition[] transitions, BakedThermalSource[] sources)
         {
@@ -294,7 +369,41 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
+        // CP8h: shipped condensation is GENTLE. Lake: "the steam should dissipate into water at a lesser
+        // rate. Only a little bit of water should form from cooling steam." Cold steam must still
+        // condense — the THRESHOLD is untouched — but it sheds only ~15% of itself per second instead of
+        // collapsing wholesale, so steam lingers and drizzles rather than vanishing into a puddle.
+        //
+        // freezeRate = 0 isolates condensation: at heat 0.1 the condensed water would otherwise freeze
+        // to ice in the same pass (CP7c cold cascade), which would eat the water we are measuring.
+        //
+        // The exact numbers are the point — a `water > 0` assertion would pass just as happily on the
+        // old full-collapse behaviour and would not pin what we actually changed.
+        [UnityTest]
+        public IEnumerator Condense_GentleRate_OnlyALittleWaterForms()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].steam = 1f;
+            var tp = new TP { condenseRate = 0.15f, freezeRate = 0f };
+            var outp = Run(p, new[] { 0.1f }, 1, tp, out _);   // below condense(0.2)
+            yield return null;
+
+            Assert.That(outp[0].water, Is.EqualTo(0.15f).Within(3e-2f),
+                "Only a LITTLE water forms from cooling steam (rate 0.15), not a wholesale collapse");
+            Assert.That(outp[0].steam, Is.EqualTo(0.85f).Within(3e-2f),
+                "…and most of the steam survives the step to keep drifting");
+            Assert.That(outp[0].steam + outp[0].water, Is.EqualTo(1f).Within(3e-2f),
+                "steam + water conserved");
+            Assert.That(outp[0].ice, Is.EqualTo(0f).Within(1e-3f),
+                "Freezing is disabled here, so the new water must stay liquid");
+#else
+            yield break;
+#endif
+        }
+
         // 5. Condense only when pre-reaction heat < condenseThreshold: steam -> water, conserved.
+        // LEGACY mechanics fixture: TP.condenseRate defaults to 1f (full rate), which is what the CP7
+        // numeric baselines pin. CP8h's gentle shipped rate lives in Cp8Defaults, not in TP.
         [UnityTest]
         public IEnumerator Condense_ColdSteamBecomesWater_WarmDoesNot()
         {
@@ -617,6 +726,371 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
+        // ── CP8k: cold fire GOES OUT, through the REAL kernel ───────────────────────────────
+        // Proves the SINK sentinel (toField < 0) survives the GPU round trip: the struct is uploaded
+        // with toField = -1 and the kernel must remove the source ink WITHOUT crediting any destination.
+        // A bug here would either write ink into a garbage channel or silently do nothing at all, so
+        // this is the parity test that matters most for the new sentinel.
+        [UnityTest]
+        public IEnumerator ShippedRules_ColdFire_IsExtinguished_AndBecomesNothing()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].fire = 1f;
+            ThermalRuleSet shipped = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
+            Assume.That(shipped.IsValid, "Shipped CP8 defaults must bake cleanly: " + shipped.Error);
+
+            // Sources OFF so the fire cannot reheat its own cell — we are testing the sink in isolation.
+            var tp = new TP { minTemp = 0f, maxHeat = 1f, enableHeatSources = 0 };
+            var outp = RunRules(p, new[] { 0.5f }, 1, tp, shipped, out float[] heatOut);  // 0.5 < sink 0.6
+            yield return null;
+
+            Assert.That(outp[0].fire, Is.LessThan(0.05f),
+                "Cold fire must go out rapidly through the real kernel");
+
+            // The sink's defining property: the fire became NOTHING. Lake ruled out smoke/puddles.
+            Assert.That(outp[0].steam, Is.EqualTo(0f).Within(1e-2f), "Dying fire must not mint steam/smoke");
+            Assert.That(outp[0].water, Is.EqualTo(0f).Within(1e-2f), "…nor water");
+            Assert.That(outp[0].ice, Is.EqualTo(0f).Within(1e-2f), "…nor anything else");
+
+            Assert.That(heatOut[0], Is.EqualTo(0.5f).Within(2e-2f),
+                "Extinguishing is heat-neutral — it must not chill the cell, or the sink becomes just " +
+                "another term in the heat ratchet CP8k exists to remove");
+#else
+            yield break;
+#endif
+        }
+
+        [UnityTest]
+        public IEnumerator ShippedRules_HotFire_SurvivesTheSink()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].fire = 1f;
+            ThermalRuleSet shipped = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
+            Assume.That(shipped.IsValid, shipped.Error);
+
+            var tp = new TP { minTemp = 0f, maxHeat = 1f, enableHeatSources = 0 };
+            var outp = RunRules(p, new[] { 0.9f }, 1, tp, shipped, out _);   // above the 0.6 sink threshold
+            yield return null;
+
+            Assert.That(outp[0].fire, Is.EqualTo(1f).Within(2e-2f),
+                "Fire in a genuinely hot cell must survive — the sink culls fire that drifted somewhere " +
+                "COLD, not a healthy flame (which heats its own cell above the threshold anyway)");
+#else
+            yield break;
+#endif
+        }
+
+        // ── CP8q: THE RED TARGET — obstacle-strength ice must actually MELT under fire contact ──
+        //
+        // Lake: "when the Ice value is high enough to make an obstacle, the heat still doesn't advect
+        // into the Ice, so the temperature never rises high enough to trigger a melting of the ice."
+        //
+        // CP8q-fix (CKPT-085): the first version of this test lived in HeatLayerTests, composed only
+        // AdvectHeat + DiffuseHeat, and asserted HEAT ONLY — while its comment claimed it asserted ice
+        // mass. That was an overclaim and it did not measure Lake's bug at all: "temperature never rises
+        // high enough to TRIGGER MELTING" is a statement about ice mass, so the test must dispatch
+        // ThermalInteractions and watch ice fall / water rise. It now does.
+        //
+        // Composes the real order over many frames, at obstacle strength (ice = 1.0, mask set):
+        //     AdvectHeat (runtime-clipped velocity)  ->  DiffuseHeat  ->  ThermalInteractions
+        // against the SHIPPED CP8 rule set, and asserts raw ice/water/heat with conservation — so a
+        // visual or thermometer-only false positive is impossible.
+        [UnityTest]
+        public IEnumerator ObstacleStrengthIce_UnderFireContact_ActuallyMelts_NotJustWarms()
+        {
+#if UNITY_EDITOR
+            const int res = 5;
+            int FIRE = 2 * res + 1;    // (1,2) sustained flame
+            int FACE = 2 * res + 2;    // (2,2) ice face touching the flame
+
+            ThermalRuleSet shipped = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
+            Assume.That(shipped.IsValid, "Shipped CP8 defaults must bake cleanly: " + shipped.Error);
+
+            // A 3-deep ice wall at OBSTACLE STRENGTH (1.0, well above Ice.obstacleThreshold 0.5), cold,
+            // with a flame on its left face. Obstacle mask set for the wall, exactly as InkToObstacles
+            // would set it at runtime — we are NOT lowering the obstacle threshold to make this pass.
+            var p = new iparticle[res * res];
+            var heat = new float[res * res];
+            var obstacle = new float[res * res];
+            for (int i = 0; i < heat.Length; i++) heat[i] = 0.5f;      // neutral room
+            for (int y = 0; y < res; y++)
+                for (int x = 2; x <= 4; x++)
+                {
+                    int i = y * res + x;
+                    p[i].ice = 1f;                                     // obstacle-strength ice
+                    heat[i] = 0f;                                      // …and genuinely cold
+                    obstacle[i] = 1f;
+                }
+            heat[FIRE] = 1f;
+
+            float iceStart = p[FACE].ice;
+            float waterStart = p[FACE].water;
+            Assume.That(iceStart, Is.EqualTo(1f).Within(1e-3f), "face starts as solid ice");
+
+            var tp = new TP { minTemp = 0f, maxHeat = 1f, enableHeatSources = 0 };
+            float[] h = heat;
+            float faceHeatPeak = 0f;
+
+            for (int frame = 0; frame < 240; frame++)   // 4 simulated seconds
+            {
+                h[FIRE] = 1f;   // a burning fire cell holds itself at max via its own emission
+
+                // This test drives CONDUCTION only, deliberately — it is a lower-level check that the
+                // conduction+melt chain works, NOT the CP8q runtime proof.
+                //
+                // SUPERSEDED NOTE: an earlier version of this comment claimed conduction is "the ONLY path
+                // into a solid". That was true of the old code but is no longer the design. Lake: "I do
+                // want the heat to advect through the obstacle ice." CP8q added a pre-boundary velocity
+                // snapshot so heat advects into solids too; see FluidSolver + Heat.hlsl. Advection is not
+                // exercised here, which is why this test alone cannot answer Lake's question.
+                h = DispatchDiffuseHeat(h, obstacle, res, diffusion: 2f, minTemp: 0f, maxHeat: 1f,
+                    dt: 1f / 60f, diffusionSolid: 12f, iceThermalThreshold: 0.1f, particles: p);
+
+                // …then the phase pass, which is what turns heat into actual MELTING.
+                p = RunRules(p, h, res, tp, shipped, out float[] heatOut);
+                h = heatOut;
+
+                if (h[FACE] > faceHeatPeak) faceHeatPeak = h[FACE];
+            }
+            yield return null;
+
+            float iceEnd = p[FACE].ice, waterEnd = p[FACE].water;
+
+            Assert.That(faceHeatPeak, Is.GreaterThan(0.15f),
+                $"The ice face must warm past the melt threshold under sustained fire contact. " +
+                $"Peak was {faceHeatPeak:0.0000}. If this fails, heat never reaches obstacle-strength ice " +
+                "at all — Lake's observation — and conduction across the fluid/solid face is the culprit.");
+
+            Assert.That(iceEnd, Is.LessThan(iceStart - 0.01f),
+                $"THE ACTUAL BUG: obstacle-strength ice must LOSE MASS, not merely get warm. " +
+                $"ice {iceStart:0.###} -> {iceEnd:0.###}. Warming without melting is exactly what Lake " +
+                "reports seeing.");
+
+            Assert.That(waterEnd, Is.GreaterThan(waterStart + 0.01f),
+                $"…and the melted ice must become water. water {waterStart:0.###} -> {waterEnd:0.###}");
+
+            Assert.That(iceEnd + waterEnd, Is.EqualTo(iceStart + waterStart).Within(5e-2f),
+                "ice + water must be conserved through melting — no minting, no loss");
+#else
+            yield break;
+#endif
+        }
+
+        // ── CP8i: ice INTENSITY is coupled to TEMPERATURE ───────────────────────────────────
+        // Lake: "there should be a relation between the ice's intensity and its temperature. The
+        // dissipation of the ice should correspond to the diffusion of heat into the ice."
+        //
+        // These two tests compose the REAL kernels in the same order FluidSolver.Step runs them —
+        // DiffuseHeat, then ThermalInteractions — and pin both halves of that statement:
+        //   * heat conducted INTO an ice cell melts it, and the melt is paid for out of that heat;
+        //   * with no heat flowing in, the ice does not melt at all.
+        // Ice's independent time-based fade was removed in CP8i (Ice.asset dissipationHalfLife
+        // 45 -> 120000, matching the other structural/obstacle inks), so melt is now the ONLY route by
+        // which ice loses intensity. That asset policy is pinned separately in HeatLayerTests.
+
+        [UnityTest]
+        public IEnumerator HeatDiffusedIntoIce_MeltsIt_AndPaysForItInHeat()
+        {
+#if UNITY_EDITOR
+            const int res = 3;
+            int C = 1 * res + 1;   // centre: a cold cell of solid ice
+
+            var p = new iparticle[res * res];
+            p[C].ice = 1f;
+
+            // Centre starts at the floor; every neighbour is hot. Ice actsAsObstacle, so the centre is
+            // masked — CP8d's conduction-ignores-obstacles rule is what lets the heat reach it at all.
+            var heat = new float[res * res];
+            for (int i = 0; i < heat.Length; i++) heat[i] = 1f;
+            heat[C] = 0f;
+
+            var obstacle = new float[res * res];
+            obstacle[C] = 1f;
+
+            // 1. Conduction. centre = lerp(0, avg(4 hot cardinals) = 1, blend) where CP8l made the blend
+            //    dt-normalized: ConductionBlend(rate, dt) = 1 - exp(-rate*dt). With dt=1 a rate of ln(2)
+            //    ~= 0.6931 gives blend = 0.5, so the centre still lands on 0.5 — above melt(0.4) so the
+            //    downstream melt chain (0.8/0.2, heat->0.4) is unchanged. (Pre-CP8l this was a per-frame
+            //    lerp where rate 0.5 meant blend 0.5 directly; 0.5 now yields 1-exp(-0.5)=0.393, below
+            //    the melt threshold, which is why the old expectation went stale.)
+            float[] diffused = DispatchDiffuseHeat(heat, obstacle, res, diffusion: 0.6931f,
+                minTemp: 0f, maxHeat: 1f);
+            yield return null;
+
+            Assert.That(diffused[C], Is.EqualTo(0.5f).Within(3e-2f),
+                "Heat must CONDUCT INTO the solid ice cell (CP8d) — otherwise ice is a perfect insulator " +
+                "and could never melt from its surroundings");
+
+            // 2. The thermal pass reads that freshly-diffused heat.
+            //    0.5 > melt(0.4). excess = 0.1, meltCost 0.5 => conv capped at excess/cost = 0.2.
+            var outp = Run(p, diffused, res, new TP(), out float[] heatOut);
+            yield return null;
+
+            Assert.That(outp[C].ice, Is.EqualTo(0.8f).Within(3e-2f),
+                "Ice loses intensity by MELTING — bounded by the heat available above the melt threshold");
+            Assert.That(outp[C].water, Is.EqualTo(0.2f).Within(3e-2f), "…turning into exactly that much water");
+            Assert.That(outp[C].ice + outp[C].water, Is.EqualTo(1f).Within(3e-2f), "ice + water conserved");
+
+            // THE COUPLING. The melt is paid for out of the heat that arrived: heat drops by
+            // conv * meltHeatCost = 0.2 * 0.5 = 0.1, landing exactly back on the melt threshold. This is
+            // why ice loss TRACKS heat inflow — melt is capped by excess/heatCost, so it consumes the
+            // incoming heat and then stalls until conduction delivers more.
+            Assert.That(heatOut[C], Is.LessThan(diffused[C] - 2e-2f),
+                "Melting must CONSUME the heat that melted it (latent heat), not melt for free");
+            Assert.That(heatOut[C], Is.EqualTo(0.4f).Within(3e-2f),
+                "Heat is drawn down to exactly the melt threshold — the heat budget is spent, melt stalls");
+#else
+            yield break;
+#endif
+        }
+
+        // The other half of Lake's statement, and the one the old behaviour got wrong: with NO heat
+        // flowing in, cold ice must simply persist. It must not melt, and (post-CP8i) it has no
+        // independent time fade either, so its intensity is stable.
+        [UnityTest]
+        public IEnumerator ColdIce_WithNoHeatInflow_DoesNotMelt()
+        {
+#if UNITY_EDITOR
+            const int res = 3;
+            int C = 1 * res + 1;
+
+            var p = new iparticle[res * res];
+            p[C].ice = 1f;
+
+            var heat = new float[res * res];          // whole grid at the floor: nothing to conduct in
+            var obstacle = new float[res * res];
+            obstacle[C] = 1f;
+
+            float[] diffused = DispatchDiffuseHeat(heat, obstacle, res, diffusion: 0.5f,
+                minTemp: 0f, maxHeat: 1f);
+            yield return null;
+
+            Assert.That(diffused[C], Is.EqualTo(0f).Within(2e-2f), "No warm neighbours => no heat arrives");
+
+            var outp = Run(p, diffused, res, new TP(), out float[] heatOut);
+            yield return null;
+
+            Assert.That(outp[C].ice, Is.EqualTo(1f).Within(2e-2f),
+                "Cold ice must PERSIST — with no heat arriving there is no thermal reason for it to go");
+            Assert.That(outp[C].water, Is.EqualTo(0f).Within(2e-2f), "…and none of it becomes water");
+            Assert.That(heatOut[C], Is.EqualTo(0f).Within(2e-2f),
+                "…and it does not keep pulling heat down either (CP8g: no continuous cold source)");
+#else
+            yield break;
+#endif
+        }
+
+        // ── CP8g: ice is a cold source WHEN IT FORMS ────────────────────────────────────────
+        // Lake: "Ice should be a cold source, but only when it forms, whether by painting or growing."
+        // Painted ice is handled by the CP8b injection stamp (min temperature). GROWN ice — water
+        // freezing — cools through the cold transition's heatCost. The defining property is that the
+        // cooling scales with the amount CONVERTED, so it is a formation event, not a standing emitter.
+
+        // Full conversion with cost 1: 0.1 - (1.0 * 1.0) = -0.9, which must clamp to the floor.
+        [UnityTest]
+        public IEnumerator Freeze_WithHeatCost_ChillsAsIceForms()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].water = 1f;
+            var tp = new TP { freezeHeatCost = 1f, minTemp = 0f };
+            var outp = Run(p, new[] { 0.1f }, 1, tp, out float[] heatOut);   // below freeze(0.2)
+            yield return null;
+
+            Assert.That(outp[0].ice, Is.EqualTo(1f).Within(3e-2f), "Cold water freezes to ice");
+            Assert.That(outp[0].water, Is.EqualTo(0f).Within(3e-2f), "Water consumed by freezing");
+            Assert.That(heatOut[0], Is.EqualTo(0f).Within(2e-2f),
+                "Forming ice must CHILL the cell — 0.1 minus a full unit of cost clamps to the floor");
+            Assert.That(heatOut[0], Is.LessThan(0.1f - 2e-2f),
+                "…and it must genuinely be colder than it started, not merely unchanged");
+#else
+            yield break;
+#endif
+        }
+
+        // The cooling must be PROPORTIONAL to what converted, not a flat per-cell hit. 25% of the water
+        // freezes at cost 0.2 => heat drops by 0.25*0.2 = 0.05, i.e. 0.1 -> 0.05. If the kernel applied
+        // the cost unscaled, heat would land at 0.1 - 0.2 = 0 (clamped) and this would catch it.
+        [UnityTest]
+        public IEnumerator Freeze_RateLimitedHeatCost_CoolsByConvertedAmount()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].water = 1f;
+            var tp = new TP { freezeRate = 0.25f, freezeHeatCost = 0.2f, minTemp = 0f };
+            var outp = Run(p, new[] { 0.1f }, 1, tp, out float[] heatOut);
+            yield return null;
+
+            Assert.That(outp[0].ice, Is.EqualTo(0.25f).Within(3e-2f), "Only rate*dt of water freezes");
+            Assert.That(heatOut[0], Is.EqualTo(0.05f).Within(2e-2f),
+                "Cooling must scale with the CONVERTED amount: 0.1 - 0.25*0.2 = 0.05");
+#else
+            yield break;
+#endif
+        }
+
+        // THE CORE CP8g GUARANTEE. A cell of settled ice, below the melt threshold, with no water left
+        // to freeze, must NOT keep dragging its own temperature down. Ice is not a standing cold
+        // emitter the way fire is a standing heat source — if it were, ice fields would run away to the
+        // floor forever. conv == 0 => no cooling.
+        // CP8j: asserted BELOW the freezing point (TP's freeze is 0.2), not in the old dead band. It used
+        // to sit at heat 0.3 — above freezing yet below TP's melt of 0.4 — which passed, but only because
+        // it was pinning the very gap Lake reported: ice loitering at a temperature that is not cold. The
+        // no-continuous-cooling guarantee is real, so it stays; it just has to be stated where ice is
+        // actually entitled to exist.
+        [UnityTest]
+        public IEnumerator ExistingIce_BelowFreezing_WithNoWater_DoesNotContinuouslyCool()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].ice = 1f;   // no water: nothing can freeze
+            var tp = new TP { freezeHeatCost = 1f, minTemp = 0f };
+            var outp = Run(p, new[] { 0.1f }, 1, tp, out float[] heatOut);   // below freeze(0.2): genuinely cold
+            yield return null;
+
+            Assert.That(outp[0].ice, Is.EqualTo(1f).Within(3e-2f), "Ice below the freezing point persists");
+            Assert.That(outp[0].water, Is.EqualTo(0f).Within(3e-2f), "…and none of it melts");
+            Assert.That(heatOut[0], Is.EqualTo(0.1f).Within(2e-2f),
+                "Existing ice must NOT keep cooling — the chill happens at FORMATION, not continuously");
+#else
+            yield break;
+#endif
+        }
+
+        // CP8j through the REAL kernel, on the SHIPPED rules (not the TP fixture): with freeze == melt,
+        // ice one notch above the freezing point melts, and pays for it in latent heat that lands the
+        // cell back exactly ON the freezing point — never below it. Landing below would push the fresh
+        // water back into the freeze band and churn ice<->water forever; landing exactly on it is what
+        // makes this converge instead of oscillating, and is why melting ice cannot run away into an
+        // ever-expanding pocket of cold.
+        [UnityTest]
+        public IEnumerator ShippedRules_IceAboveFreezing_Melts_AndSettlesAtTheFreezePoint()
+        {
+#if UNITY_EDITOR
+            var p = new iparticle[1]; p[0].ice = 1f;
+            ThermalRuleSet shipped = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
+            Assume.That(shipped.IsValid, "Shipped CP8 defaults must bake cleanly: " + shipped.Error);
+
+            var tp = new TP { minTemp = 0f, maxHeat = 1f, enableHeatSources = 0 };
+            var outp = RunRules(p, new[] { 0.2f }, 1, tp, shipped, out float[] heatOut);  // above freeze(0.15)
+            yield return null;
+
+            // excess = 0.2 - 0.15 = 0.05; CP8ad meltHeatCost 0.10 => conv capped at 0.05/0.10 = 0.5.
+            // The cost fell 0.5 -> 0.15 (CP8l) -> 0.10 (CP8ad), so the SAME deposited heat now melts 5x
+            // more ice than the legacy 0.5 cost — ice keeps melting from heat already delivered rather
+            // than needing a constant fire stream. The heat still settles on exactly the freeze point
+            // regardless of cost; only the ice bought with it changed.
+            Assert.That(outp[0].ice, Is.EqualTo(0.5f).Within(3e-2f),
+                "Ice above the freezing point must MELT under the shipped rules");
+            Assert.That(outp[0].water, Is.EqualTo(0.5f).Within(3e-2f), "…into water");
+            Assert.That(outp[0].ice + outp[0].water, Is.EqualTo(1f).Within(3e-2f), "ice + water conserved");
+
+            Assert.That(heatOut[0], Is.EqualTo(0.15f).Within(2e-2f),
+                "Melting draws the cell back to EXACTLY the freezing point — the heat above freezing is " +
+                "spent on the melt and no further");
+            Assert.That(heatOut[0], Is.LessThan(0.2f - 1e-2f), "…so the cell genuinely cooled");
+#else
+            yield break;
+#endif
+        }
+
         // 19. Freezing is rate-limited: only freezeRate*dt of the water converts.
         [UnityTest]
         public IEnumerator Freeze_RateLimited_LeavesSomeWater()
@@ -754,9 +1228,9 @@ namespace Magi.Inkling.Tests.PlayMode
             StringAssert.Contains("Mathf.Max(condenseT, ctx.BoilThreshold)", src,
                 "boilT must be sanitized to >= condenseT (the water<->steam inverse cycle)");
 
-            // condense must be seeded INDEPENDENTLY of the freeze/melt cycle. The room-temperature
-            // layout requires condense (.65) ABOVE melt (.35), so any coupling of condense to freeze
-            // would clamp it back down and silently destroy water stability at neutral.
+            // condense must be seeded INDEPENDENTLY of the freeze/melt cycle. The room-temperature layout
+            // requires condense (.65) ABOVE melt (.15 in shipped CP8j), so any coupling of condense to
+            // freeze would clamp it back down and silently destroy water stability at neutral.
             StringAssert.Contains("Mathf.Max(0f, ctx.CondenseThreshold)", src,
                 "condenseT must be seeded from 0, independent of the freeze/melt cycle");
             Assert.IsFalse(src.Contains("Mathf.Max(freezeT, ctx.CondenseThreshold)"),
@@ -859,12 +1333,18 @@ namespace Magi.Inkling.Tests.PlayMode
         // kernel produced, and every one of those is outside tolerance, so these tests genuinely FAIL
         // on the broken kernel rather than passing vacuously.
 
-        // 27a. COLD: negative source must not drain the destination or invert the heat release.
+        // 27a. COLD: negative source must not drain the destination, nor invert the heat release, nor
+        // (CP8g) invert the ice-formation COOLING into heating.
         // Isolated to a freeze-only rule so the negative water reaches the freeze source directly
         // (under the default rules, condense's destination-write clamps water to 0 first, which would
         // mask the bug entirely).
-        //   PRE-FIX: conv = -0.1  =>  ice 0.4 -> 0.3,  heat 0.1 -> 0.05
+        //   PRE-FIX: conv = -0.1  =>  ice 0.4 -> 0.3,  heat 0.1 -> 0.1 + (-0.1*0.5) - (-0.1*0.2) = 0.07
         //   POST-FIX: conv = 0    =>  ice 0.4,         heat 0.1,   water clamped to 0
+        //
+        // heatCost (0.2) MUST DIFFER from heatRelease (0.5). With a negative conv the two terms have
+        // opposite signs, so if they were equal they would cancel EXACTLY and the heat assertion would
+        // pass on the broken kernel — a vacuous regression. The asymmetry is what gives the pre-fix
+        // path an observable 0.03 deviation.
         [UnityTest]
         public IEnumerator NegativeSource_ColdTransition_DoesNotDrainDestinationOrHeat()
         {
@@ -878,7 +1358,8 @@ namespace Magi.Inkling.Tests.PlayMode
                 new BakedThermalTransition
                 {
                     fromField = (int)InkTypeId.Water, toField = (int)InkTypeId.Ice,
-                    regime = ThermalRegime.Cold, threshold = 0.2f, rate = 1f, heatRelease = 0.5f
+                    regime = ThermalRegime.Cold, threshold = 0.2f, rate = 1f,
+                    heatRelease = 0.5f, heatCost = 0.2f
                 }
             }, null);
 
