@@ -27,4 +27,4 @@ MonoBehaviour:
   clearingThreshold: 0.5
   clearingRate: 0.05
   actsAsObstacle: 1
-  obstacleThreshold: 0.45
+  obstacleThreshold: 0.6

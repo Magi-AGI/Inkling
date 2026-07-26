@@ -1375,33 +1375,41 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 7f3c1a9e5b204d64a8e1c6f0d29b4e73, type: 2}
   enableReactionImpulse: 1
   reactionImpulseStrength: 40
-  reactionImpulseMax: 100
+  reactionImpulseMax: 8
   reactionImpulseCurlBias: 1
   reactionImpulseExpansionBias: 0.35
   reactionImpulseGain: 1
-  thermalDissipationHalfLife: 1000
-  thermalDiffusion: 0.2
+  thermalDissipationHalfLife: 60
+  thermalDiffusion: 2
+  thermalDiffusionSolid: 60
+  thermalSolidThresholdIce: 0.1
+  thermalSolidPermeability: 1
+  quenchCoolingPerUnit: 1
   neutralTemperature: 0.5
   minTemperature: 0
+  steamInjectionTemperature: 0.75
   enableHeatSources: 1
-  fireHeatEmissionRate: 1
+  fireHeatEmissionRate: 4
   maxHeat: 1
   enableThermalInteractions: 1
   freezeThreshold: 0.15
-  meltThreshold: 0.35
+  meltThreshold: 0.15
   condenseThreshold: 0.65
   boilThreshold: 0.85
   meltRate: 1
   boilRate: 1
-  condenseRate: 1
-  freezeRate: 1
-  meltHeatCost: 0.5
+  condenseRate: 0.15
+  freezeRate: 0.4
+  meltHeatCost: 0.10
   boilHeatCost: 0.5
   condenseHeatRelease: 0
+  freezeHeatCost: 0.1
   fireHeatFuelCost: 0
-  plantIgnitionThreshold: 0.98
+  plantIgnitionThreshold: 0.75
   plantIgnitionRate: 0.5
   plantIgnitionHeatCost: 0.25
+  fireSinkThreshold: 0.6
+  fireSinkRate: 4
   enableBlackBodyClearingFallback: 0
   blackBodyThresholdFallback: 0.5
   blackBodyClearingRateFallback: 0.05
