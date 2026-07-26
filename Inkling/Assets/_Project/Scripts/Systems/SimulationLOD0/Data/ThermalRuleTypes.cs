@@ -5,7 +5,8 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 {
     /// <summary>
     /// Which side of the thermal ladder a transition fires on.
-    /// Cold: gated by `heat &lt; threshold`, rate-limited, may RELEASE heat.
+    /// Cold: gated by `heat &lt; threshold`, rate-limited, may RELEASE heat (`heatRelease`) and/or
+    ///       REMOVE heat as the destination forms (`heatCost`, CP8g). Not heat-budget capped.
     /// Hot:  gated by excess `heat - threshold`, additionally capped by `excess / heatCost` (heat budget).
     /// </summary>
     public enum ThermalRegime
@@ -31,8 +32,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Source slot index into the owning AffinityGroup.inks[] (0..3). Consumed by this transition.")]
         [Range(0, 3)] public int fromSlot;
 
-        [Tooltip("Destination slot index into the owning AffinityGroup.inks[] (0..3). Produced by this transition.")]
-        [Range(0, 3)] public int toSlot;
+        [Tooltip("Destination slot index into the owning AffinityGroup.inks[] (0..3). Produced by this " +
+                 "transition.\n\n" +
+                 "CP8k: set to -1 for a SINK — the source ink is REMOVED outright rather than converted " +
+                 "into anything. This is how 'cold fire simply goes out' is expressed: a dying flame " +
+                 "should not mint smoke or a puddle. A sink only ever destroys ink, never creates it, so " +
+                 "it cannot mint mass.")]
+        [Range(-1, 3)] public int toSlot;
 
         [Tooltip("Cold = fires when heat < threshold. Hot = fires on excess heat above threshold.")]
         public ThermalRegime regime = ThermalRegime.Hot;
@@ -44,8 +50,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Fraction of the source ink converted per second.")]
         [Min(0f)] public float rate = 1f;
 
-        [Tooltip("HOT only: heat consumed per unit converted. Also caps conversion to excess/heatCost " +
-                 "(the heat budget). 0 means the conversion is limited only by rate and available ink.")]
+        [Tooltip("Heat consumed per unit converted. HOT: this is the heat budget — it also CAPS the " +
+                 "conversion to excess/heatCost. COLD: a ONE-SHOT cooling event applied as the " +
+                 "destination material FORMS (water->ice chills the cell as ice appears); it does NOT " +
+                 "cap the conversion. Because it scales with how much actually converted, a cell that " +
+                 "converts nothing is cooled by nothing — so this makes ice a cold source at formation, " +
+                 "NOT a continuous emitter. 0 means no heat is consumed.")]
         [Min(0f)] public float heatCost;
 
         [Tooltip("COLD only: latent heat released per unit converted (clamped to maxHeat). " +

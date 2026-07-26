@@ -34,6 +34,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             new GpuThermalSource[ThermalRuleBaker.MaxSources];
 
         private int thermalSignature;
+        // CP8ab: one-shot latch for the affinity-group diagnostic dump. The dump used to be gated on
+        // `Time.frameCount == 10`, which assumed ONE simulation step per frame. That is false whenever the
+        // sim is driven externally (InkScenarioRunner steps many times per frame) or substepped, so frame
+        // 10 emitted one entry PER STEP PER GROUP — 164 lines in the FireIce capture. Latching instead of
+        // guessing a frame makes the dump exactly once regardless of step cadence.
+        private bool loggedInteractionGroupsOnce;
         private bool thermalSignatureValid;
         private int thermalTransitionCount;
         private int thermalSourceCount;
@@ -91,6 +97,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
                 freezeThreshold = freezeT,
                 freezeRate = Mathf.Max(0f, ctx.FreezeRate),
+                // CP8g: one-shot chill as ice FORMS. Unlike a hot heatCost this does NOT cap the
+                // conversion (cold has no heat budget to spend — it is the thing producing the cold),
+                // so it needs only a non-negative clamp. A negative value would turn freezing into a
+                // heat SOURCE, which is exactly backwards.
+                freezeHeatCost = Mathf.Max(0f, ctx.FreezeHeatCost),
 
                 meltThreshold = meltT,
                 meltRate = Mathf.Max(0f, ctx.MeltRate),
@@ -99,6 +110,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 boilThreshold = boilT,
                 boilRate = Mathf.Max(0f, ctx.BoilRate),
                 boilHeatCost = Mathf.Max(0f, ctx.BoilHeatCost),
+
+                // CP8k cold-fire SINK. Fire -> (removed) has no destination and no inverse, so it is not
+                // part of any cycle and needs no per-cycle sanitization — only a non-negative clamp.
+                // The opt-in flag MUST be set here: the runtime builds its defaults from ctx, not from
+                // ThermalDefaults.Cp8Defaults, so without it cold fire would silently never go out.
+                includeFireColdSink = true,
+                fireSinkThreshold = Mathf.Max(0f, ctx.FireSinkThreshold),
+                fireSinkRate = Mathf.Max(0f, ctx.FireSinkRate),
 
                 // CP8d plant ignition. Plant -> Fire has no inverse cold transition, so it is not part
                 // of any cycle and needs no per-cycle sanitization — only a non-negative clamp.
@@ -160,6 +179,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 h = h * 31 + d.condenseHeatRelease.GetHashCode();
                 h = h * 31 + d.freezeThreshold.GetHashCode();
                 h = h * 31 + d.freezeRate.GetHashCode();
+                h = h * 31 + d.freezeHeatCost.GetHashCode();
+                h = h * 31 + d.fireSinkThreshold.GetHashCode();
+                h = h * 31 + d.fireSinkRate.GetHashCode();
                 h = h * 31 + d.meltThreshold.GetHashCode();
                 h = h * 31 + d.meltRate.GetHashCode();
                 h = h * 31 + d.meltHeatCost.GetHashCode();
@@ -361,7 +383,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // ambient (from a half-life), matching the ink dissipation convention; defaults are
             // inert (near-persistent, no diffusion, ambient 0) so CP1 has no observable effect.
             fc.SetFloat("_ThermalDissipation", HalfLifeToPerSecond(ctx.ThermalDissipationHalfLife));
-            fc.SetFloat("_ThermalDiffusion", Mathf.Clamp01(ctx.ThermalDiffusion));
+            // CP8l: these are now conduction rates PER SECOND, not per-frame blends — so they are no
+            // longer Clamp01'd (a rate above 1/sec is perfectly meaningful). The kernel converts each to
+            // a frame-rate-independent blend via 1 - exp(-rate*dt).
+            fc.SetFloat("_ThermalDiffusion", Mathf.Max(0f, ctx.ThermalDiffusion));
+            fc.SetFloat("_ThermalDiffusionSolid", Mathf.Max(0f, ctx.ThermalDiffusionSolid));
+            // CP8o: ice concentration at/above which a cell conducts at the solid rate — its OWN threshold,
+            // not the velocity/flow obstacle threshold, so painted ice conducts without blocking fluid.
+            fc.SetFloat("_ThermalSolidThresholdIce", Mathf.Max(0f, ctx.ThermalSolidThresholdIce));
+            // LEGACY (CP8q): fraction of neighbouring fluid velocity a SOLID cell borrows for HEAT
+            // advection. The shader IGNORES this unless _HeatObstacleMode == 1; the default strict model
+            // has no advective path through solids at all. Still uploaded every step so the legacy A/B
+            // mode cannot pick up a stale value.
+            fc.SetFloat("_ThermalSolidPermeability", Mathf.Clamp01(ctx.ThermalSolidPermeability));
             // Heat TRANSPORT relaxes toward the NEUTRAL (room) temperature. The InkTools uniform keeps
             // its historical name _AmbientTemperature — it has always meant "the value heat decays
             // toward", which is exactly the neutral.
@@ -404,7 +438,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_DissipationBlackBody", HalfLifeToPerSecond(GetInkProp(InkTypeId.BlackBody, d => d.dissipationHalfLife, 0.75f)));
             fc.SetFloat("_DissipationElectricitySeeded", HalfLifeToPerSecond(GetInkProp(InkTypeId.ElectricitySeeded, d => d.dissipationHalfLife, 2f)));
             fc.SetFloat("_DissipationElectricityGrown", HalfLifeToPerSecond(GetInkProp(InkTypeId.ElectricityGrown, d => d.dissipationHalfLife, 2f)));
-            fc.SetFloat("_DissipationIce", HalfLifeToPerSecond(GetInkProp(InkTypeId.Ice, d => d.dissipationHalfLife, 45f)));
+            // CP8i: the FALLBACK must match Ice.asset (120000 = persistent). It used to be 45, which
+            // would silently reinstate ice's non-thermal time fade whenever the ink definition is not
+            // wired — ice must lose intensity only by MELTING, i.e. only when heat conducts into it.
+            fc.SetFloat("_DissipationIce", HalfLifeToPerSecond(GetInkProp(InkTypeId.Ice, d => d.dissipationHalfLife, 120000f)));
 
             // Viscosity
             fc.SetFloat("_ViscosityFire", GetInkProp(InkTypeId.Fire, d => d.viscosity, 0.05f));
@@ -561,6 +598,20 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 ctx.FluidCompute.Dispatch(k, threadGroups, threadGroups, 1);
             }
 
+            // CP8q (Codex): zero the thermal velocity snapshot alongside the velocity buffers, so its
+            // first use after allocation OR after a mid-run reset is DETERMINISTIC rather than whatever
+            // the RT happened to contain. A zeroed snapshot means the first heat step advects nothing,
+            // and the real snapshot lands at the end of that same step.
+            // CP8z: this only affects the LEGACY advective mode (HeatObstacleMode == 1) — the strict
+            // default never reads VelocityThermal. Kept so the legacy A/B leg stays deterministic.
+            if (ctx.VelocityThermal != null)
+            {
+                var prevRT = RenderTexture.active;
+                RenderTexture.active = ctx.VelocityThermal;
+                GL.Clear(true, true, Color.clear);
+                RenderTexture.active = prevRT;
+            }
+
             // Heat is a persistent field (not cleared per-step). Initialise BOTH ping-pong sides to the
             // NEUTRAL (room) temperature so a mid-run reset can't inherit stale temperature.
             //
@@ -583,6 +634,32 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 ctx.ParticlesBuffer[ctx.ParticleReadIndex].SetData(zero);
                 ctx.ParticlesBuffer[ctx.ParticleWriteIndex].SetData(zero);
             }
+        }
+
+        /// <summary>
+        /// CP8r: is this group's pair-0x1 column the Fire+Water -> Steam contact quench?
+        ///
+        /// Identified by AUTHORED SEMANTICS, not by asset name: slot 0 must resolve to Fire, slot 1 to
+        /// Water, and column 0 (the 0x1 pair) must CONSUME both — i.e. e00 &lt; 0 and e10 &lt; 0. Matching
+        /// on the name would silently stop cooling the moment someone renamed or duplicated the asset,
+        /// and matching on slots alone would wrongly cool a group that happens to hold Fire and Water in
+        /// those slots without authoring a quench (OrganicGroup does exactly that — its col0 is all zero).
+        /// </summary>
+        private static bool IsFireWaterQuenchGroup(AffinityGroup group, int[] indices)
+        {
+            if (group == null || indices == null || indices.Length < 3) return false;
+            if (indices[0] != (int)InkTypeId.Fire || indices[1] != (int)InkTypeId.Water) return false;
+
+            // CKPT-102 hardening: require the STEAM product too, not just "consumes Fire and Water".
+            // Evaporative cooling is the latent heat of VAPORISATION — it is only physically justified
+            // when the water actually becomes steam. A future Fire+Water column that sank both into
+            // something else (or into nothing) would have no business chilling the cell, so slot 2 must
+            // be Steam and column 0 must produce it.
+            if (indices[2] != (int)InkTypeId.Steam) return false;
+
+            // Column 0 = pair 0x1. Rows are output slots: m00 = Fire, m10 = Water, m20 = Steam.
+            var pm = group.productMatrix;
+            return pm.m00 < 0f && pm.m10 < 0f && pm.m20 > 0f;
         }
 
         public void InitializeObstacles()
@@ -725,7 +802,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                             );
                             ctx.InkInteractionsCompute.SetVector("_InteractionThresholds", thresholds);
 
-                            if (Time.frameCount == 10)
+                            // CP8ab: gated behind the existing inkInteractionsDebugMode flag (default OFF)
+                            // and latched to once. This is a DIAGNOSTIC, not normal output: it reports the
+                            // runtime-RESOLVED channel indices for each group, which the inspector cannot
+                            // show. Previously it was unconditional and frame-gated, so it spammed the
+                            // Console during scenario runs and read as runtime errors.
+                            if (ctx.InkInteractionsDebugMode && !loggedInteractionGroupsOnce)
                             {
                                 var pm = group.productMatrix;
                                 Debug.Log($"[InkInteractions] Group '{group.groupName}' dispatch:\n" +
@@ -739,11 +821,56 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                                     $"  Resolution: {ctx.Resolution}, DeltaTime: {ctx.Timestep}");
                             }
 
+                            // CP8r: EVAPORATIVE COOLING, scoped to the Fire+Water quench group ONLY.
+                            //
+                            // Water removed fire MASS but never HEAT, so a doused cell stayed pinned near
+                            // max temperature — above plantIgnitionThreshold (0.75), which kept
+                            // regenerating Fire from Plant, and above fireSinkThreshold (0.6), so
+                            // surviving fire never guttered out. Vaporising water absorbs latent heat,
+                            // which is physically how water extinguishes fire.
+                            //
+                            // Only the group whose pair-0x1 column IS the quench gets a non-zero cooling
+                            // value. Every other group is uploaded 0, so the kernel's `> 0.0` guard makes
+                            // it a pure pass-through and OrganicGroup's Fire x Plant burn cannot chill the
+                            // world. Heat is bound (and swapped) ONLY for the cooling dispatch: when
+                            // cooling is on, the branch is on a UNIFORM, so every cell writes back and the
+                            // heat layer stays complete for the swap.
+                            bool coolsOnQuench = ctx.Heat != null
+                                && ctx.QuenchCoolingPerUnit > 0f
+                                && IsFireWaterQuenchGroup(group, indices);
+
+                            // CP8r-fix (CKPT-102): BIND EVERY DISPATCH, SCOPE ONLY THE VALUE.
+                            //
+                            // The kernel DECLARES _HeatRead/_HeatWrite, so Unity requires them bound on
+                            // every dispatch of it — exactly the rule this file already documents for
+                            // _ReactionImpulseRW (bound unconditionally even when accumulation is off) and
+                            // that InkInteractionsConservationTests repeats with a dummy RT. A uniform
+                            // branch inside the shader does NOT excuse an unbound resource: the binding is
+                            // validated at dispatch, not at the branch.
+                            //
+                            // So heat is bound for ALL groups; only the COOLING VALUE is scoped, which is
+                            // what actually keeps OrganicGroup's Fire x Plant burn from chilling the world.
+                            ctx.InkInteractionsCompute.SetFloat("_QuenchCoolingPerUnit",
+                                coolsOnQuench ? Mathf.Max(0f, ctx.QuenchCoolingPerUnit) : 0f);
+                            ctx.InkInteractionsCompute.SetFloat("_MinTemperature", SanitizedMin());
+                            ctx.InkInteractionsCompute.SetFloat("_MaxHeat", SanitizedMax());
+                            if (ctx.Heat != null)
+                            {
+                                ctx.InkInteractionsCompute.SetTexture(opQueue.KernelInkInteractions, "_HeatRead", ctx.Heat.Read);
+                                ctx.InkInteractionsCompute.SetTexture(opQueue.KernelInkInteractions, "_HeatWrite", ctx.Heat.Write);
+                            }
+
                             ctx.InkInteractionsCompute.SetBuffer(opQueue.KernelInkInteractions, "_ParticlesRead", ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
                             ctx.InkInteractionsCompute.SetBuffer(opQueue.KernelInkInteractions, "_ParticlesWrite", ctx.ParticlesBuffer[ctx.ParticleWriteIndex]);
                             ctx.InkInteractionsCompute.Dispatch(opQueue.KernelInkInteractions, threadGroups, threadGroups, 1);
                             ctx.SwapParticleBuffers();
+                            if (coolsOnQuench) ctx.Heat.Swap();
                         }
+
+                        // CP8ab: latch AFTER the group loop so every group dumps once, not just the
+                        // first. Mirrors the flag rather than hard-setting true, so toggling
+                        // inkInteractionsDebugMode off and on re-arms a fresh dump.
+                        loggedInteractionGroupsOnce = ctx.InkInteractionsDebugMode;
                     }
 
                     if (ctx.UseParticleDissipation && ctx.FluidKernelDissipateParticles != 0)
@@ -769,8 +896,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // 1b. Heat transport (scalar environment layer). Source (fire emits heat) first so it
             // reflects the current particle field, then advect by current velocity + decay, then
             // optional diffusion. Heat is diagnostic only in CP3 — it drives no other field.
-            // CP4: AdvectHeat/DiffuseHeat unconditionally read _ObstacleRead, so require ctx.Obstacles
-            // here (CP1 always allocates it; the guard just prevents an unbound SRV in test/abnormal setups).
+            // Both heat kernels need _ObstacleRead, for DIFFERENT reasons:
+            //   DiffuseHeat — CONDUCTIVITY SELECTOR (solid rate vs fluid rate), never a barrier.
+            //   AdvectHeat  — CP8z: in the default strict mode the mask is a BARRIER again (solid cells
+            //                 do not advect; fluid back-traces crossing a solid are refused). Only the
+            //                 legacy mode 1 uses it as a velocity-borrow detector.
+            // ctx.Obstacles is therefore required here (CP1 always allocates it; the guard just prevents
+            // an unbound SRV in test/abnormal setups).
             if (ctx.Heat != null && ctx.FluidKernelAdvectHeat >= 0 && ctx.Obstacles != null)
             {
                 // Heat sources: fire emits heat (add-only; never writes the particle buffer).
@@ -787,21 +919,76 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     ctx.Heat.Swap();
                 }
 
-                // Obstacle mask for no-flux heat transport (CP4). ctx.Obstacles holds this frame's
-                // ink/geometry solids; bound unconditionally (required by the guard above) so
-                // AdvectHeat/DiffuseHeat don't leak heat across walls and never read an unbound SRV.
-                ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_VelocityRead", ctx.Velocity.Read);
+                // Obstacle mask. ctx.Obstacles holds this frame's ink/geometry solids. Both heat kernels
+                // read it, for DIFFERENT purposes (see the fuller note above the enclosing block):
+                //   DiffuseHeat — CONDUCTIVITY SELECTOR only: picks the solid conduction rate over the
+                //                 fluid one. Never a barrier, so conduction always crosses into a solid.
+                //                 An ink obstacle is matter, not vacuum (CP8d/CP8k), and this is the one
+                //                 path by which a flame melts adjacent ice.
+                //   AdvectHeat  — CP8z: in the DEFAULT strict mode this IS a barrier again — solid cells
+                //                 do not advect, and a fluid back-trace crossing a solid is refused
+                //                 (no-flux). Only the legacy mode 1 treats it as a velocity-borrow
+                //                 detector instead. So heat crosses solids by conduction, never by
+                //                 advection, which is the whole point of the CP8z model.
+                // Still bound unconditionally so neither kernel reads an unbound SRV.
+                // CP8z: velocity source is MODE-DEPENDENT.
+                //   STRICT (default, HeatObstacleMode 0): bind the CLIPPED ctx.Velocity.Read. A solid's
+                //     velocity is zeroed and adjacent inward flow clipped — exactly the mass boundary heat
+                //     SHOULD respect, because in the strict model heat never advects through a solid. The
+                //     kernel early-outs on solids and no-flux-blocks fluid back-traces regardless, so the
+                //     clipped field is both correct and sufficient.
+                //   LEGACY (HeatObstacleMode 1): bind the PRE-BOUNDARY ctx.VelocityThermal snapshot, which
+                //     is what let CP8q's advective path punch heat through the barrier. Kept for A/B only.
+                // The uniform is set unconditionally so a stale value cannot carry over between dispatches.
+                ctx.FluidCompute.SetInt("_HeatObstacleMode", ctx.HeatObstacleMode);
+                bool legacyAdvectiveHeat = ctx.HeatObstacleMode == 1;
+                ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_VelocityRead",
+                    (legacyAdvectiveHeat && ctx.VelocityThermal != null) ? ctx.VelocityThermal : ctx.Velocity.Read);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_HeatRead", ctx.Heat.Read);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_HeatWrite", ctx.Heat.Write);
                 ctx.FluidCompute.SetTexture(ctx.FluidKernelAdvectHeat, "_ObstacleRead", ctx.Obstacles);
                 ctx.FluidCompute.Dispatch(ctx.FluidKernelAdvectHeat, threadGroups, threadGroups, 1);
                 ctx.Heat.Swap();
 
-                if (ctx.FluidKernelDiffuseHeat >= 0 && ctx.ThermalDiffusion > 0f)
+                // CP8m: gate on EITHER rate. Guarding on the fluid rate alone meant a config with
+                // thermalDiffusion = 0 and thermalDiffusionSolid > 0 — "only solids conduct", a perfectly
+                // reasonable thing to author — would skip the whole dispatch and silently conduct nothing
+                // ANYWHERE, including in the solids it was explicitly enabling. That is the same failure
+                // shape as the uniform-never-uploaded bug that cost a playtest: a heat path that does not
+                // error, it just quietly does nothing. The kernel picks the per-cell rate itself; this
+                // guard only needs to know whether ANY conduction is wanted at all.
+                if (ctx.FluidKernelDiffuseHeat >= 0
+                    && (ctx.ThermalDiffusion > 0f || ctx.ThermalDiffusionSolid > 0f))
                 {
                     ctx.FluidCompute.SetTexture(ctx.FluidKernelDiffuseHeat, "_HeatRead", ctx.Heat.Read);
                     ctx.FluidCompute.SetTexture(ctx.FluidKernelDiffuseHeat, "_HeatWrite", ctx.Heat.Write);
                     ctx.FluidCompute.SetTexture(ctx.FluidKernelDiffuseHeat, "_ObstacleRead", ctx.Obstacles);
+
+                    // CP8o: DiffuseHeat classifies painted ice as thermal-solid by CONCENTRATION
+                    // (p.ice >= _ThermalSolidThresholdIce), decoupled from the velocity obstacle mask.
+                    //
+                    // CP8o-fix (Codex): the shader reads _ParticlesRead UNCONDITIONALLY whenever the
+                    // threshold is > 0, and it has no buffer-presence check. So the C# side MUST make the
+                    // "no particles" fallback real: bind the buffer AND upload the live threshold when we
+                    // have particles; otherwise upload threshold 0 (which the shader's `> 0.0` guard
+                    // short-circuits, so it never touches the buffer) — never dispatch with a live
+                    // threshold and an unbound/stale buffer. This also overrides the SetConstants upload,
+                    // so it is order-independent rather than relying on that earlier write.
+                    if (ctx.ParticlesBuffer != null && ctx.ParticlesBuffer[ctx.ParticleReadIndex] != null)
+                    {
+                        ctx.FluidCompute.SetBuffer(ctx.FluidKernelDiffuseHeat, "_ParticlesRead",
+                            ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
+                        ctx.FluidCompute.SetFloat("_ThermalSolidThresholdIce",
+                            Mathf.Max(0f, ctx.ThermalSolidThresholdIce));
+                    }
+                    else
+                    {
+                        // No particles => disable ice-concentration classification for this dispatch,
+                        // so the kernel genuinely falls back to the geometry mask alone and cannot read
+                        // an unbound buffer.
+                        ctx.FluidCompute.SetFloat("_ThermalSolidThresholdIce", 0f);
+                    }
+
                     ctx.FluidCompute.Dispatch(ctx.FluidKernelDiffuseHeat, threadGroups, threadGroups, 1);
                     ctx.Heat.Swap();
                 }
@@ -925,6 +1112,23 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.FluidCompute.SetTexture(ctx.FluidKernelSubtractGradient, "_PressureRead", ctx.Pressure.Read);
             ctx.FluidCompute.Dispatch(ctx.FluidKernelSubtractGradient, threadGroups, threadGroups, 1);
             ctx.Velocity.Swap();
+
+            // Snapshot velocity BEFORE the obstacle boundary clips it — the only moment in the step where
+            // an unclipped field exists.
+            // CP8z: this exists SOLELY for the legacy advective A/B mode (HeatObstacleMode == 1). The
+            // default strict model does NOT bind it — AdvectHeat uses the clipped ctx.Velocity.Read,
+            // because advection is transport by the fluid and fluid cannot enter a solid. The snapshot is
+            // still taken unconditionally (one GPU copy) so switching to legacy mid-session is seamless.
+            //
+            // Heat transport runs earlier in the step than this, so it consumes the snapshot one frame
+            // later. That is consistent with semi-Lagrangian advection, which already works off prior state.
+            // CP8q (Gemini): CopyTexture, not Blit. Both are the same resolution and RGHalf, so this is a
+            // straight GPU-side copy with no render-target bind and no full-screen shader pass. Blit was a
+            // reflex, not a considered choice — there is no pipeline/synchronisation reason to prefer it
+            // here, and it also has the side effect of leaving RenderTexture.active set, which has caused
+            // "releasing a render texture that is set to be active" warnings elsewhere in this codebase.
+            if (ctx.VelocityThermal != null && ctx.Velocity?.Read != null)
+                Graphics.CopyTexture(ctx.Velocity.Read, ctx.VelocityThermal);
 
             // 5. Obstacle boundaries
             if (ctx.FluidKernelApplyObstacleBoundary != 0)

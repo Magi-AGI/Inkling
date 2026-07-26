@@ -27,6 +27,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             // Single render textures
             ctx.Divergence = CreateRT(resolution, RenderTextureFormat.RHalf, "Divergence");
+            // Velocity snapshot taken BEFORE ApplyObstacleBoundary clips it.
+            // CP8z: allocated ONLY to support the legacy advective A/B mode (HeatObstacleMode == 1). The
+            // default strict conduction-only model never binds it — AdvectHeat uses the clipped field,
+            // because fluid cannot enter a solid and heat may not advect where mass cannot. Retained so
+            // the Fire-vs-Ice harness can still compare the two models; it costs one RGHalf RT.
+            ctx.VelocityThermal = CreateRT(resolution, RenderTextureFormat.RGHalf, "VelocityThermal");
             ctx.VorticityTex = CreateRT(resolution, RenderTextureFormat.RHalf, "Vorticity");
             ctx.Obstacles = CreateRT(resolution, RenderTextureFormat.RFloat, "Obstacles");
             ctx.CreatureInkBuffer = CreateRT(resolution, RenderTextureFormat.ARGBHalf, "CreatureInk");
@@ -111,6 +117,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.Heat?.Dispose();
 
             ReleaseRT(ctx.Divergence);
+            ReleaseRT(ctx.VelocityThermal);
             ReleaseRT(ctx.VorticityTex);
             ReleaseRT(ctx.Obstacles);
             ReleaseRT(ctx.ReactionImpulseTex);

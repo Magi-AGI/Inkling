@@ -73,6 +73,16 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
 
         private static readonly int[] SlotValues = { 0, 1, 2, 3 };
 
+        // CP8k: a transition's DESTINATION may also be the SINK sentinel — the source ink is removed
+        // outright rather than converted (this is how "cold fire simply goes out" is expressed, without
+        // minting smoke or a puddle). Sources cannot be sinks, so this list is destination-only.
+        private static readonly int[] DestinationValues = { 0, 1, 2, 3, ThermalRuleBaker.SinkField };
+
+        private static string[] DestinationNames(string[] inkNames)
+        {
+            return new[] { inkNames[0], inkNames[1], inkNames[2], inkNames[3], "∅ Sink (remove)" };
+        }
+
         private void DrawTransitionElement(Rect rect, int index)
         {
             SerializedProperty el = thermalTransitions.GetArrayElementAtIndex(index);
@@ -94,7 +104,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
             float third = (rect.width - 26f) / 3f;
             from.intValue = EditorGUI.IntPopup(new Rect(rect.x, y, third, line), from.intValue, names, SlotValues);
             EditorGUI.LabelField(new Rect(rect.x + third + 4f, y, 18f, line), "→");
-            to.intValue = EditorGUI.IntPopup(new Rect(rect.x + third + 22f, y, third, line), to.intValue, names, SlotValues);
+            // CP8k: the destination list includes the SINK option (removal). Authoring it here is the
+            // only way to reach it — the popup used to offer slots 0..3 only, so the sentinel existed in
+            // the data model but was unauthorable through the inspector.
+            to.intValue = EditorGUI.IntPopup(new Rect(rect.x + third + 22f, y, third, line),
+                to.intValue, DestinationNames(names), DestinationValues);
             EditorGUI.PropertyField(new Rect(rect.x + 2f * third + 26f, y, third, line), regime, GUIContent.none);
 
             // Row 2: Threshold | Rate | (Hot ? heat Cost : heat Release)
@@ -150,7 +164,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
         private void DrawRegimeGrid(string title, ThermalRegime regime, string[] names)
         {
             // Collect authored transitions of this regime, preserving authored order.
+            //
+            // CP8k: a destination is one of exactly THREE things, and the preview must not blur them.
+            //
+            //   -1 (SinkField) : a SINK — removal. No destination ink, so no grid column: reported
+            //                    separately below. The original code did `Mathf.Clamp(toSlot, 0, 3)`,
+            //                    which rendered a Fire -> SINK as a transition into slot 0, i.e. it
+            //                    DISPLAYED AS "Fire -> Fire". Worse than hiding it: it lied.
+            //   0..3           : a normal conversion. Goes in the grid.
+            //   anything else  : INVALID (a typo, or a stale serialized value). The baker hard-errors on
+            //                    it, so the preview must call it invalid too. Clamping it back into 0..3
+            //                    would resurrect the same lie for a different input, and calling it a
+            //                    sink would contradict the validation panel — either way the author is
+            //                    told two different stories about the same data.
             var cells = new Dictionary<(int, int), string>();
+            var sinks = new List<string>();
+            var invalid = new List<string>();
             int order = 0;
             for (int i = 0; i < thermalTransitions.arraySize; i++)
             {
@@ -158,16 +187,45 @@ namespace Magi.Inkling.Systems.SimulationLOD0.Editor
                 if (el.FindPropertyRelative("regime").enumValueIndex != (int)regime) continue;
 
                 order++;
-                int from = Mathf.Clamp(el.FindPropertyRelative("fromSlot").intValue, 0, 3);
-                int to = Mathf.Clamp(el.FindPropertyRelative("toSlot").intValue, 0, 3);
+                int rawFrom = el.FindPropertyRelative("fromSlot").intValue;
+                int to = el.FindPropertyRelative("toSlot").intValue;
                 float rate = el.FindPropertyRelative("rate").floatValue;
-                cells[(from, to)] = $"{order}: {rate:0.##}";
+
+                int from = Mathf.Clamp(rawFrom, 0, 3);
+
+                if (ThermalRuleBaker.IsSink(to))
+                {
+                    sinks.Add($"{order}: {names[from]} → ∅ removed  (rate {rate:0.##})");
+                }
+                else if (to < 0 || to > 3)
+                {
+                    invalid.Add($"{order}: {names[from]} → slot {to} — INVALID destination " +
+                                $"(only {ThermalRuleBaker.SinkField} means Sink)");
+                }
+                else
+                {
+                    cells[(from, to)] = $"{order}: {rate:0.##}";
+                }
             }
 
-            if (cells.Count == 0) return;
+            if (cells.Count == 0 && sinks.Count == 0 && invalid.Count == 0) return;
 
             EditorGUILayout.LabelField(title, EditorStyles.miniBoldLabel);
             EditorGUI.indentLevel++;
+
+            // Sinks first: they are removals, not conversions, so they live outside the from/to grid.
+            foreach (string s in sinks)
+                EditorGUILayout.LabelField(s, EditorStyles.miniLabel);
+
+            // Then anything the baker will reject, so it cannot masquerade as either of the above.
+            foreach (string s in invalid)
+                EditorGUILayout.HelpBox(s, MessageType.Error);
+
+            if (cells.Count == 0)
+            {
+                EditorGUI.indentLevel--;
+                return;
+            }
 
             const float labelWidth = 70f;
             const float cellWidth = 60f;

@@ -12,6 +12,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     [DefaultExecutionOrder(49)] // Run just before SimDriver (+50)
     public class SimDriverDebugInput : MonoBehaviour
     {
+        [Tooltip("CP8p: legacy right-click Water spray. OFF by default — right mouse now creates/removes " +
+                 "continuous directional emitters via BrushInputController + DirectionalEmitterController. " +
+                 "Enable only for isolated debugging, never alongside BrushInputController.")]
+        [SerializeField] private bool enableLegacyRightClickWater = false;
+
         [Header("References")]
         [SerializeField] private MonoBehaviour simulationWriterSource;
 
@@ -100,7 +105,15 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (Mouse.current.leftButton.isPressed)
                 shouldInjectLeft = isMoving || Mouse.current.leftButton.wasPressedThisFrame;
 
-            if (Mouse.current.rightButton.isPressed)
+            // CP8p: the legacy right-click "spray Water while dragging" behaviour is RETIRED. Right mouse
+            // now means CREATE/REMOVE a continuous directional emitter, owned by
+            // Brush/DirectionalEmitterController and driven by BrushInputController (which also uses the
+            // robust SimulationUvUtility mapping instead of the naive screen-ratio UV below). Leaving both
+            // live would double-inject on every RMB drag and fight the emitter gesture.
+            //
+            // Set `enableLegacyRightClickWater` to restore the old behaviour for isolated debugging, but
+            // do NOT run it alongside BrushInputController in a playtest scene.
+            if (enableLegacyRightClickWater && Mouse.current.rightButton.isPressed)
                 shouldInjectRight = isMoving || Mouse.current.rightButton.wasPressedThisFrame;
 
             if (shouldInjectLeft || autoInject)

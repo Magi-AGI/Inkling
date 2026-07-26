@@ -46,6 +46,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float fireHeatEmissionRate, fireHeatFuelCost;
         public float condenseThreshold, condenseRate, condenseHeatRelease;
         public float freezeThreshold, freezeRate;
+
+        // CP8g: heat REMOVED per unit of water that freezes into ice — the one-shot cooling of ice
+        // FORMING. Scales with the amount actually converted, so a cell holding settled ice with no
+        // water left to freeze converts nothing and therefore cools nothing. That is the whole design:
+        // ice is a cold source at creation, never a continuous cold emitter. Legacy Cp7Defaults keeps
+        // this at 0 so the frozen kernel-mechanics fixtures keep pinning their original numbers.
+        public float freezeHeatCost;
         public float meltThreshold, meltRate, meltHeatCost;
         public float boilThreshold, boilRate, boilHeatCost;
 
@@ -56,29 +63,69 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public bool includePlantIgnition;
         public float plantIgnitionThreshold, plantIgnitionRate, plantIgnitionHeatCost;
 
+        // CP8k: cold fire GOES OUT. A cold transition Fire -> SINK (removal, not conversion), so a
+        // guttering flame does not mint smoke or water on its way out. Gated by an explicit flag for
+        // the same reason as plant ignition: the legacy Cp7Defaults is a frozen fixture and must keep
+        // baking exactly its original 4 transitions.
+        public bool includeFireColdSink;
+        public float fireSinkThreshold, fireSinkRate;
+
         /// <summary>
         /// CP8a SHIPPED layout — mirrors the SimDriver serialized defaults. Thresholds are placed
         /// around a NEUTRAL (room) temperature of 0.5 so that water is the stable phase:
         ///
-        ///     min 0 .. freeze .15 .. melt .35 .. [NEUTRAL .5] .. condense .65 .. boil .85 .. max 1
+        ///     min 0 .. [freeze == melt == .15] .. [NEUTRAL .5] .. condense .65 .. boil .85 .. max 1
+        ///
+        /// CP8j collapsed freeze and melt onto ONE point (they were .15 and .35). The gap between them
+        /// was a dead band in which ice was above freezing yet still refused to melt.
         ///
         /// At neutral: water neither freezes (needs &lt; .15) nor boils (needs &gt; .85); ice melts
-        /// (.5 &gt; .35); steam condenses (.5 &lt; .65). Note condense sits ABOVE melt — physically
+        /// (.5 &gt; .15); steam SLOWLY condenses (.5 &lt; .65). Note condense sits ABOVE melt — physically
         /// required, and only legal because the baker validates per-INVERSE-PAIR rather than with a
         /// global "all cold &lt;= all hot" ladder.
         /// </summary>
         public static ThermalDefaults Cp8Defaults => new ThermalDefaults
         {
-            fireHeatEmissionRate = 1f,
+            fireHeatEmissionRate = 4f,
             fireHeatFuelCost = 0f,
             condenseThreshold = 0.65f,
-            condenseRate = 1f,
+
+            // CP8h: condensation is deliberately GENTLE. Cooling steam sheds only a little water per
+            // second (~15%) instead of collapsing wholesale the instant it drops below the threshold —
+            // steam should linger and drizzle, not vanish into a puddle in one tick. This is a RATE
+            // change only: the threshold is untouched, so steam still condenses whenever it is cold
+            // enough, just slowly. Legacy Cp7Defaults keeps 1f; its kernel-mechanics tests pin exact
+            // full-conversion numbers against that.
+            condenseRate = 0.15f,
             condenseHeatRelease = 0f,
             freezeThreshold = 0.15f,
-            freezeRate = 1f,
-            meltThreshold = 0.35f,
+            freezeRate = 0.4f,
+
+            // CP8g: forming ice CHILLS its cell — Lake's "ice should be a cold source, but only when it
+            // forms". The key property is that it scales with the amount CONVERTED: settled ice with no
+            // water left to freeze converts nothing, so it cools nothing and just sits there.
+            //
+            // CP8k reduced this from 1.0, which was the dominant term in a global heat RATCHET. Every
+            // thermal transition is a heat sink (freeze, melt, boil, ignition) and NONE returns heat, so
+            // a water -> ice -> water round trip destroyed 1.0 + 0.5 = 1.5 units of heat and put the
+            // matter back exactly where it started: a perpetual refrigerator. The whole field trended to
+            // frozen. 0.2 keeps the "forming ice is cold" feel — painted ice gets its chill from the
+            // injection stamp anyway, which stamps the floor outright — without the runaway.
+            freezeHeatCost = 0.1f,
+
+            // CP8j: melt sits EXACTLY ON the freeze point, not above it. A gap between them (it was
+            // 0.15..0.35) is a band where ice is above freezing yet still refuses to melt — ice looking
+            // cold while sitting at a temperature that is not cold. Lake: "ice above the freezing point
+            // should simply melt."
+            //
+            // Equal thresholds are legal AND stable, which is the whole reason this works:
+            //   cold gate is `heat >= threshold => skip`  => freezes only strictly BELOW 0.15
+            //   hot  gate is `excess = heat - threshold`  => at exactly 0.15 excess is 0, so conv is 0
+            // so at the boundary neither fires and there is no freeze/melt churn. The baker's
+            // inverse-cycle rule compares with `>` (not `>=`), so it accepts freeze == melt.
+            meltThreshold = 0.15f,
             meltRate = 1f,
-            meltHeatCost = 0.5f,
+            meltHeatCost = 0.10f,
             boilThreshold = 0.85f,
             boilRate = 1f,
             boilHeatCost = 0.5f,
@@ -90,9 +137,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // Burning consumes heat (endothermic pyrolysis), which also bounds the conversion so a hot
             // cell cannot flash the whole plant mass to fire in one step.
             includePlantIgnition = true,
-            plantIgnitionThreshold = 0.98f,
+            plantIgnitionThreshold = 0.75f,
             plantIgnitionRate = 0.5f,
             plantIgnitionHeatCost = 0.25f,
+
+            // CP8k: fire only burns where it is genuinely HOT. Below the boil threshold it goes out
+            // rapidly — removed, not converted, so a dying flame leaves no smoke or puddle behind.
+            // Fire emits heat into its own cell, so a healthy flame keeps itself above 0.85 and is
+            // unaffected; it is fire that has DRIFTED somewhere cold that gutters. Heat-neutral by
+            // design (no heatCost/heatRelease): fire going out must not itself chill the cell, or we
+            // would just be reintroducing the ratchet under a new name.
+            includeFireColdSink = true,
+            fireSinkThreshold = 0.6f,
+            fireSinkRate = 4f,
         };
 
         /// <summary>
@@ -109,6 +166,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             condenseHeatRelease = 0f,
             freezeThreshold = 0.2f,
             freezeRate = 1f,
+
+            // Explicitly 0: CP8g's ice-formation cooling must NOT leak into this frozen fixture, or the
+            // kernel-mechanics tests would silently start measuring different heat numbers.
+            freezeHeatCost = 0f,
+
             meltThreshold = 0.4f,
             meltRate = 1f,
             meltHeatCost = 0.5f,
@@ -175,6 +237,34 @@ namespace Magi.Inkling.Systems.SimulationLOD0
     {
         public const int MaxTransitions = 8;   // 4 slots x 2 regimes under the one-outgoing invariant
         public const int MaxSources = 4;       // one per slot
+
+        /// <summary>
+        /// CP8k SINK sentinel for <c>toField</c>: the source ink is REMOVED rather than converted into
+        /// another ink. Authored as a negative <c>toSlot</c>.
+        ///
+        /// <para>
+        /// Every transition until now was a paired <c>from-- / to++</c>, which is what made the pass
+        /// incapable of minting mass. A sink is the one deliberate exception: it only ever DESTROYS ink,
+        /// never creates it, so it cannot mint either — the conservation argument still holds, just on
+        /// the safe side of the inequality.
+        /// </para>
+        /// <para>
+        /// This exists because "cold fire simply goes out" was previously inexpressible: a transition
+        /// maps one ink field to another, and <c>from == to</c> is a hard error, so there was no way to
+        /// say "this ink stops existing". Routing dying fire into Steam or Water was rejected — a
+        /// guttering flame should not mint smoke or puddles.
+        /// </para>
+        /// </summary>
+        public const int SinkField = -1;
+
+        /// <summary>
+        /// EXACT sentinel test. Deliberately <c>== SinkField</c> and not <c>&lt; 0</c>: -1 is the only
+        /// value that means "remove this ink". Any other negative is an out-of-range destination and a
+        /// hard bake error, so nothing else may be *described* as a sink either — a loose predicate here
+        /// would let the inspector preview happily render a stale <c>toSlot = -2</c> as a removal while
+        /// the baker was rejecting it, telling the author two different stories about the same data.
+        /// </summary>
+        public static bool IsSink(int toField) => toField == SinkField;
 
         /// <summary>
         /// Fills caller-owned arrays with the GPU layout (no allocation). Returns the element count.
@@ -250,10 +340,36 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
                             if (!TryResolve(g, t.fromSlot, out int from, out string err))
                                 return rs.Fail($"[{Name(g)}] transition source: {err}");
-                            if (!TryResolve(g, t.toSlot, out int to, out err))
-                                return rs.Fail($"[{Name(g)}] transition destination: {err}");
-                            if (from == to)
-                                return rs.Fail($"[{Name(g)}] transition from == to (field {from}); a transition must change ink.");
+
+                            // CP8k: toSlot == SinkField (-1) EXACTLY means SINK — the source ink is
+                            // removed outright rather than converted. It resolves to no slot, so it
+                            // deliberately skips slot resolution (and can never trip the from == to
+                            // check).
+                            //
+                            // The test is `== SinkField`, NOT `< 0`. A blanket negative check would
+                            // silently bake toSlot = -2 (a typo, or a stale serialized value) as a
+                            // REMOVAL — quietly deleting ink instead of hard-erroring. Only the one
+                            // documented sentinel is a sink; every other out-of-range value, negative or
+                            // positive, must still fail loudly.
+                            int to;
+                            if (t.toSlot == SinkField)
+                            {
+                                to = SinkField;
+                            }
+                            else if (t.toSlot < 0)
+                            {
+                                return rs.Fail(
+                                    $"[{Name(g)}] transition destination: slot {t.toSlot} is out of range. " +
+                                    $"The only legal negative destination is {SinkField} (SINK — removes the " +
+                                    "source ink outright).");
+                            }
+                            else
+                            {
+                                if (!TryResolve(g, t.toSlot, out to, out err))
+                                    return rs.Fail($"[{Name(g)}] transition destination: {err}");
+                                if (from == to)
+                                    return rs.Fail($"[{Name(g)}] transition from == to (field {from}); a transition must change ink.");
+                            }
 
                             var baked = new BakedThermalTransition
                             {
@@ -396,8 +512,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 // Cold, in authored order: condense, then freeze.
                 new BakedThermalTransition { fromField = steam, toField = water, regime = ThermalRegime.Cold,
                     threshold = d.condenseThreshold, rate = d.condenseRate, heatRelease = d.condenseHeatRelease },
+                // CP8g: freezing REMOVES heat as the ice forms (one-shot, scales with what converted).
                 new BakedThermalTransition { fromField = water, toField = ice, regime = ThermalRegime.Cold,
-                    threshold = d.freezeThreshold, rate = d.freezeRate, heatRelease = 0f },
+                    threshold = d.freezeThreshold, rate = d.freezeRate, heatRelease = 0f,
+                    heatCost = d.freezeHeatCost },
 
                 // Hot, in authored order: melt, then boil.
                 new BakedThermalTransition { fromField = ice, toField = water, regime = ThermalRegime.Hot,
@@ -405,6 +523,26 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 new BakedThermalTransition { fromField = water, toField = steam, regime = ThermalRegime.Hot,
                     threshold = d.boilThreshold, rate = d.boilRate, heatCost = d.boilHeatCost },
             };
+
+            // CP8k: cold fire GOES OUT — a COLD transition Fire -> SINK. REMOVAL, not conversion: a
+            // guttering flame must not mint smoke or a puddle, so this is the one transition with no
+            // destination ink. Deliberately HEAT-NEUTRAL (no heatCost, no heatRelease) — fire dying must
+            // not itself chill the cell, or we would be reintroducing the very heat ratchet CP8k exists
+            // to remove, just under a new name.
+            //
+            // Fire is its own heat source, so a healthy flame holds its own cell above the threshold and
+            // is untouched. What this culls is fire that has DRIFTED somewhere cold. Fire has no other
+            // outgoing cold transition (one-outgoing rule holds) and a sink has no inverse (no cycle).
+            // Appended only on opt-in, so the legacy Cp7Defaults fixture keeps its original 4.
+            if (d.includeFireColdSink)
+            {
+                transitions.Add(new BakedThermalTransition
+                {
+                    fromField = fire, toField = SinkField, regime = ThermalRegime.Cold,
+                    threshold = d.fireSinkThreshold, rate = d.fireSinkRate,
+                    heatCost = 0f, heatRelease = 0f,
+                });
+            }
 
             // CP8d: heat-driven plant IGNITION — plant must actually get HOT to catch fire. Appended
             // only when the caller opts in, so the legacy Cp7Defaults fixture keeps baking exactly its

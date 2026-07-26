@@ -44,12 +44,21 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             public float blackLuminanceThreshold;
         }
 
+        // CP8w: a heat-only injection (ColdAir). Carries a temperature and NO ink index, because there
+        // is no ink — this is the type-level guarantee that the ColdAir path cannot write mass.
+        private struct PendingHeatInjection
+        {
+            public Vector2 position;
+            public float targetTemperature;
+        }
+
         // ── Queues ──────────────────────────────────────────────────────────
 
         private readonly List<PendingDensityStamp> pendingDensityStamps = new List<PendingDensityStamp>();
         private readonly List<PendingForceInjection> pendingForceInjections = new List<PendingForceInjection>();
         private readonly List<PendingDensityInjection> pendingDensityInjections = new List<PendingDensityInjection>();
         private readonly List<PendingClearDensityMask> pendingClearDensityMasks = new List<PendingClearDensityMask>();
+        private readonly List<PendingHeatInjection> pendingHeatInjections = new List<PendingHeatInjection>();
 
         // ── Kernel indices ──────────────────────────────────────────────────
 
@@ -125,6 +134,18 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 position = position,
                 color = color,
                 inkTypeIndex = inkTypeIndex
+            });
+        }
+
+        /// <summary>
+        /// CP8w: queues a HEAT-ONLY injection (ColdAir). Never touches density or particles.
+        /// </summary>
+        public void EnqueueHeatInjection(Vector2 position, float targetTemperature)
+        {
+            pendingHeatInjections.Add(new PendingHeatInjection
+            {
+                position = position,
+                targetTemperature = targetTemperature
             });
         }
 
@@ -350,6 +371,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ProcessClearDensityMasks(threadGroups);
             ProcessForceInjections(threadGroups);
             ProcessDensityInjections(threadGroups);
+            ProcessHeatInjections(threadGroups);
+        }
+
+        /// <summary>
+        /// CP8w: applies queued ColdAir stamps. Deliberately NOT folded into ProcessDensityInjections —
+        /// that method early-returns when ctx.Density is null, and a pure temperature probe must still
+        /// work in a heat-only harness with no density buffer allocated.
+        /// </summary>
+        private void ProcessHeatInjections(int threadGroups)
+        {
+            if (pendingHeatInjections.Count == 0) return;
+
+            foreach (var h in pendingHeatInjections)
+                StampHeatAt(h.position, h.targetTemperature, threadGroups);
+
+            pendingHeatInjections.Clear();
         }
 
         private void ProcessDensityStamps(int threadGroups)
@@ -718,10 +755,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         }
 
         /// <summary>
-        /// CP8b: stamps the injected ink's characteristic temperature into the heat field, using the
-        /// injection's own centre/radius/falloff — Fire at the ceiling, Water at the neutral baseline,
-        /// Ice at the floor (so painting ice immediately creates genuinely sub-neutral cold, which was
-        /// the user-reported gap). Every other ink leaves heat untouched.
+        /// CP8b/CP8f: stamps the injected ink's characteristic temperature into the heat field, using the
+        /// injection's own centre/radius/falloff — Fire at the ceiling, Steam hot (between water and
+        /// fire, so painted steam sits above the condense threshold instead of collapsing straight back
+        /// into water), Water at the neutral baseline, Ice at the floor (so painting ice immediately
+        /// creates genuinely sub-neutral cold, which was the user-reported gap). The mapping itself
+        /// lives in SimulationContext.TryGetInjectionTemperature; every other ink leaves heat untouched.
         ///
         /// This is a ONE-SHOT INITIAL CONDITION per queued injection, not a per-frame source, so it does
         /// NOT revive the free continuous fire heat that CP7b/CP7d removed — fire's ongoing emission
@@ -736,11 +775,22 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         /// </summary>
         private void StampInjectionHeat(Vector2 uvPosition, int inkTypeIndex, int threadGroups)
         {
-            if (ctx.Heat == null || ctx.FluidKernelStampInjectionHeat < 0 || ctx.FluidCompute == null)
-                return;
-
             if (!ctx.TryGetInjectionTemperature(inkTypeIndex, out float target))
                 return;   // this ink has no characteristic temperature: leave the heat field alone
+
+            StampHeatAt(uvPosition, target, threadGroups);
+        }
+
+        /// <summary>
+        /// Drives the heat field toward <paramref name="target"/> at a point, using the same centre,
+        /// radius and falloff as density injection. CP8w split this out of StampInjectionHeat so the
+        /// ColdAir probe can stamp an EXPLICIT temperature — it has no InkTypeId, so it cannot go
+        /// through TryGetInjectionTemperature (which rejects anything past the enum).
+        /// </summary>
+        private void StampHeatAt(Vector2 uvPosition, float target, int threadGroups)
+        {
+            if (ctx.Heat == null || ctx.FluidKernelStampInjectionHeat < 0 || ctx.FluidCompute == null)
+                return;
 
             int k = ctx.FluidKernelStampInjectionHeat;
             var fc = ctx.FluidCompute;

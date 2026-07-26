@@ -32,13 +32,19 @@
 struct GpuThermalTransition
 {
     int fromField;      // absolute iparticle field index (0..9)
-    int toField;        // absolute iparticle field index (0..9)
+    int toField;        // absolute iparticle field index (0..9), or -1 = SINK (CP8k): the source ink is
+                        // REMOVED outright, with no destination credited. This is how cold fire goes out
+                        // without minting smoke or a puddle. A sink only ever destroys ink, never creates
+                        // it, so the no-minting invariant still holds.
     int regime;         // 0 = Cold, 1 = Hot
     int pad0;
     float threshold;
     float rate;
-    float heatCost;     // HOT: consumed per unit converted; also caps conversion to excess/heatCost
-    float heatRelease;  // COLD: released per unit converted
+    float heatCost;     // HOT:  consumed per unit converted; also caps conversion to excess/heatCost
+                        // COLD: heat REMOVED per unit converted (CP8g), a one-shot cooling event at
+                        //       formation. Does NOT cap the conversion — cold has no heat budget to
+                        //       spend, it is the thing producing the cold.
+    float heatRelease;  // COLD: released per unit converted (latent heat)
 };
 
 struct GpuThermalSource
@@ -183,8 +189,25 @@ void ThermalInteractions(uint3 id : SV_DispatchThreadID)
         float conv = min(from, from * t.rate * dt);
 
         SetInkByIndex(p, t.fromField, max(0.0, from - conv));
-        SetInkByIndex(p, t.toField, max(0.0, GetInkByIndex(p, t.toField) + conv));
-        heat = min(_MaxHeat, heat + conv * t.heatRelease);
+
+        // CP8k: toField < 0 is the SINK sentinel — the ink is REMOVED, not converted, so there is no
+        // destination to credit. This is how cold fire simply goes out without minting smoke or water.
+        // A sink only ever destroys ink, so the no-minting invariant still holds (strictly, it is now
+        // an inequality rather than an equality).
+        if (t.toField >= 0)
+            SetInkByIndex(p, t.toField, max(0.0, GetInkByIndex(p, t.toField) + conv));
+
+        // CP8g: a cold transition applies BOTH terms as a signed net, scaled by how much actually
+        // converted. heatCost is the ONE-SHOT cooling of forming the destination material (water->ice
+        // chills the cell as the ice forms); heatRelease is latent heat given back. Because `from` is
+        // clamped above, conv >= 0, so heatCost can only ever COOL — an underflowed source cannot
+        // invert this into heating. Only cells that actually convert are cooled, which is exactly why
+        // this is a formation event and not a continuous emitter: no conversion => conv == 0 => no
+        // cooling, so a cell of settled ice with no water left to freeze stops pulling heat down.
+        // Clamp BOTH ends: cold heatCost can now drive heat DOWN, so a min-clamp is required here and
+        // not only in the final pass clamp — otherwise a large cost could push heat below the floor and
+        // a later transition in this same loop would read that out-of-range value.
+        heat = clamp(heat + conv * t.heatRelease - conv * t.heatCost, _MinTemperature, _MaxHeat);
     }
 
     // 2. HOT transitions, in baked order. Each re-derives its excess against its OWN threshold from
@@ -202,7 +225,12 @@ void ThermalInteractions(uint3 id : SV_DispatchThreadID)
         float conv = min(from, min(from * t.rate * dt, excess / max(t.heatCost, EPS)));
 
         SetInkByIndex(p, t.fromField, max(0.0, from - conv));
-        SetInkByIndex(p, t.toField, max(0.0, GetInkByIndex(p, t.toField) + conv));
+
+        // CP8k SINK sentinel (see the cold loop). Supported here too for symmetry, so a hot sink is
+        // expressible without a second code path — the shipped rules only use a cold one (fire).
+        if (t.toField >= 0)
+            SetInkByIndex(p, t.toField, max(0.0, GetInkByIndex(p, t.toField) + conv));
+
         heat -= conv * t.heatCost;
     }
 

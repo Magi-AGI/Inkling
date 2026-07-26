@@ -1,6 +1,11 @@
 #pragma kernel AddDensityBatched
 #pragma kernel AddParticlesBatched
 
+// CP9c: define ifloat BEFORE iparticle.cs. AddInkByIndex casts (ifloat)amount, but ifloat was never
+// defined here, so the shader failed to compile and Unity reported both kernels invalid at Dispatch
+// ("Kernel at index (0/1) is invalid"). Matches the include order in ThermalInteractions.compute and
+// StampParticlesCompute.compute. Surfaced by the first live PlayMode run (InjectionHeatSmokeTests).
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
 #include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
 
 StructuredBuffer<float4> _Injections; // uv.xy, color.rg

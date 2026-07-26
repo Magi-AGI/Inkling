@@ -135,16 +135,63 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float reactionImpulseGain = 1f;
 
         [Header("Heat / Thermal (temperature field)")]
-        [Tooltip("Seconds for temperature to fade 50% toward NEUTRAL. Large ≈ persistent. Frame-rate independent.")]
+        [Tooltip("Seconds for temperature to relax 50% toward NEUTRAL (room temperature). Frame-rate " +
+                 "independent. This is the THERMOSTAT, not a leak — heat is not draining away to zero, " +
+                 "it is settling back to room temperature. CP8k lowered this from 1000, which restored " +
+                 "only 0.0003 heat/sec (~515s to thaw a frozen cell) and so was effectively no thermostat " +
+                 "at all: since every thermal transition REMOVES heat and none returns it, the field could " +
+                 "only ever ratchet colder. Keep it long enough that explicit effects (fire, ice, phase " +
+                 "changes) dominate on their own timescales, but short enough that the world recovers.")]
         [Min(0.25f)]
-        [SerializeField] private float thermalDissipationHalfLife = 1000f;
+        [SerializeField] private float thermalDissipationHalfLife = 60f;
         [Tooltip("Thermal conduction: how fast temperature spreads to neighbours per step (0 = none). " +
                  "This is what lets fire warm — and ice chill — the region AROUND them rather than only " +
-                 "their own cell. Conduction ignores the obstacle mask (CP8d), so solid ink conducts " +
-                 "rather than insulating. CP8e raised this from 0.05, which was too subtle to read on " +
-                 "screen: fire heat and ice cold barely reached past their own cells.")]
+                 "their own cell.\n\n" +
+                 "CP8l: this is now a rate PER SECOND, not a per-frame blend. DiffuseHeat was the only " +
+                 "heat term that was not dt-normalised: at 60fps the old 0.2/frame was an effective " +
+                 "~12/sec and beat fire's own emission 6:1, so fire could not hold its own temperature " +
+                 "and every hot spot smeared away before it could melt ice or ignite plant. UNITS " +
+                 "CHANGED — the old 0.2 and a new 0.2 are not the same thing.")]
+        [Min(0f)]
+        [SerializeField] private float thermalDiffusion = 2f;
+        [Tooltip("Conduction rate PER SECOND inside SOLID/obstacle cells. Heat travels MORE readily " +
+                 "through solids than open fluid — physically right, since ice and rock conduct better " +
+                 "than the fluid around them. This is what lets a block of ice heat THROUGH rather than " +
+                 "only skinning at its surface: a multi-cell solid has no fluid neighbours to borrow " +
+                 "velocity from, so conduction carries heat through the INTERIOR.\n\n" +
+                 "CP8z: in the DEFAULT strict model, conduction is once again the ONLY way heat crosses a " +
+                 "solid — advection is transport by the fluid, and fluid cannot enter a solid. (CP8q's " +
+                 "advective path survives only as the opt-in diagnostic thermalObstacleHeatMode = 1.)\n\n" +
+                 "NOTE the obstacle mask cannot tell ink solids from geometry walls, so both get this rate.")]
+        [Min(0f)]
+        [SerializeField] private float thermalDiffusionSolid = 60f;
+        [Tooltip("Ice concentration at/above which a cell CONDUCTS at the solid rate. DECOUPLED from the " +
+                 "velocity/flow obstacle threshold (Ice.obstacleThreshold, 0.5): thin ice must keep NOT " +
+                 "blocking flow, yet still conduct heat and melt. 0.1 sits below brush density (0.3) so a " +
+                 "normal painted stroke conducts, while staying below 0.5 so it does not dam fluid. Set 0 " +
+                 "to fall back to the geometry obstacle mask alone (the CP8n behaviour).")]
+        [Min(0f)]
+        [SerializeField] private float thermalSolidThresholdIce = 0.1f;
+        [Tooltip("LEGACY (CP8q), ignored unless thermalObstacleHeatMode = 1. How much of the surrounding " +
+                 "fluid velocity a SOLID cell borrows for HEAT advection. In the default strict model heat " +
+                 "never advects through a solid, so this does nothing. Kept so the Fire-vs-Ice harness can " +
+                 "A/B the old advective behaviour. 1 = energy crosses a solid as freely as fluid; 0 = none.")]
         [Range(0f, 1f)]
-        [SerializeField] private float thermalDiffusion = 0.2f;
+        [SerializeField] private float thermalSolidPermeability = 1f;
+        [Tooltip("CP8z: how AdvectHeat treats obstacles. 0 = STRICT conduction-only (DEFAULT) — heat " +
+                 "crosses a solid only by conduction (DiffuseHeat), never by advection, matching Lake's " +
+                 "revised model. 1 = LEGACY CP8q advective path, an opt-in diagnostic for comparing the " +
+                 "two models in the Fire-vs-Ice test. Leave at 0 for normal play.")]
+        [Range(0, 1)]
+        [SerializeField] private int thermalObstacleHeatMode = 0;
+        [Tooltip("CP8r: heat absorbed per unit of Fire+Water converted to Steam by the CONTACT quench — " +
+                 "evaporative cooling, i.e. how water actually extinguishes fire. Without it the quench " +
+                 "removed fire MASS but left the cell hot, so plant kept re-igniting above 0.75 and " +
+                 "surviving fire stayed above the 0.6 cold-fire sink — dousing could never finish the job. " +
+                 "Applies ONLY to the Fire+Water quench group (not Fire x Plant, not any other pair). " +
+                 "0 disables it and restores the pre-CP8r behaviour.")]
+        [Min(0f)]
+        [SerializeField] private float quenchCoolingPerUnit = 1f;
         [Tooltip("NEUTRAL (room) temperature. Temperature relaxes toward this, and the heat field is " +
                  "INITIALISED to it. Water is the stable phase here: it neither freezes nor boils. " +
                  "Thresholds are laid out around it (freeze/melt below, condense/boil above).")]
@@ -155,12 +202,21 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                  "never form.")]
         [Range(0f, 1f)]
         [SerializeField] private float minTemperature = 0f;
+        [Tooltip("Temperature stamped when Steam is painted DIRECTLY (typed injection). Steam is born hot: " +
+                 "between Water (neutral) and Fire (max). Kept above the condense threshold so freshly " +
+                 "painted steam does not immediately collapse back into water, and below the boil threshold " +
+                 "so it does not read as fire-hot. Clamped into [neutral, max] at use. Does NOT affect steam " +
+                 "produced by boiling or by the Fire+Water contact quench — those inherit their cell's heat.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float steamInjectionTemperature = 0.75f;
         [Tooltip("When true, fire concentration emits heat into the heat layer (add-only; does not modify " +
                  "particles). Diagnostic in CP3 — visible only in the Heat debug view, not Combined rendering.")]
         [SerializeField] private bool enableHeatSources = true;
-        [Tooltip("Heat added per unit fire per second (dt-normalized).")]
+        [Tooltip("Heat added per unit fire per second (dt-normalized). CP8l raised this from 1: fire " +
+                 "must OUT-PRODUCE conduction in its own cell, or it cannot hold its temperature, drops " +
+                 "below the sink threshold and extinguishes itself.")]
         [Min(0f)]
-        [SerializeField] private float fireHeatEmissionRate = 1f;
+        [SerializeField] private float fireHeatEmissionRate = 4f;
         [Tooltip("Clamp ceiling for the heat field to prevent runaway values.")]
         [Min(0f)]
         [SerializeField] private float maxHeat = 1f;
@@ -171,8 +227,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                  "state, so baseline is unchanged until enabled. Local-only conversions (no neighbor " +
                  "sampling) are conservation-safe.")]
         [SerializeField] private bool enableThermalInteractions = false;
-        // CP8a layout around neutral 0.5:
-        //   freeze .15 .. melt .35 .. [NEUTRAL .5] .. condense .65 .. boil .85
+        // CP8a/CP8j layout around neutral 0.5:
+        //   [freeze == melt == .15] .. [NEUTRAL .5] .. condense .65 .. boil .85
+        // CP8j collapsed freeze and melt onto ONE point (they were .15 and .35) — the gap between them
+        // was a dead band where ice was above freezing yet still refused to melt.
+        //
         // Sanitized PER CYCLE (freeze <= melt, condense <= boil). Condense is deliberately ABOVE melt:
         // at room temperature both steam->water and ice->water must run, which is what makes water the
         // stable phase. They are not inverses, so they cannot oscillate.
@@ -180,9 +239,13 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Range(0f, 1f)]
         [SerializeField] private float freezeThreshold = 0.15f;
         [Tooltip("Temperature above which ice melts to water. Sanitized to >= freezeThreshold (its inverse). " +
-                 "Sits BELOW neutral so ice melts at room temperature.")]
+                 "CP8j sets this EQUAL to freezeThreshold: anything above the freezing point melts, full " +
+                 "stop. A gap between the two would be a band where ice is warmer than freezing yet still " +
+                 "refuses to melt — ice that looks cold while sitting at a temperature that isn't. Equal is " +
+                 "stable, not churny: freezing needs heat strictly BELOW the threshold, and melting is " +
+                 "driven by heat ABOVE it, so exactly at the boundary neither fires.")]
         [Range(0f, 1f)]
-        [SerializeField] private float meltThreshold = 0.35f;
+        [SerializeField] private float meltThreshold = 0.15f;
         [Tooltip("Temperature below which steam condenses to water. Sanitized to <= boilThreshold (its " +
                  "inverse). Sits ABOVE neutral so steam condenses at room temperature.")]
         [Range(0f, 1f)]
@@ -190,38 +253,59 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Tooltip("Temperature above which water boils to steam. Sanitized to >= condenseThreshold (its inverse).")]
         [Range(0f, 1f)]
         [SerializeField] private float boilThreshold = 0.85f;
-        [Tooltip("Melt/boil/condense conversion rates (fraction of the source ink per second).")]
+        [Tooltip("Melt/boil conversion rates (fraction of the source ink per second).")]
         [Min(0f)]
         [SerializeField] private float meltRate = 1f;
         [Min(0f)]
         [SerializeField] private float boilRate = 1f;
+        [Tooltip("Fraction of local steam condensed back into water per second when below " +
+                 "condenseThreshold. Deliberately MUCH gentler than melt/boil: cooling steam should " +
+                 "linger and drizzle out only a little water at a time, not collapse into a puddle the " +
+                 "instant it drops below the threshold. This is a rate, not a gate — steam still " +
+                 "condenses whenever it is cold enough, just slowly.")]
         [Min(0f)]
-        [SerializeField] private float condenseRate = 1f;
+        [SerializeField] private float condenseRate = 0.15f;
         [Tooltip("Fraction of local water frozen to ice per second when below freezeThreshold.")]
         [Min(0f)]
-        [SerializeField] private float freezeRate = 1f;
-        [Tooltip("Latent heat consumed per unit of ice melted / water boiled.")]
+        [SerializeField] private float freezeRate = 0.4f;
+        [Tooltip("Latent heat consumed per unit of ice melted. CP8l cut this from 0.5 so deposited heat " +
+                 "melts ~3x more ice: melt is capped by excess/heatCost, so a lower cost means ice keeps " +
+                 "melting from heat already delivered instead of needing a constant fire stream. Ambient " +
+                 "warmth alone now thaws a unit of ice in ~37s rather than ~124s.")]
         [Min(0f)]
-        [SerializeField] private float meltHeatCost = 0.5f;
+        [SerializeField] private float meltHeatCost = 0.10f;
         [Min(0f)]
         [SerializeField] private float boilHeatCost = 0.5f;
         [Tooltip("Latent heat released per unit condensed. Kept 0 in CP5 to avoid condense->heat->boil feedback.")]
         [Min(0f)]
         [SerializeField] private float condenseHeatRelease = 0f;
+        [Tooltip("Heat removed per unit of water that FREEZES into ice — the one-shot chill of ice " +
+                 "FORMING. This is what makes ice a cold source when it appears (painted ice stamps the " +
+                 "min temperature directly; grown/frozen ice cools through this). It scales with how " +
+                 "much actually converted, so ice that already exists — with no water left to freeze — " +
+                 "cools nothing. Ice is deliberately NOT a continuous cold emitter the way fire is a " +
+                 "continuous heat source. CP8k cut this from 1.0: every thermal transition removes heat " +
+                 "and none returns it, so a water->ice->water round trip destroyed 1.5 units of heat and " +
+                 "put the matter back where it started — a refrigerator that dragged the field to frozen.")]
+        [Min(0f)]
+        [SerializeField] private float freezeHeatCost = 0.1f;
         [Tooltip("Fuel-like fire (CP7b): fire burned per unit of heat ACTUALLY emitted. 0 = add-only " +
                  "(fire emits heat forever and only fades via its own dissipation). Only applies while " +
                  "thermal interactions are enabled — that pass then owns fire->heat emission.")]
         [Min(0f)]
         [SerializeField] private float fireHeatFuelCost = 0f;
 
-        [Tooltip("Temperature above which plant SPONTANEOUSLY COMBUSTS from ambient heat alone. CP8e " +
-                 "raised this to 0.98 — just shy of max heat (1.0) — because heat-only ignition is meant " +
-                 "to be a rare, extreme event, not the normal way fire spreads. Ordinary hot-but-not-" +
-                 "furnace cells (e.g. 0.9) must NOT ignite vegetation. Fire spreading into adjacent " +
-                 "plant is still handled by the legacy Fire x Plant CONTACT reaction in OrganicGroup, " +
-                 "which is unaffected by this threshold.")]
+        [Tooltip("Temperature above which plant SPONTANEOUSLY COMBUSTS from ambient heat alone.\n\n" +
+                 "CP8e set this to 0.98 to keep it rare. CP8l lowered it to 0.75 because 0.98 turned out " +
+                 "to be UNREACHABLE, not merely rare: a plant cell beside a max-heat fire converges to " +
+                 "its neighbour average, (1.0 + 0.5*3)/4 = 0.625, and can never climb to 0.98 by " +
+                 "conduction — so heat-only ignition was dead code. 0.75 is reachable when plant is " +
+                 "genuinely well-surrounded by fire, yet still far above ordinary warmth (ambient 0.5), " +
+                 "so plant never combusts just from a warm room.\n\n" +
+                 "Fire catching ADJACENT plant is a different mechanism and is NOT gated by this: that is " +
+                 "the Fire x Plant CONTACT reaction authored in OrganicGroup.asset.")]
         [Range(0f, 1f)]
-        [SerializeField] private float plantIgnitionThreshold = 0.98f;
+        [SerializeField] private float plantIgnitionThreshold = 0.75f;
         [Tooltip("Fraction of local plant converted to fire per second once above the ignition temperature.")]
         [Min(0f)]
         [SerializeField] private float plantIgnitionRate = 0.5f;
@@ -229,6 +313,23 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                  "plant a hot cell can ignite in one step.")]
         [Min(0f)]
         [SerializeField] private float plantIgnitionHeatCost = 0.25f;
+
+        [Tooltip("Temperature below which fire GOES OUT. Fire is REMOVED outright (a sink), not converted " +
+                 "— a guttering flame does not leave smoke or a puddle behind. Fire heats its own cell, so " +
+                 "a healthy flame holds itself above this and is unaffected; what this culls is fire that " +
+                 "has drifted somewhere cold. Deliberately heat-neutral: fire dying must not itself chill " +
+                 "the cell, or it would just be another heat sink.\n\n" +
+                 "CP8l lowered this from 0.85. A plant cell beside a max-heat fire settles at 0.625, so a " +
+                 "0.85 sink was EXTINGUISHING fire as it spread into plant — before it could establish " +
+                 "and heat its own cell. Fire was strangling itself, which is why plant only smouldered. " +
+                 "This MUST stay below what a fire-adjacent cell reaches (~0.625), yet above room " +
+                 "temperature (0.5) so fire adrift in the cold still goes out.")]
+        [Range(0f, 1f)]
+        [SerializeField] private float fireSinkThreshold = 0.6f;
+        [Tooltip("Fraction of local fire extinguished per second while below fireSinkThreshold. High = " +
+                 "cold fire dies fast, which is the point.")]
+        [Min(0f)]
+        [SerializeField] private float fireSinkRate = 4f;
 
         [Header("Black Body Ink (Fallback)")]
         [SerializeField] private bool enableBlackBodyClearingFallback = false;
@@ -265,7 +366,29 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Runtime Selection")]
         [SerializeField] private int currentInkType = 0;
 
-        public int CurrentInkType { get => currentInkType; set => currentInkType = Mathf.Clamp(value, 0, 9); }
+        // CP8w: upper bound is now ColdSourceInkIndex (10), not 9 — the selection range covers the ten
+        // real inks PLUS the ColdAir temperature probe. Painting routes on the index, so widening this
+        // clamp is what makes ColdAir reachable from the brush and from right-mouse emitters.
+        public int CurrentInkType
+        {
+            get => currentInkType;
+            set => currentInkType = Mathf.Clamp(value, 0, SimulationContext.ColdSourceInkIndex);
+        }
+
+        /// <summary>
+        /// CP8z: obstacle-heat model. 0 = strict conduction-only (default), 1 = legacy CP8q advective.
+        /// Writes the serialized field (so it survives the per-frame SetConstants push) AND the live ctx,
+        /// so the Fire-vs-Ice harness can flip models between runs without a scene edit.
+        /// </summary>
+        public int HeatObstacleMode
+        {
+            get => thermalObstacleHeatMode;
+            set
+            {
+                thermalObstacleHeatMode = Mathf.Clamp(value, 0, 1);
+                if (ctx != null) ctx.HeatObstacleMode = thermalObstacleHeatMode;
+            }
+        }
 
         /// <summary>
         /// Fire-replacing-plant reaction impulse. Defaults enabled for live playtest of fire spread.
@@ -478,8 +601,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
             ctx.ThermalDissipationHalfLife = thermalDissipationHalfLife;
             ctx.ThermalDiffusion = thermalDiffusion;
+            ctx.ThermalDiffusionSolid = thermalDiffusionSolid;
+            ctx.ThermalSolidThresholdIce = thermalSolidThresholdIce;
+            ctx.ThermalSolidPermeability = thermalSolidPermeability;
+            ctx.HeatObstacleMode = Mathf.Clamp(thermalObstacleHeatMode, 0, 1);
+            ctx.QuenchCoolingPerUnit = quenchCoolingPerUnit;
             ctx.NeutralTemperature = neutralTemperature;
             ctx.MinTemperature = minTemperature;
+            ctx.SteamInjectionTemperature = steamInjectionTemperature;
             ctx.EnableHeatSources = enableHeatSources;
             ctx.FireHeatEmissionRate = fireHeatEmissionRate;
             ctx.MaxHeat = maxHeat;
@@ -496,6 +625,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.MeltHeatCost = meltHeatCost;
             ctx.BoilHeatCost = boilHeatCost;
             ctx.CondenseHeatRelease = condenseHeatRelease;
+            ctx.FreezeHeatCost = freezeHeatCost;
+            ctx.FireSinkThreshold = fireSinkThreshold;
+            ctx.FireSinkRate = fireSinkRate;
             ctx.FireHeatFuelCost = fireHeatFuelCost;
             ctx.PlantIgnitionThreshold = plantIgnitionThreshold;
             ctx.PlantIgnitionRate = plantIgnitionRate;
@@ -681,6 +813,20 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         public void InjectDensity(Vector2 position, Color color, int inkTypeIndex = 0)
         {
+            // CP8w: ColdAir is intercepted FIRST — before every guard below. Two reasons this ordering
+            // is load-bearing:
+            //   1. The Mathf.Clamp(inkTypeIndex, 0, 9) further down would silently turn index 10 into
+            //      ICE, seeding exactly the mass this feature exists to avoid. Nothing about that
+            //      failure would be visible: you would paint "cold air" and get ice.
+            //   2. The density/colour guards are irrelevant to a temperature probe. ColdAir must still
+            //      cool with DensityAmount at 0, and must not require a Density buffer at all.
+            if (SimulationContext.IsColdSource(inkTypeIndex))
+            {
+                if (ctx.FluidCompute == null) return;
+                operationQueue.EnqueueHeatInjection(position, ctx.SanitizedColdSourceTemperature);
+                return;   // heat only: no density, no particles, no obstacle, no ice
+            }
+
             if (ctx.FluidCompute == null || ctx.Density == null) return;
 
             float colorIntensity = Mathf.Max(color.r, Mathf.Max(color.g, color.b));
@@ -871,7 +1017,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             if (hotkey >= 0)
             {
                 currentInkType = hotkey;
-                Debug.Log($"[SimDriver] Switched to ink type: {currentInkType}");
+                // CP8w: name it, not just the index — "10" alone reads as a bug rather than a feature.
+                string label = SimulationContext.IsColdSource(currentInkType)
+                    ? "ColdAir (temperature probe, no mass)"
+                    : ((InkTypeId)currentInkType).ToString();
+                Debug.Log($"[SimDriver] Switched to ink type: {currentInkType} ({label})");
             }
 
             // V key: toggle velocity display (shows raw velocity texture, bypasses gradient)
@@ -896,6 +1046,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 if (Keyboard.current.digit8Key.wasPressedThisFrame || Keyboard.current.numpad8Key.wasPressedThisFrame) return 7;
                 if (Keyboard.current.digit9Key.wasPressedThisFrame || Keyboard.current.numpad9Key.wasPressedThisFrame) return 8;
                 if (Keyboard.current.digit0Key.wasPressedThisFrame || Keyboard.current.numpad0Key.wasPressedThisFrame) return 9;
+
+                // CP8w: C = ColdAir, the temperature-only probe. The digit row is full (1..0 -> 0..9),
+                // so it needs a letter. C was verified unbound across the project — the only existing
+                // letter bindings are R, V and Space.
+                if (Keyboard.current.cKey.wasPressedThisFrame) return SimulationContext.ColdSourceInkIndex;
             }
 
             #if ENABLE_LEGACY_INPUT_MANAGER
