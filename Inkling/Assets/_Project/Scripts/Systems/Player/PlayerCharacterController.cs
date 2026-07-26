@@ -73,7 +73,12 @@ namespace Magi.Inkling.Systems.Player
 
         private void ApplyInkSelectionIfChanged()
         {
-            int activeInk = simDriver != null ? Mathf.Clamp(simDriver.CurrentInkType, 0, 9) : 0;
+            // CP8w: upper bound is ColdSourceInkIndex, not 9. Clamping to 9 here pinned a ColdAir
+            // selection to Ice, so the avatar turned Ice-cyan the moment you pressed C — visually
+            // indistinguishable from the one ink ColdAir exists to be an alternative to.
+            int activeInk = simDriver != null
+                ? Mathf.Clamp(simDriver.CurrentInkType, 0, SimulationContext.ColdSourceInkIndex)
+                : 0;
             if (activeInk == appliedInkType) return;
 
             appliedInkType = activeInk;
@@ -82,6 +87,12 @@ namespace Magi.Inkling.Systems.Player
 
         private static Color GetInkKeyColor(int inkTypeIndex)
         {
+            // CP8w: ColdAir before the clamp, matching BrushInputController and
+            // DirectionalEmitterController exactly. This is a tint only — the player's ColdAir
+            // injection still routes through SimDriver.InjectDensity, which writes no mass.
+            if (SimulationContext.IsColdSource(inkTypeIndex))
+                return new Color(0.8f, 1f, 0.95f, 1f);   // pale mint-frost, matches the brush/emitter maps
+
             switch (Mathf.Clamp(inkTypeIndex, 0, 9))
             {
                 case 0: return new Color(1f, 0f, 0f, 1f); // Fire
