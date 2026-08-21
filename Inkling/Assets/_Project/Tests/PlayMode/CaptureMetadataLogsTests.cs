@@ -24,10 +24,17 @@ namespace Magi.Inkling.Tests.PlayMode
             service.GetType().GetField("config", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(service, cfg);
             service.GetType().GetField("reader", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(service, stubReader);
 
+            // CaptureFrame names its files with Time.frameCount at call time. Capture that frame number
+            // NOW (synchronously, same frame) — reading Time.frameCount after the yield below would be
+            // off-by-one and point at a filename the service never wrote.
+            int captureFrame = Time.frameCount;
             service.CaptureFrame();
+            // CaptureFrame also fires a fire-and-forget async PNG readback; flush it so its callback runs
+            // (and writes into the still-existing dir) before the test tears the directory down.
+            UnityEngine.Rendering.AsyncGPUReadback.WaitAllRequests();
             yield return null;
 
-            var jsonPath = System.IO.Path.Combine(cfg.outputPath, $"capture_{Time.frameCount:D06}.json");
+            var jsonPath = System.IO.Path.Combine(cfg.outputPath, $"capture_{captureFrame:D06}.json");
             Assert.IsTrue(System.IO.File.Exists(jsonPath), "JSON metadata not written");
             var json = System.IO.File.ReadAllText(jsonPath);
             Assert.IsTrue(json.Contains("captureStatus"), "Metadata missing captureStatus");

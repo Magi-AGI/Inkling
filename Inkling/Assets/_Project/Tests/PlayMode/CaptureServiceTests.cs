@@ -45,6 +45,10 @@ namespace Magi.Inkling.Tests.PlayMode
             service.GetType().GetMethod("WriteMetadata", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
                 .Invoke(service, new object[] { Path.Combine(dir, "capture.json"), rt });
 
+            // CaptureRenderTexture uses AsyncGPUReadback and writes the PNG inside the completion
+            // callback, which is not guaranteed to have fired after a single frame. Force all pending
+            // readbacks (and their callbacks) to complete so the assert is deterministic, not timing-flaky.
+            UnityEngine.Rendering.AsyncGPUReadback.WaitAllRequests();
             yield return null; // allow async readback to finish
 
             Assert.IsTrue(File.Exists(Path.Combine(dir, "capture.png")), "PNG not written");

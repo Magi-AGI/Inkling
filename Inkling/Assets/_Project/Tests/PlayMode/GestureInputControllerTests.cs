@@ -37,8 +37,11 @@ namespace Magi.Inkling.Tests.PlayMode
             var writer = go.AddComponent<StubWriter>();
             var manager = go.AddComponent<GestureInputController>();
 
-            // Inject private fields via reflection for test
+            // Inject private fields via reflection for test.
             manager.GetType().GetField("simulationWriterSource", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(manager, writer);
+            // Awake already ran (during AddComponent) with a null source, so the resolved private `writer`
+            // is still null. Set it directly — otherwise the reflection-invoked dispatch NREs on writer.
+            manager.GetType().GetField("writer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(manager, writer);
             manager.GetType().GetField("templates", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(manager,
                 new List<GestureTemplate> { CreateLineTemplate() });
             var map = ScriptableObject.CreateInstance<GestureActionMap>();

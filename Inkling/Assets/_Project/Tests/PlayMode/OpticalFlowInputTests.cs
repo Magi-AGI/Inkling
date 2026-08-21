@@ -39,6 +39,9 @@ namespace Magi.Inkling.Tests.PlayMode
 
             flow.GetType().GetField("flowTexture", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)!.SetValue(flow, tex);
             flow.GetType().GetField("simulationWriterSource", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)!.SetValue(flow, writer);
+            // Awake already ran (during AddComponent) with a null source, so the resolved private `writer`
+            // is still null and Update() would early-return. Set it directly so the flow force is injected.
+            flow.GetType().GetField("writer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(flow, writer);
             flow.GetType().GetField("forceMultiplier", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)!.SetValue(flow, 100f);
             flow.GetType().GetField("enabledModule", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)!.SetValue(flow, true);
 

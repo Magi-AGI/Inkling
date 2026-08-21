@@ -46,6 +46,9 @@ namespace Magi.Inkling.Tests.PlayMode
 
             // Inject fields
             manager.GetType().GetField("simulationWriterSource", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(manager, writer);
+            // Awake already ran (during AddComponent) with a null source, so the resolved private `writer`
+            // is still null. Set it directly — otherwise the reflection-invoked dispatch NREs on writer.
+            manager.GetType().GetField("writer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)?.SetValue(manager, writer);
             manager.GetType().GetField("minScore", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.SetValue(manager, 0.1f);
 
             var template = ScriptableObject.CreateInstance<GestureTemplate>();

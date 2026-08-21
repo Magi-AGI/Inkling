@@ -78,7 +78,10 @@ namespace Magi.Inkling.Systems.Capture
 
         private void WriteMetadataDetailed(string path, RenderTexture src, Result captureResult, ReadbackUtility.ReadbackMetadata captureMeta)
         {
-            var meta = new
+            // JsonUtility only serializes [Serializable] types with public fields; an anonymous type
+            // serializes to "{}", silently dropping every metadata field (frame, captureStatus, logs, ...).
+            // Use a concrete class so the metadata is actually written.
+            var meta = new CaptureMetadata
             {
                 frame = Time.frameCount,
                 width = captureMeta.width != 0 ? captureMeta.width : src.width,
@@ -93,6 +96,21 @@ namespace Magi.Inkling.Systems.Capture
             };
             var json = JsonUtility.ToJson(meta, true);
             File.WriteAllText(path, json);
+        }
+
+        [System.Serializable]
+        private class CaptureMetadata
+        {
+            public int frame;
+            public int width;
+            public int height;
+            public string format;
+            public bool asyncSupported;
+            public bool usedAsync;
+            public string colorSpace;
+            public string timestamp;
+            public string captureStatus;
+            public string[] logs;
         }
 
         private string[] CollectLogs()
