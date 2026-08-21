@@ -1,0 +1,35 @@
+#pragma kernel WriteSentinels
+
+// CP9f Slice A probe: write 14 asymmetric, half-exact sentinels into a StructuredBuffer<iparticle>.
+// Include the shared type header (ifloat defaults to float) before the shared iparticle struct, exactly
+// like the production particle shaders, so this kernel exercises the SAME layout under test.
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
+#include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
+
+RWStructuredBuffer<iparticle> _Particles;
+int _Count;
+
+[numthreads(64, 1, 1)]
+void WriteSentinels(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_Count) return;
+
+    iparticle p;
+    p.fire              = 1.0 / 16.0;
+    p.water             = 2.0 / 16.0;
+    p.plantSeeded       = 3.0 / 16.0;
+    p.plantGrown        = 4.0 / 16.0;
+    p.steam             = 5.0 / 16.0;
+    p.glitter           = 6.0 / 16.0;
+    p.blackBody         = 7.0 / 16.0;
+    p.electricitySeeded = 8.0 / 16.0;
+    p.electricityGrown  = 9.0 / 16.0;
+    p.ice               = 10.0 / 16.0;
+    p.red               = 11.0 / 16.0;
+    p.green             = 12.0 / 16.0;
+    p.blue              = 13.0 / 16.0;
+    p.alpha             = 14.0 / 16.0;
+
+    _Particles[i] = p;
+}
