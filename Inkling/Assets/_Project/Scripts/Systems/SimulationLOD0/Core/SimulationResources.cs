@@ -87,9 +87,30 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             int resolution = ctx.Resolution;
             int particleCount = resolution * resolution;
 
-            // Force float stride for all platforms to avoid half/float promotion mismatch
+            // Force float stride for all platforms to avoid half/float promotion mismatch.
+            // D2: iparticle now uses `ifloat`, which DEFAULTS TO FLOAT (see InkTools Types.cs /
+            // InkToolsTypes.hlsl), so this stays 56 bytes and the "force float stride" contract holds
+            // unchanged. The float readback mirrors (SimulationDisplay.iparticle_gpu,
+            // FluidSolver.SimulationDisplay_iparticle_gpu) are the 56-byte layout this must match.
             ctx.GpuPromotesHalf = true;
             ctx.GpuParticleStride = Marshal.SizeOf<iparticle>();
+
+            // LAYOUT GUARD (D2): the particle StructuredBuffer contract assumes a 56-byte float layout,
+            // and the readback mirrors are hand-declared as 14 floats. If a future half-storage experiment
+            // (D3) flips `ifloat` to half WITHOUT reworking the stride/mirror path, iparticle becomes
+            // 28 bytes here while shaders/mirrors still expect 56 -> silent particle corruption. FAIL FAST
+            // BEFORE allocating the buffer — the failure mode is silent corruption, so a logged-and-continue
+            // guard is not safe. When D3 legitimately moves to half, update this guard deliberately.
+            const int ExpectedFloatStride = 14 * sizeof(float); // 56
+            int mirrorStride = Marshal.SizeOf<SimulationDisplay_iparticle_gpu>();
+            if (ctx.GpuParticleStride != ExpectedFloatStride || mirrorStride != ExpectedFloatStride)
+            {
+                throw new InvalidOperationException(
+                    "[SimulationResources] iparticle layout guard FAILED: " +
+                    $"stride={ctx.GpuParticleStride}, mirror={mirrorStride}, expected {ExpectedFloatStride}. " +
+                    "`ifloat` must resolve to float for the 56-byte particle buffer contract; a half flip " +
+                    "needs the D3 per-backend stride/mirror rework before the buffer can be allocated safely.");
+            }
 
             ctx.ParticlesBuffer = new ComputeBuffer[2];
             for (int i = 0; i < 2; i++)

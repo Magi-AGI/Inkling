@@ -1,5 +1,7 @@
 #pragma kernel StampDensityBatched
 
+// D2: iparticle now uses `ifloat`, so its type header must be included first (defaults to float).
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
 #include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
 
 StructuredBuffer<float4> _StampPayloadA; // center.xy, sizeUV.xy

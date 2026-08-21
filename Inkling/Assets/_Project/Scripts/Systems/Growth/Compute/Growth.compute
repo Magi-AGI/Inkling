@@ -3,8 +3,10 @@
 
 #pragma kernel GrowSeeds
 
-// Include iparticle struct definition
-#define ifloat float
+// Include iparticle struct definition. D2: get ifloat from the shared type header (defaults to float)
+// instead of a local `#define ifloat float`, so ifloat is defined in ONE place and stays consistent
+// with the C# side and every other shader.
+#include "Packages/com.inktools.core/Compute/InkToolsTypes.hlsl"
 #include "Packages/com.inktools.core/ScriptsAndShaders/iparticle.cs"
 
 // Buffers (operate in-place, no ping-pong needed for growth)
