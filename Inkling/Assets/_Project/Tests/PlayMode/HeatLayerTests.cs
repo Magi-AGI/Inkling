@@ -252,7 +252,7 @@ namespace Magi.Inkling.Tests.PlayMode
             // Always bind a real particle buffer so the kernel never reads an unbound SRV, regardless of
             // whether ice-concentration classification is active this call.
             var parts = new iparticle[res * res];
-            for (int i = 0; i < parts.Length; i++) parts[i].ice = iceConc;
+            for (int i = 0; i < parts.Length; i++) parts[i].ice = IFloatTestValue.FromFloat(iceConc);
             var partBuf = new ComputeBuffer(res * res, Marshal.SizeOf<iparticle>());
             partBuf.SetData(parts);
             try
@@ -502,8 +502,8 @@ namespace Magi.Inkling.Tests.PlayMode
             int kernel = cs.FindKernel("ChannelSplat");
 
             var particles = new iparticle[res * res];
-            particles[0].electricitySeeded = 0.3f;
-            particles[0].electricityGrown = 0.6f;
+            particles[0].electricitySeeded = IFloatTestValue.FromFloat(0.3f);
+            particles[0].electricityGrown = IFloatTestValue.FromFloat(0.6f);
 
             var buf = new ComputeBuffer(res * res, Marshal.SizeOf<iparticle>());
             var heat = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf) { enableRandomWrite = true };

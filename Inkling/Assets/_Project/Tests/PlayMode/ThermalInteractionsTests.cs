@@ -284,8 +284,8 @@ namespace Magi.Inkling.Tests.PlayMode
         {
 #if UNITY_EDITOR
             var p = new iparticle[1];
-            p[0].fire = 0.3f; p[0].ice = 0.5f; p[0].water = 0.2f; p[0].steam = 0.1f;
-            p[0].red = 0.7f; p[0].blue = 0.9f; p[0].plantGrown = 0.15f;
+            p[0].fire = IFloatTestValue.FromFloat(0.3f); p[0].ice = IFloatTestValue.FromFloat(0.5f); p[0].water = IFloatTestValue.FromFloat(0.2f); p[0].steam = IFloatTestValue.FromFloat(0.1f);
+            p[0].red = IFloatTestValue.FromFloat(0.7f); p[0].blue = IFloatTestValue.FromFloat(0.9f); p[0].plantGrown = IFloatTestValue.FromFloat(0.15f);
             var heat = new[] { 0.5f };
 
             var outp = Run(p, heat, 1, new TP { enable = 0 }, out float[] heatOut);
@@ -309,7 +309,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Melt_ConsumesIceAndHeat_ProducesWater_Conserves()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].ice = 1f;
+            var p = new iparticle[1]; p[0].ice = IFloatTestValue.FromFloat(1f);
             var outp = Run(p, new[] { 0.6f }, 1, new TP(), out float[] heatOut);   // between melt(0.4) and boil(0.7)
             yield return null;
 
@@ -320,7 +320,7 @@ namespace Magi.Inkling.Tests.PlayMode
             Assert.That(heatOut[0], Is.LessThan(0.6f), "Heat consumed by melting");
 
             // No melt at/below threshold.
-            var p2 = new iparticle[1]; p2[0].ice = 1f;
+            var p2 = new iparticle[1]; p2[0].ice = IFloatTestValue.FromFloat(1f);
             var out2 = Run(p2, new[] { 0.4f }, 1, new TP(), out _);
             Assert.That(out2[0].water, Is.EqualTo(0f).Within(1e-3f), "No melt at threshold");
             Assert.That(out2[0].ice, Is.EqualTo(1f).Within(2e-2f), "Ice untouched at threshold");
@@ -339,7 +339,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Boil_ConsumesWaterAndHeat_ProducesSteam_Conserves()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].water = 1f;
+            var p = new iparticle[1]; p[0].water = IFloatTestValue.FromFloat(1f);
             var outp = Run(p, new[] { 1f }, 1, new TP(), out float[] heatOut);   // above boil(0.7)
             yield return null;
 
@@ -357,7 +357,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator PerThresholdBudget_MeltsButDoesNotBoil()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].ice = 1f; p[0].water = 1f;
+            var p = new iparticle[1]; p[0].ice = IFloatTestValue.FromFloat(1f); p[0].water = IFloatTestValue.FromFloat(1f);
             var outp = Run(p, new[] { 0.5f }, 1, new TP(), out _);   // melt(0.4) < 0.5 < boil(0.7)
             yield return null;
 
@@ -383,7 +383,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Condense_GentleRate_OnlyALittleWaterForms()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].steam = 1f;
+            var p = new iparticle[1]; p[0].steam = IFloatTestValue.FromFloat(1f);
             var tp = new TP { condenseRate = 0.15f, freezeRate = 0f };
             var outp = Run(p, new[] { 0.1f }, 1, tp, out _);   // below condense(0.2)
             yield return null;
@@ -410,14 +410,14 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
             // freezeRate=0 isolates condensation: at heat 0.1 the condensed water would otherwise
             // freeze to ice in the same pass (CP7c). Freezing is covered by its own tests below.
-            var cold = new iparticle[1]; cold[0].steam = 1f;
+            var cold = new iparticle[1]; cold[0].steam = IFloatTestValue.FromFloat(1f);
             var outCold = Run(cold, new[] { 0.1f }, 1, new TP { freezeRate = 0f }, out _);   // below condense(0.2)
             yield return null;
             Assert.That(outCold[0].water, Is.GreaterThan(0f), "Cold steam condenses to water");
             Assert.That(outCold[0].steam, Is.LessThan(1f), "Steam consumed");
             Assert.That(outCold[0].steam + outCold[0].water, Is.EqualTo(1f).Within(3e-2f), "steam+water conserved");
 
-            var warm = new iparticle[1]; warm[0].steam = 1f;
+            var warm = new iparticle[1]; warm[0].steam = IFloatTestValue.FromFloat(1f);
             var outWarm = Run(warm, new[] { 0.5f }, 1, new TP(), out _);   // above condense
             Assert.That(outWarm[0].steam, Is.EqualTo(1f).Within(2e-2f), "Warm steam does not condense");
 #else
@@ -438,7 +438,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator BoilDoesNotTriggerSamePassCondensation()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].water = 1f; // steam0 == 0
+            var p = new iparticle[1]; p[0].water = IFloatTestValue.FromFloat(1f); // steam0 == 0
             var tp = new TP { freezeT = 0.3f, condenseT = 0.3f, meltT = 0.4f, boilT = 0.5f };
             var outp = Run(p, new[] { 1f }, 1, tp, out float[] heatOut);
             yield return null;
@@ -462,7 +462,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Cascade_HotIceMeltsThenBoils()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].ice = 1f;
+            var p = new iparticle[1]; p[0].ice = IFloatTestValue.FromFloat(1f);
             var tp = new TP { maxHeat = 3f };
             var outp = Run(p, new[] { 3f }, 1, tp, out _);
             yield return null;
@@ -482,7 +482,7 @@ namespace Magi.Inkling.Tests.PlayMode
         {
 #if UNITY_EDITOR
             // Heat-capped: big rate, tiny excess (0.1 over melt), cost 1 => melt <= 0.1.
-            var pHeat = new iparticle[1]; pHeat[0].ice = 1f;
+            var pHeat = new iparticle[1]; pHeat[0].ice = IFloatTestValue.FromFloat(1f);
             var outHeat = Run(pHeat, new[] { 0.5f }, 1,
                 new TP { meltRate = 10f, meltCost = 1f }, out _);
             yield return null;
@@ -494,7 +494,7 @@ namespace Magi.Inkling.Tests.PlayMode
             // behaviour — see Cascade_HotIceMeltsThenBoils) and `water` would read 0, telling us nothing
             // about the ice cap. This is the assertion Hermes saw fail; the cascade is right, the
             // fixture was not isolating what it claimed to measure.
-            var pInk = new iparticle[1]; pInk[0].ice = 0.05f;
+            var pInk = new iparticle[1]; pInk[0].ice = IFloatTestValue.FromFloat(0.05f);
             var outInk = Run(pInk, new[] { 1f }, 1,
                 new TP { meltRate = 10f, meltCost = 0.1f, boilRate = 0f }, out _);
             Assert.That(outInk[0].water, Is.EqualTo(0.05f).Within(2e-2f), "Melt capped by available ice");
@@ -512,7 +512,7 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
             const int res = 3;
             var p = new iparticle[res * res];
-            p[1 * res + 0].ice = 1f;   // (0,1) hot ice neighbor
+            p[1 * res + 0].ice = IFloatTestValue.FromFloat(1f);   // (0,1) hot ice neighbor
             var heat = new float[res * res];
             heat[1 * res + 0] = 1f;    // heat only at the neighbor
             // center (1,1) has no ice, no water, no heat.
@@ -541,7 +541,7 @@ namespace Magi.Inkling.Tests.PlayMode
             int N = 1 * res + 0;   // (0,1) hot neighbor
 
             var p = new iparticle[res * res];
-            p[C].ice = 1f;         // center HAS ice
+            p[C].ice = IFloatTestValue.FromFloat(1f);         // center HAS ice
             var heat = new float[res * res];
             heat[N] = 1f;          // heat only at the neighbor; center heat = 0
 
@@ -562,7 +562,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Clamp_HeatNeverExceedsMaxHeat()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].steam = 1f;
+            var p = new iparticle[1]; p[0].steam = IFloatTestValue.FromFloat(1f);
             // Cold steam condenses; a huge (test-only) release would blow past maxHeat without the clamp.
             var tp = new TP { condenseRelease = 100f, maxHeat = 1f };
             var outp = Run(p, new[] { 0.1f }, 1, tp, out float[] heatOut);
@@ -622,7 +622,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Fuel_ZeroCost_EmitsHeat_FireUnchanged()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].fire = 0.5f;
+            var p = new iparticle[1]; p[0].fire = IFloatTestValue.FromFloat(0.5f);
             var tp = new TP { enableHeatSources = 1, fireEmissionRate = 1f, fireFuelCost = 0f };
             var outp = Run(p, new[] { 0f }, 1, tp, out float[] heatOut);
             yield return null;
@@ -640,7 +640,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Fuel_HeadroomLimited_ConsumesOnlyForHeatAdded()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].fire = 1f;
+            var p = new iparticle[1]; p[0].fire = IFloatTestValue.FromFloat(1f);
             var tp = new TP { enableHeatSources = 1, fireEmissionRate = 100f, fireFuelCost = 2f, maxHeat = 1f };
             var outp = Run(p, new[] { 0.8f }, 1, tp, out float[] heatOut);
             yield return null;
@@ -658,7 +658,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Fuel_FuelLimited_CapsHeat_FireNotNegative()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].fire = 0.1f;
+            var p = new iparticle[1]; p[0].fire = IFloatTestValue.FromFloat(0.1f);
             var tp = new TP { enableHeatSources = 1, fireEmissionRate = 100f, fireFuelCost = 5f, maxHeat = 3f };
             var outp = Run(p, new[] { 0f }, 1, tp, out float[] heatOut);
             yield return null;
@@ -676,7 +676,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Fuel_AtMaxHeat_NoHeatAdded_NoFireConsumed()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].fire = 1f;
+            var p = new iparticle[1]; p[0].fire = IFloatTestValue.FromFloat(1f);
             var tp = new TP { enableHeatSources = 1, fireEmissionRate = 10f, fireFuelCost = 2f, maxHeat = 1f };
             var outp = Run(p, new[] { 1f }, 1, tp, out float[] heatOut);
             yield return null;
@@ -693,7 +693,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Fuel_SourcesDisabled_NoEmission_NoBurn()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].fire = 1f;
+            var p = new iparticle[1]; p[0].fire = IFloatTestValue.FromFloat(1f);
             var tp = new TP { enableHeatSources = 0, fireEmissionRate = 10f, fireFuelCost = 2f };
             var outp = Run(p, new[] { 0.3f }, 1, tp, out float[] heatOut);
             yield return null;
@@ -712,7 +712,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Freeze_WaterBelowThreshold_BecomesIce()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].water = 1f;
+            var p = new iparticle[1]; p[0].water = IFloatTestValue.FromFloat(1f);
             var outp = Run(p, new[] { 0.1f }, 1, new TP(), out float[] heatOut);   // below freeze(0.2)
             yield return null;
 
@@ -735,7 +735,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator ShippedRules_ColdFire_IsExtinguished_AndBecomesNothing()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].fire = 1f;
+            var p = new iparticle[1]; p[0].fire = IFloatTestValue.FromFloat(1f);
             ThermalRuleSet shipped = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
             Assume.That(shipped.IsValid, "Shipped CP8 defaults must bake cleanly: " + shipped.Error);
 
@@ -764,7 +764,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator ShippedRules_HotFire_SurvivesTheSink()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].fire = 1f;
+            var p = new iparticle[1]; p[0].fire = IFloatTestValue.FromFloat(1f);
             ThermalRuleSet shipped = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
             Assume.That(shipped.IsValid, shipped.Error);
 
@@ -817,7 +817,7 @@ namespace Magi.Inkling.Tests.PlayMode
                 for (int x = 2; x <= 4; x++)
                 {
                     int i = y * res + x;
-                    p[i].ice = 1f;                                     // obstacle-strength ice
+                    p[i].ice = IFloatTestValue.FromFloat(1f);                                     // obstacle-strength ice
                     heat[i] = 0f;                                      // …and genuinely cold
                     obstacle[i] = 1f;
                 }
@@ -896,7 +896,7 @@ namespace Magi.Inkling.Tests.PlayMode
             int C = 1 * res + 1;   // centre: a cold cell of solid ice
 
             var p = new iparticle[res * res];
-            p[C].ice = 1f;
+            p[C].ice = IFloatTestValue.FromFloat(1f);
 
             // Centre starts at the floor; every neighbour is hot. Ice actsAsObstacle, so the centre is
             // masked — CP8d's conduction-ignores-obstacles rule is what lets the heat reach it at all.
@@ -955,7 +955,7 @@ namespace Magi.Inkling.Tests.PlayMode
             int C = 1 * res + 1;
 
             var p = new iparticle[res * res];
-            p[C].ice = 1f;
+            p[C].ice = IFloatTestValue.FromFloat(1f);
 
             var heat = new float[res * res];          // whole grid at the floor: nothing to conduct in
             var obstacle = new float[res * res];
@@ -991,7 +991,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Freeze_WithHeatCost_ChillsAsIceForms()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].water = 1f;
+            var p = new iparticle[1]; p[0].water = IFloatTestValue.FromFloat(1f);
             var tp = new TP { freezeHeatCost = 1f, minTemp = 0f };
             var outp = Run(p, new[] { 0.1f }, 1, tp, out float[] heatOut);   // below freeze(0.2)
             yield return null;
@@ -1014,7 +1014,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Freeze_RateLimitedHeatCost_CoolsByConvertedAmount()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].water = 1f;
+            var p = new iparticle[1]; p[0].water = IFloatTestValue.FromFloat(1f);
             var tp = new TP { freezeRate = 0.25f, freezeHeatCost = 0.2f, minTemp = 0f };
             var outp = Run(p, new[] { 0.1f }, 1, tp, out float[] heatOut);
             yield return null;
@@ -1040,7 +1040,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator ExistingIce_BelowFreezing_WithNoWater_DoesNotContinuouslyCool()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].ice = 1f;   // no water: nothing can freeze
+            var p = new iparticle[1]; p[0].ice = IFloatTestValue.FromFloat(1f);   // no water: nothing can freeze
             var tp = new TP { freezeHeatCost = 1f, minTemp = 0f };
             var outp = Run(p, new[] { 0.1f }, 1, tp, out float[] heatOut);   // below freeze(0.2): genuinely cold
             yield return null;
@@ -1064,7 +1064,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator ShippedRules_IceAboveFreezing_Melts_AndSettlesAtTheFreezePoint()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].ice = 1f;
+            var p = new iparticle[1]; p[0].ice = IFloatTestValue.FromFloat(1f);
             ThermalRuleSet shipped = ThermalRuleBaker.Bake(null, ThermalDefaults.Cp8Defaults);
             Assume.That(shipped.IsValid, "Shipped CP8 defaults must bake cleanly: " + shipped.Error);
 
@@ -1096,7 +1096,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Freeze_RateLimited_LeavesSomeWater()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].water = 1f;
+            var p = new iparticle[1]; p[0].water = IFloatTestValue.FromFloat(1f);
             var outp = Run(p, new[] { 0.1f }, 1, new TP { freezeRate = 0.25f }, out _);
             yield return null;
 
@@ -1113,7 +1113,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Freeze_SteamCondensesThenFreezes_WhenCold()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].steam = 1f;
+            var p = new iparticle[1]; p[0].steam = IFloatTestValue.FromFloat(1f);
             var outp = Run(p, new[] { 0.1f }, 1, new TP { condenseRate = 1f, freezeRate = 1f }, out _);
             yield return null;
 
@@ -1137,7 +1137,7 @@ namespace Magi.Inkling.Tests.PlayMode
             int N = 1 * res + 0;   // (0,1) cold neighbor
 
             var p = new iparticle[res * res];
-            p[C].water = 1f;
+            p[C].water = IFloatTestValue.FromFloat(1f);
             var heat = new float[res * res];
             heat[C] = 0.5f;   // warm: above freeze(0.2), below boil(0.7)
             heat[N] = 0f;     // neighbor is cold
@@ -1159,7 +1159,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator Fuel_NegativeFireUnderflow_NoNegativeEmission_ClampsToZero()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].fire = -0.01f;
+            var p = new iparticle[1]; p[0].fire = IFloatTestValue.FromFloat(-0.01f);
             var tp = new TP { enableHeatSources = 1, fireEmissionRate = 100f, fireFuelCost = 2f, maxHeat = 1f };
             var outp = Run(p, new[] { 0.25f }, 1, tp, out float[] heatOut);
             yield return null;
@@ -1270,7 +1270,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator CustomBufferedSource_OnNonDefaultField_EmitsAndBurns()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].plantSeeded = 0.5f;
+            var p = new iparticle[1]; p[0].plantSeeded = IFloatTestValue.FromFloat(0.5f);
             var rules = CustomRules(null, new[]
             {
                 new BakedThermalSource
@@ -1298,7 +1298,7 @@ namespace Magi.Inkling.Tests.PlayMode
         public IEnumerator CustomBufferedHotTransition_OnNonDefaultFields_Converts()
         {
 #if UNITY_EDITOR
-            var p = new iparticle[1]; p[0].plantSeeded = 1f;
+            var p = new iparticle[1]; p[0].plantSeeded = IFloatTestValue.FromFloat(1f);
             var rules = CustomRules(new[]
             {
                 new BakedThermalTransition
@@ -1350,8 +1350,8 @@ namespace Magi.Inkling.Tests.PlayMode
         {
 #if UNITY_EDITOR
             var p = new iparticle[1];
-            p[0].water = -0.1f;   // underflowed source
-            p[0].ice = 0.4f;      // destination starts non-zero: an unclamped conv would drain it
+            p[0].water = IFloatTestValue.FromFloat(-0.1f);   // underflowed source
+            p[0].ice = IFloatTestValue.FromFloat(0.4f);      // destination starts non-zero: an unclamped conv would drain it
 
             var rules = CustomRules(new[]
             {
@@ -1386,8 +1386,8 @@ namespace Magi.Inkling.Tests.PlayMode
         {
 #if UNITY_EDITOR
             var p = new iparticle[1];
-            p[0].ice = -0.1f;     // underflowed melt source
-            p[0].water = 0.3f;    // melt destination, non-zero so a drain is observable
+            p[0].ice = IFloatTestValue.FromFloat(-0.1f);     // underflowed melt source
+            p[0].water = IFloatTestValue.FromFloat(0.3f);    // melt destination, non-zero so a drain is observable
 
             var outp = Run(p, new[] { 0.6f }, 1, new TP(), out float[] heatOut);
             yield return null;
@@ -1412,8 +1412,8 @@ namespace Magi.Inkling.Tests.PlayMode
         {
 #if UNITY_EDITOR
             var p = new iparticle[1];
-            p[0].plantSeeded = -0.1f;   // underflowed source
-            p[0].plantGrown = 0.5f;     // destination, non-zero
+            p[0].plantSeeded = IFloatTestValue.FromFloat(-0.1f);   // underflowed source
+            p[0].plantGrown = IFloatTestValue.FromFloat(0.5f);     // destination, non-zero
 
             var rules = CustomRules(new[]
             {
@@ -1447,7 +1447,7 @@ namespace Magi.Inkling.Tests.PlayMode
         {
 #if UNITY_EDITOR
             var p = new iparticle[1];
-            p[0].ice = 0.5f; p[0].water = 0.3f; p[0].fire = 0.2f;
+            p[0].ice = IFloatTestValue.FromFloat(0.5f); p[0].water = IFloatTestValue.FromFloat(0.3f); p[0].fire = IFloatTestValue.FromFloat(0.2f);
 
             // A VALID rule set (so the buffers are genuinely populated and the counts are non-zero),
             // dispatched with the validity flag forced to 0. If the kernel honoured the buffers instead

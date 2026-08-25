@@ -160,7 +160,7 @@ namespace Magi.Inkling.Tests.PlayMode
         private static iparticle[] FireAndWater(float fire, float water)
         {
             var p = new iparticle[Res * Res];
-            for (int i = 0; i < p.Length; i++) { p[i].fire = fire; p[i].water = water; }
+            for (int i = 0; i < p.Length; i++) { p[i].fire = IFloatTestValue.FromFloat(fire); p[i].water = IFloatTestValue.FromFloat(water); }
             return p;
         }
 #endif
@@ -263,7 +263,7 @@ namespace Magi.Inkling.Tests.PlayMode
             var idx = new[] { (int)InkTypeId.Fire, (int)InkTypeId.Water,
                               (int)InkTypeId.PlantSeeded, (int)InkTypeId.PlantGrown };
             var p = new iparticle[Res * Res];
-            for (int i = 0; i < p.Length; i++) { p[i].fire = 0.6f; p[i].plantSeeded = 0.6f; }
+            for (int i = 0; i < p.Length; i++) { p[i].fire = IFloatTestValue.FromFloat(0.6f); p[i].plantSeeded = IFloatTestValue.FromFloat(0.6f); }
             const float seed = 1f;
 
             Dispatch(p, seed, PlantBurnMatrix(), idx, cooling: 1f, out var outP, out var outHeat);

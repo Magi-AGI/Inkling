@@ -229,8 +229,8 @@ namespace Magi.Inkling.Tests.PlayMode
             int center = 1 * res + 1;
             int left = 1 * res + 0;
             int right = 1 * res + 2;
-            particles[left].fire = 1f;   // neighbor supplies fire
-            particles[right].ice = 1f;   // neighbor supplies ice
+            particles[left].fire = IFloatTestValue.FromFloat(1f);   // neighbor supplies fire
+            particles[right].ice = IFloatTestValue.FromFloat(1f);   // neighbor supplies ice
             // center has NO fire/ice/water/steam locally.
 
             // Thermal group slots [Fire, Water, Steam, Ice]; Fire+Ice is pair 0x3 (products0.z).
@@ -263,9 +263,9 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
             const int res = 1;
             var particles = new iparticle[res * res];
-            particles[0].fire = 0.5f;
-            particles[0].ice = 0.5f;
-            particles[0].water = 0f;
+            particles[0].fire = IFloatTestValue.FromFloat(0.5f);
+            particles[0].ice = IFloatTestValue.FromFloat(0.5f);
+            particles[0].water = IFloatTestValue.FromFloat(0f);
 
             var m = Matrix4x4.zero;
             m[0, 2] = -0.5f; // Fire
@@ -300,8 +300,8 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
             const int res = 3;
             var particles = new iparticle[res * res];
-            particles[1 * res + 0].fire = 1f;  // left neighbor supplies fire
-            particles[1 * res + 2].ice = 1f;   // right neighbor supplies ice
+            particles[1 * res + 0].fire = IFloatTestValue.FromFloat(1f);  // left neighbor supplies fire
+            particles[1 * res + 2].ice = IFloatTestValue.FromFloat(1f);   // right neighbor supplies ice
             // center (1,1) has no local fire/ice.
 
             var m = Matrix4x4.zero; m[0, 2] = -0.5f; m[1, 2] = 1f; m[3, 2] = -0.5f; // Fire+Ice->Water (pair 0x3)
@@ -327,9 +327,9 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
             const int res = 3;
             var particles = new iparticle[res * res];
-            particles[1 * res + 1].fire = 0.5f;  // center can pay locally
-            particles[1 * res + 1].ice = 0.5f;
-            particles[1 * res + 2].ice = 0.5f;   // extra ice on the right -> gradient for direction
+            particles[1 * res + 1].fire = IFloatTestValue.FromFloat(0.5f);  // center can pay locally
+            particles[1 * res + 1].ice = IFloatTestValue.FromFloat(0.5f);
+            particles[1 * res + 2].ice = IFloatTestValue.FromFloat(0.5f);   // extra ice on the right -> gradient for direction
 
             var m = Matrix4x4.zero; m[0, 2] = -0.5f; m[1, 2] = 1f; m[3, 2] = -0.5f;
             var imp = Matrix4x4.zero; imp[0, 2] = 1f;
@@ -370,9 +370,9 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
             const int res = 1;
             var particles = new iparticle[res * res];
-            particles[0].steam = 1f;
-            particles[0].plantSeeded = 0f;
-            particles[0].plantGrown = 0.5f;
+            particles[0].steam = IFloatTestValue.FromFloat(1f);
+            particles[0].plantSeeded = IFloatTestValue.FromFloat(0f);
+            particles[0].plantGrown = IFloatTestValue.FromFloat(0.5f);
 
             var outData = Dispatch(
                 particles, res, new[] { STEAM, ICE, PLANT_SEEDED, PLANT_GROWN },
@@ -397,9 +397,9 @@ namespace Magi.Inkling.Tests.PlayMode
 #if UNITY_EDITOR
             const int res = 1;
             var particles = new iparticle[res * res];
-            particles[0].steam = 1f;
-            particles[0].plantSeeded = 0.5f;
-            particles[0].plantGrown = 0f;
+            particles[0].steam = IFloatTestValue.FromFloat(1f);
+            particles[0].plantSeeded = IFloatTestValue.FromFloat(0.5f);
+            particles[0].plantGrown = IFloatTestValue.FromFloat(0f);
 
             var outData = Dispatch(
                 particles, res, new[] { STEAM, ICE, PLANT_SEEDED, PLANT_GROWN },

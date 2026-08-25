@@ -426,7 +426,9 @@ namespace Magi.Inkling.Tests.PlayMode
             buffer.GetData(all);
             iparticle p = all[py * Res + px];
 
-            return new[]
+            // Explicit float[] so half-mode fields (Unity.Mathematics.half) convert implicitly to float per
+            // element; in the default float mode this is identity. Avoids new[] inferring half[] (CS0029).
+            return new float[]
             {
                 p.fire, p.water, p.plantSeeded, p.plantGrown, p.steam,
                 p.glitter, p.blackBody, p.electricitySeeded, p.electricityGrown, p.ice

@@ -8,7 +8,8 @@
     "Magi.InkTools",
     "Magi.InkTools.Simulation",
     "Magi.InkTools.Services",
-    "Magi.UnityTools"
+    "Magi.UnityTools",
+    "Unity.Mathematics"
   ],
   "optionalUnityReferences": [
     "TestAssemblies"

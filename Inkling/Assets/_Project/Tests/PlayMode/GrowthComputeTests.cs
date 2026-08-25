@@ -26,9 +26,9 @@ namespace Magi.Inkling.Tests.PlayMode
 
             // single pixel sim: seeded AND wet
             var particles = new iparticle[1];
-            particles[0].plantSeeded = 1f;
-            particles[0].plantGrown = 0f;
-            particles[0].water = 0.5f;
+            particles[0].plantSeeded = IFloatTestValue.FromFloat(1f);
+            particles[0].plantGrown = IFloatTestValue.FromFloat(0f);
+            particles[0].water = IFloatTestValue.FromFloat(0.5f);
 
             using var buffer = new ComputeBuffer(1, Marshal.SizeOf<iparticle>());
             buffer.SetData(particles);
@@ -72,9 +72,9 @@ namespace Magi.Inkling.Tests.PlayMode
 
             // single pixel sim: seeded but DRY (no water)
             var particles = new iparticle[1];
-            particles[0].plantSeeded = 1f;
-            particles[0].plantGrown = 0f;
-            particles[0].water = 0f;
+            particles[0].plantSeeded = IFloatTestValue.FromFloat(1f);
+            particles[0].plantGrown = IFloatTestValue.FromFloat(0f);
+            particles[0].water = IFloatTestValue.FromFloat(0f);
 
             using var buffer = new ComputeBuffer(1, Marshal.SizeOf<iparticle>());
             buffer.SetData(particles);
@@ -126,13 +126,13 @@ namespace Magi.Inkling.Tests.PlayMode
             var particles = new iparticle[res * res];
             // Center (1,1): grown source.
             int center = 1 * res + 1;
-            particles[center].plantGrown = 1f;
+            particles[center].plantGrown = IFloatTestValue.FromFloat(1f);
             // Left of center (0,1): has water, no seeds/grown → should gain grown via spread.
             int waterCell = 1 * res + 0;
-            particles[waterCell].water = 0.5f;
+            particles[waterCell].water = IFloatTestValue.FromFloat(0.5f);
             // Right of center (2,1): has seeds, no water/grown → should NOT gain grown.
             int seedCell = 1 * res + 2;
-            particles[seedCell].plantSeeded = 0.5f;
+            particles[seedCell].plantSeeded = IFloatTestValue.FromFloat(0.5f);
 
             using var buffer = new ComputeBuffer(res * res, Marshal.SizeOf<iparticle>());
             buffer.SetData(particles);

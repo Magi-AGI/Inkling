@@ -283,7 +283,14 @@ namespace Magi.Inkling.Dev
                 for (int x = ix0; x <= ix1; x++)
                 {
                     int i = y * res + x;
+                    // iparticle.ice is `ifloat`. In half mode (CP9f transient) float->half needs an explicit
+                    // cast; in the default float mode the assignment is unchanged (no precision change).
+                    // `ifloat` is not aliased in this assembly, so gate on the mode symbol directly.
+#if INKTOOLS_IFLOAT_HALF
+                    all[i].ice = (Unity.Mathematics.half)ActiveWallConcentration;
+#else
                     all[i].ice = ActiveWallConcentration;
+#endif
                     heat[i] = new Color(MinTemperature, 0f, 0f, 0f);
                 }
             }
