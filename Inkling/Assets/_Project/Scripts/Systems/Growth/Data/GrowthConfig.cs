@@ -57,6 +57,18 @@ namespace Magi.Inkling.Systems.Growth
         [Range(0f, 1f)]
         public float plantSpreadWaterThreshold = 0.01f;
 
+        [Tooltip("Grown electricity spreads (neighbor expansion) into cells whose WATER exceeds this " +
+                 "threshold — electricity conducts through water. Neighbor-spread only; does not affect " +
+                 "direct seeded->grown maturation (which stays water-independent).")]
+        [Range(0f, 1f)]
+        public float electricitySpreadWaterThreshold = 0.01f;
+
+        [Tooltip("Grown electricity spreads (neighbor expansion) into cells whose ICE exceeds this " +
+                 "threshold — electricity conducts through ice. Neighbor-spread only; does not affect " +
+                 "direct seeded->grown maturation.")]
+        [Range(0f, 1f)]
+        public float electricitySpreadIceThreshold = 0.01f;
+
         [Header("Decay")]
         [Tooltip("Enable decay of grown plants/electricity over time")]
         public bool enableDecay = false;

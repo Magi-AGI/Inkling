@@ -32,6 +32,8 @@ int _EnableSpread;
 float _CardinalSpreadWeight;
 float _DiagonalSpreadWeight;
 float _PlantSpreadWaterThreshold;  // grown plant only spreads into cells with water above this
+float _ElectricitySpreadWaterThreshold;  // grown electricity spreads (neighbor expansion) into cells with water above this
+float _ElectricitySpreadIceThreshold;    // grown electricity spreads (neighbor expansion) into cells with ice above this
 
 // Helper: Sample particle at position (clamped)
 iparticle SampleParticle(int2 pos)
@@ -117,7 +119,10 @@ void GrowSeeds(uint3 id : SV_DispatchThreadID)
         {
             p.plantGrown = min(p.plantGrown + plantSpread, _PlantMaxGrown);
         }
-        if (p.electricitySeeded > 0.001)
+        // Grown electricity spreads like plants but through a CONDUCTIVE SUBSTRATE: it creeps into
+        // neighboring cells that contain water or ice, not across the electricity-seed bed. (Direct
+        // seeded->grown maturation above stays deliberately water-INDEPENDENT.)
+        if (p.water > _ElectricitySpreadWaterThreshold || p.ice > _ElectricitySpreadIceThreshold)
         {
             p.electricityGrown = min(p.electricityGrown + elecSpread, _ElectricityMaxGrown);
         }
