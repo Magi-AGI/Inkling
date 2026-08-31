@@ -6,7 +6,7 @@
 // This avoids a stride mismatch: CGPROGRAM fragment shaders on desktop promote half → float and would
 // expect a 60-byte iparticle; a transient half build would be 30 bytes. Compute shaders read the buffer
 // layout correctly, so we splat here and let the fragment shader sample standard float textures.
-// M0: this splat still packs the same channels; _Channels2.w stays reserved until M1 wires true-metal rendering.
+// M1: _Channels2.w now carries true Metal (iparticle.metal, index 10) for the gradient/debug passes.
 
 #pragma kernel ChannelSplat
 
@@ -22,7 +22,7 @@ Texture2D<float> _HeatRead;
 // Channel packing:
 //   _Channels0: fire, water, plantSeeded, plantGrown
 //   _Channels1: steam, glitter, blackBody, ice
-//   _Channels2: electricitySeeded, electricityGrown, heat, reserved
+//   _Channels2: electricitySeeded, electricityGrown, heat, metal
 RWTexture2D<float4> _Channels0;
 RWTexture2D<float4> _Channels1;
 RWTexture2D<float4> _Channels2;
@@ -42,5 +42,5 @@ void ChannelSplat(uint3 id : SV_DispatchThreadID)
 
     _Channels0[int2(id.xy)] = float4((float)p.fire, (float)p.water, (float)p.plantSeeded, (float)p.plantGrown);
     _Channels1[int2(id.xy)] = float4((float)p.steam, (float)p.glitter, (float)p.blackBody, (float)p.ice);
-    _Channels2[int2(id.xy)] = float4((float)p.electricitySeeded, (float)p.electricityGrown, heat, 0);
+    _Channels2[int2(id.xy)] = float4((float)p.electricitySeeded, (float)p.electricityGrown, heat, (float)p.metal);
 }

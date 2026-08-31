@@ -152,7 +152,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 case InkType.Fire:        return new Color(1f, 0f, 0f, 1f);
                 case InkType.Water:       return new Color(0f, 1f, 0f, 1f);
-                case InkType.Metal:       return new Color(0f, 0f, 1f, 1f);
+                case InkType.Metal:       return new Color(0.65f, 0.7f, 0.82f, 1f); // steel-silver; matches Metal.asset (M1)
                 case InkType.Electricity: return new Color(0.5f, 0.5f, 1f, 1f);
                 case InkType.Ice:         return new Color(0.7f, 0.9f, 1f, 1f);
                 case InkType.Plant:       return new Color(0.3f, 0.8f, 0.2f, 1f);

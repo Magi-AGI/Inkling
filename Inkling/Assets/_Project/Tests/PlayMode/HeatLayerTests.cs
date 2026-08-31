@@ -536,7 +536,7 @@ namespace Magi.Inkling.Tests.PlayMode
                 Assert.That(c2.r, Is.EqualTo(0.3f).Within(2e-2f), "Channels2.x should carry electricitySeeded");
                 Assert.That(c2.g, Is.EqualTo(0.6f).Within(2e-2f), "Channels2.y should carry electricityGrown");
                 Assert.That(c2.b, Is.EqualTo(0.5f).Within(2e-2f), "Channels2.z should carry heat");
-                Assert.That(c2.a, Is.EqualTo(0f).Within(1e-3f), "Channels2.w is reserved and must stay 0");
+                Assert.That(c2.a, Is.EqualTo(0f).Within(1e-3f), "Channels2.w carries metal (M1); this cell has no metal so it stays 0");
             }
             finally
             {

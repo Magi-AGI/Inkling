@@ -49,25 +49,12 @@ void ParticleToColor(uint3 id : SV_DispatchThreadID)
 
     waterIntensity += max(p.steam, 0.0) * 0.3;
 
-    // Metal/Electric intensity -> B channel (electricity + dust)
-    // Electricity: use seeded vs grown ratio as lifetime proxy for intensity
-    float electricitySeeded = p.electricitySeeded;
-    float electricityGrown  = p.electricityGrown;
-    float electricityTotal  = electricitySeeded + electricityGrown;
-    float electricity       = electricityTotal;
-    float metalIntensity    = 0.0;
+    // True Metal intensity -> B channel (M1). Electricity and glitter/dust NO LONGER stand in for metal here:
+    // electricity renders via ParticleChannelSplat _Channels2.x/y + the gradient pass, and metal is now its
+    // own iparticle field (index 10). B is the real metal concentration.
+    float metalIntensity = max(p.metal, 0.0);
 
-    if (electricityTotal > 0.0)
-    {
-        float life = saturate(electricityGrown / electricityTotal);
-        metalIntensity += electricity * life;
-    }
-
-    // Glitter/dust contributes to metal channel slightly
-    float dust = max(p.glitter, 0.0);
-    metalIntensity += dust * 0.3;
-
-    // Pack into RGB: R=fire, G=water, B=metal/electric
+    // Pack into RGB: R=fire, G=water, B=metal
     color.r = fireIntensity;
     color.g = waterIntensity;
     color.b = metalIntensity;

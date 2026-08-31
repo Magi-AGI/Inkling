@@ -1424,6 +1424,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 50ea6e5c4ac9a58459b4f3b7a083b114, type: 2}
   - {fileID: 11400000, guid: 4f68a274df5e692418fe1a0fcd8e536c, type: 2}
   - {fileID: 11400000, guid: 4d5cac36951b253469623e9d3dcf56dd, type: 2}
+  - {fileID: 11400000, guid: c7e4a9f21b8d6350a4f9e2c1d8b70a63, type: 2}
   particleToColorCompute: {fileID: 7200000, guid: 0334aaf5539bd7649886292613ec7ad8, type: 3}
   particleChannelSplatCompute: {fileID: 7200000, guid: 2e75d1648379b174584d6d1a1c20b62c, type: 3}
   useParticleRenderPass: 0

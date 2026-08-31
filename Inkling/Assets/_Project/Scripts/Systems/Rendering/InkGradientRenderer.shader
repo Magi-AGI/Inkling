@@ -73,7 +73,7 @@ Shader "Inkling/InkGradientRenderer"
             // (a half iparticle would be 30 bytes in C# vs the 60 bytes expected by the shader).
             //   _Channels0: fire, water, plantSeeded, plantGrown
             //   _Channels1: steam, glitter, blackBody, ice
-            //   _Channels2: electricitySeeded, electricityGrown, heat, reserved
+            //   _Channels2: electricitySeeded, electricityGrown, heat, metal
             sampler2D _Channels0;
             sampler2D _Channels1;
             sampler2D _Channels2;
@@ -180,7 +180,7 @@ Shader "Inkling/InkGradientRenderer"
                 // for hardware-filtered minification of sim-resolution data.
                 float4 ch0 = tex2D(_Channels0, input.uv); // fire, water, plantSeeded, plantGrown
                 float4 ch1 = tex2D(_Channels1, input.uv); // steam, glitter, blackBody, ice
-                float4 ch2 = tex2D(_Channels2, input.uv); // electricitySeeded, electricityGrown, heat, reserved
+                float4 ch2 = tex2D(_Channels2, input.uv); // electricitySeeded, electricityGrown, heat, metal
 
                 #ifdef _SHOWCHANNELS_ON
                     return float4(ch0.r, ch0.g, ch1.a, 1.0); // fire, water, ice
@@ -200,6 +200,9 @@ Shader "Inkling/InkGradientRenderer"
                     float h = saturate(ch2.b);
                     float3 hot = float3(saturate(h * 1.5), saturate(h * 1.5 - 0.4), saturate(h * 2.0 - 1.4));
                     return float4(hot, 1.0);
+                #elif _DEBUGMODE_METAL
+                    // True Metal debug (ch2.a): grayscale metal MASS (M1).
+                    return float4(ch2.a, ch2.a, ch2.a, 1.0);
                 #endif
 
                 // Per-channel gradient lookups, weighted by channel intensity.
@@ -214,9 +217,10 @@ Shader "Inkling/InkGradientRenderer"
                 float dustI   = saturate(ch1.g);
                 float iceI    = saturate(ch1.a);
                 float elecI   = saturate(max(ch2.r, ch2.g));
+                float metalI  = saturate(ch2.a);
 
                 float totalInk = fireI + waterI + plantSI + plantGI
-                    + steamI + dustI + elecI + iceI + 0.001;
+                    + steamI + dustI + elecI + iceI + metalI + 0.001;
 
                 finalColor =
                     ( SampleGradient(_FireGradientTex,        fireI)   * fireI
@@ -227,6 +231,7 @@ Shader "Inkling/InkGradientRenderer"
                     + SampleGradient(_DustGradientTex,        dustI)   * dustI
                     + SampleGradient(_ElectricityGradientTex, elecI)   * elecI
                     + SampleGradient(_IceGradientTex,         iceI)    * iceI
+                    + SampleGradient(_MetalGradientTex,       metalI)  * metalI
                     ) / totalInk;
 
                 // BlackBody darkening (subtractive — no gradient lookup)
@@ -235,10 +240,12 @@ Shader "Inkling/InkGradientRenderer"
                 // Alpha from total ink presence
                 finalColor.a = saturate(fireI + waterI + plantSI + plantGI
                     + steamI + dustI + saturate(ch1.b) + iceI
-                    + elecI);
+                    + elecI + metalI);
 
-                // Gradient intensity: lerp between raw particle RGB and gradient output
-                float4 rawColor = float4(ch0.r, ch0.g, ch1.a, finalColor.a); // fire, water, ice
+                // Gradient intensity: lerp between raw particle RGB and gradient output.
+                // B carries TRUE metal (ch2.a) so the M1 metal identity survives _GradientIntensity < 1
+                // (previously B blended toward Ice, undercutting visible metal).
+                float4 rawColor = float4(ch0.r, ch0.g, ch2.a, finalColor.a); // fire, water, metal
                 finalColor = lerp(rawColor, finalColor, _GradientIntensity);
 
             #else
