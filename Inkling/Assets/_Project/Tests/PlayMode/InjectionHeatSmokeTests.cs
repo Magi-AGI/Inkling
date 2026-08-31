@@ -348,8 +348,9 @@ namespace Magi.Inkling.Tests.PlayMode
         /// <summary>
         /// THE test for CP8w. ColdAir must lower heat while adding NO ice mass — otherwise it is just
         /// Ice with extra steps, and Lake still could not tell whether water froze on its own.
-        /// Also guards the specific failure mode in SimDriver.InjectDensity: the Mathf.Clamp(idx, 0, 9)
-        /// would silently convert index 10 into ICE. That bug would pass a heat-only assertion.
+        /// Also guards the specific failure mode in SimDriver.InjectDensity: without the ColdAir intercept,
+        /// the injection clamp (0..Count-1) would silently pin ColdAir (index == InkTypeId.Count) to the last
+        /// real ink (Metal, index 10). That bug would pass a heat-only assertion.
         /// </summary>
         [UnityTest]
         public IEnumerator ColdAir_AddsNoIceMass_AndNoOtherInk()
@@ -374,7 +375,7 @@ namespace Magi.Inkling.Tests.PlayMode
             float[] after = ReadInkChannels(driver, cx, cy);
 
             Assert.That(after[(int)InkTypeId.Ice], Is.EqualTo(before[(int)InkTypeId.Ice]).Within(1e-5f),
-                "ColdAir must NOT add ice mass — if this fails, index 10 is being clamped to Ice (9)");
+                "ColdAir must NOT add ice mass — if this fails, ColdAir is being clamped to a real ink instead of heat-only");
 
             for (int i = 0; i < (int)InkTypeId.Count; i++)
                 Assert.That(after[i], Is.EqualTo(before[i]).Within(1e-5f),
@@ -386,7 +387,7 @@ namespace Magi.Inkling.Tests.PlayMode
 
         /// <summary>
         /// Selection plumbing: CurrentInkType must accept ColdAir. Before CP8w the setter clamped to
-        /// 0..9, which would have silently pinned any ColdAir selection to Ice.
+        /// 0..Count-1, which would have silently pinned any ColdAir selection to the last real ink (Metal).
         /// </summary>
         [Test]
         public void CurrentInkType_AcceptsColdAir_AndStillClampsAbove()
@@ -416,7 +417,7 @@ namespace Magi.Inkling.Tests.PlayMode
         }
 
 #if UNITY_EDITOR
-        /// <summary>Reads all ten ink mass channels of the particle at (px, py).</summary>
+        /// <summary>Reads all eleven ink mass channels (0..Count-1, incl. Metal) of the particle at (px, py).</summary>
         private static float[] ReadInkChannels(SimDriver driver, int px, int py)
         {
             var buffer = driver.GetParticleBuffer();
@@ -431,7 +432,8 @@ namespace Magi.Inkling.Tests.PlayMode
             return new float[]
             {
                 p.fire, p.water, p.plantSeeded, p.plantGrown, p.steam,
-                p.glitter, p.blackBody, p.electricitySeeded, p.electricityGrown, p.ice
+                p.glitter, p.blackBody, p.electricitySeeded, p.electricityGrown, p.ice,
+                p.metal
             };
         }
 #endif

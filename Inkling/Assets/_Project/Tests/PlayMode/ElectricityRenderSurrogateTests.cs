@@ -13,18 +13,20 @@ namespace Magi.Inkling.Tests.PlayMode
     /// <summary>
     /// Electricity slice 1 — CHARACTERIZATION LOCK for the ParticleToColor "metal/electric" B channel.
     /// This asserts the CURRENT render SURROGATE behavior only: B = electricity lifetime proxy + glitter
-    /// dust*0.3. It does NOT assert or imply a true metal ink — "metal" here is a render-channel label, and
-    /// there is deliberately NO metal particle field (documented by the reflection assertion below). If a
-    /// real metal ink is ever added, that is a separate iparticle layout migration, not this test.
+    /// dust*0.3. M0 (true Metal) added a real `metal` particle field at index 10, but did NOT change
+    /// rendering — the ParticleToColor B channel is still the electricity/dust surrogate; wiring B to true
+    /// metal is M1. So this render lock remains valid under M0.
     /// </summary>
     public class ElectricityRenderSurrogateTests
     {
         [Test]
-        public void Iparticle_HasNoDedicatedMetalField()
+        public void Iparticle_HasDedicatedMetalField_RenderStillElectricitySurrogate()
         {
-            // 'metal' is only a rendering-channel concept; the particle struct has no metal storage.
-            Assert.IsNull(typeof(iparticle).GetField("metal"),
-                "No dedicated metal particle field should exist; 'metal' is a ParticleToColor channel label only.");
+            // M0 replaces the Slice-1 "no metal field" lock: a true metal field now EXISTS (index 10). The
+            // B-channel render remains the electricity/dust surrogate in M0 (see the round-trip test below);
+            // binding B to true metal is M1.
+            Assert.IsNotNull(typeof(iparticle).GetField("metal"),
+                "M0: iparticle must now have a dedicated 'metal' field (index 10).");
         }
 
         [UnityTest]

@@ -162,6 +162,7 @@ namespace Magi.Inkling.Systems.Brush
                 case 7: return new Color(1f, 1f, 0f, 1f);          // ElectricitySeeded
                 case 8: return new Color(0.5f, 0.5f, 0f, 1f);      // ElectricityGrown
                 case 9: return new Color(0f, 1f, 1f, 1f);          // Ice
+                case 10: return new Color(0.6f, 0.6f, 0.65f, 1f);  // Metal (placeholder silver; real color in M1)
                 default: return new Color(1f, 0f, 0f, 1f);
             }
         }

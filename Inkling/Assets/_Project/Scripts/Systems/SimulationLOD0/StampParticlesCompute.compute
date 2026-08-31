@@ -29,11 +29,13 @@ float  _UseOverride;
 float4 _OverrideColor;
 float2 _Resolution;
 
-// Color palette for ink type matching (10 ink types, RGB + tolerance in .w)
+// Color palette for ink type matching (Count ink slots, RGB + tolerance in .w)
 // Index matches InkTypeId enum: 0=Fire, 1=Water, 2=PlantSeeded, 3=PlantGrown,
-// 4=Steam, 5=Glitter, 6=BlackBody, 7=ElectricitySeeded, 8=ElectricityGrown, 9=Ice
-float4 _InkKeyColors[10];     // RGB in xyz, tolerance in w
-int _NumActiveInks;           // How many inks have valid key colors (default 10)
+// 4=Steam, 5=Glitter, 6=BlackBody, 7=ElectricitySeeded, 8=ElectricityGrown, 9=Ice, 10=Metal
+// M0: array is Count-sized (11) for index-10 safety; Metal has NO authored key color yet, so its slot
+// carries tolerance 0 (never matches) — the real Metal key color arrives with the Metal asset in M1.
+float4 _InkKeyColors[11];     // RGB in xyz, tolerance in w (index 0..10)
+int _NumActiveInks;           // How many inks have valid key colors (Count = 11)
 int _UsePaletteLookup;        // 1 = use palette matching, 0 = legacy RGB mapping
 
 // Helper: Calculate RGB distance between two colors (ignoring alpha)
@@ -58,6 +60,7 @@ void AddInkByIndex(inout iparticle p, int inkIdx, float amount)
         case 7: p.electricitySeeded += (ifloat)amount; break;
         case 8: p.electricityGrown += (ifloat)amount; break;
         case 9: p.ice += (ifloat)amount; break;
+        case 10: p.metal += (ifloat)amount; break;
     }
 }
 
@@ -111,6 +114,11 @@ void StampParticles(uint3 id : SV_DispatchThreadID)
         {
             float3 keyColor = _InkKeyColors[i].xyz;
             float tolerance = _InkKeyColors[i].w;
+            // Inactive slot: tolerance <= 0 means "no authored key color" (e.g. M0 Metal, index 10). Skip so
+            // an EXACT color hit cannot select it — otherwise dist=0 would pass `dist <= tolerance*1.732`
+            // (0 <= 0) and wrongly write that channel. Real key colors always carry a positive tolerance.
+            if (tolerance <= 0.0)
+                continue;
             float dist = ColorDistance(inputColor, keyColor);
 
             if (dist < bestDist && dist <= tolerance * 1.732) // 1.732 = sqrt(3) for max RGB distance

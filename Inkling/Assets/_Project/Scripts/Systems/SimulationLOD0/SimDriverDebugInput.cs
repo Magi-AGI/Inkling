@@ -169,7 +169,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 case InkType.Fire:        return 0;
                 case InkType.Water:       return 1;
                 case InkType.Plant:       return 2;
-                case InkType.Metal:       return 6;
+                case InkType.Metal:       return (int)InkTypeId.Metal; // 10 — real Metal field (M0), no longer aliased to BlackBody(6)
                 case InkType.Steam:       return 4;
                 case InkType.Dust:        return 5;
                 case InkType.Electricity: return 7;

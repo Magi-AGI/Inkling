@@ -75,7 +75,7 @@ namespace Magi.Inkling.Tests.PlayMode
 
 #if UNITY_EDITOR
         // Dispatches AddHeatSources on a 1-cell grid and returns the resulting center heat.
-        // Uses the raw iparticle float layout (stride 56); fire is field index 0.
+        // Uses the raw iparticle float layout (stride 60, 15 fields incl. Metal); fire is field index 0.
         // minTemp defaults to 0 so the original CP3 expectations (no-fire cell stays at 0) hold.
         private static float DispatchAddHeatSources(float fire, float heat0, int enable, float rate, float dt,
             float maxHeat, float minTemp = 0f)
@@ -86,10 +86,10 @@ namespace Magi.Inkling.Tests.PlayMode
             Assert.IsNotNull(cs, "Fluids.compute should load");
             int kernel = cs.FindKernel("AddHeatSources");
 
-            var particle = new float[14];
+            var particle = new float[15];
             particle[0] = fire; // fire = iparticle field index 0
 
-            var buf = new ComputeBuffer(res * res, 56);
+            var buf = new ComputeBuffer(res * res, 60);
             var hr = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf) { enableRandomWrite = true }; hr.Create();
             var hw = new RenderTexture(res, res, 0, RenderTextureFormat.RHalf) { enableRandomWrite = true }; hw.Create();
             try

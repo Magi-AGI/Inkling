@@ -442,6 +442,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // would silently reinstate ice's non-thermal time fade whenever the ink definition is not
             // wired — ice must lose intensity only by MELTING, i.e. only when heat conducts into it.
             fc.SetFloat("_DissipationIce", HalfLifeToPerSecond(GetInkProp(InkTypeId.Ice, d => d.dissipationHalfLife, 120000f)));
+            fc.SetFloat("_DissipationMetal", HalfLifeToPerSecond(GetInkProp(InkTypeId.Metal, d => d.dissipationHalfLife, 120000f))); // M0: no decay
 
             // Viscosity
             fc.SetFloat("_ViscosityFire", GetInkProp(InkTypeId.Fire, d => d.viscosity, 0.05f));
@@ -454,6 +455,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_ViscosityElectricitySeeded", GetInkProp(InkTypeId.ElectricitySeeded, d => d.viscosity, 0.0f));
             fc.SetFloat("_ViscosityElectricityGrown", GetInkProp(InkTypeId.ElectricityGrown, d => d.viscosity, 0.0f));
             fc.SetFloat("_ViscosityIce", GetInkProp(InkTypeId.Ice, d => d.viscosity, 0.0f));
+            fc.SetFloat("_ViscosityMetal", GetInkProp(InkTypeId.Metal, d => d.viscosity, 0.0f)); // M0: no diffusion
 
             // Vorticity
             fc.SetFloat("_VorticityFire", GetInkProp(InkTypeId.Fire, d => d.vorticity, 1.5f));
@@ -466,6 +468,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_VorticityElectricitySeeded", GetInkProp(InkTypeId.ElectricitySeeded, d => d.vorticity, 0.0f));
             fc.SetFloat("_VorticityElectricityGrown", GetInkProp(InkTypeId.ElectricityGrown, d => d.vorticity, 0.0f));
             fc.SetFloat("_VorticityIce", GetInkProp(InkTypeId.Ice, d => d.vorticity, 0.2f));
+            fc.SetFloat("_VorticityMetal", GetInkProp(InkTypeId.Metal, d => d.vorticity, 0.0f)); // M0: no swirl
 
             // Advection
             fc.SetFloat("_AdvectionFire", GetInkProp(InkTypeId.Fire, d => d.advectionWeight, 1.0f));
@@ -478,6 +481,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_AdvectionElectricitySeeded", GetInkProp(InkTypeId.ElectricitySeeded, d => d.advectionWeight, 1.0f));
             fc.SetFloat("_AdvectionElectricityGrown", GetInkProp(InkTypeId.ElectricityGrown, d => d.advectionWeight, 1.0f));
             fc.SetFloat("_AdvectionIce", GetInkProp(InkTypeId.Ice, d => d.advectionWeight, 1.0f));
+            fc.SetFloat("_AdvectionMetal", GetInkProp(InkTypeId.Metal, d => d.advectionWeight, 0.0f)); // M0: static painted conductor
 
             // Obstacle thresholds (0 = not an obstacle)
             fc.SetFloat("_ObstacleThresholdFire", GetObstacleThreshold(InkTypeId.Fire));
@@ -502,6 +506,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_PressureElectricitySeeded", GetClampedPressureWeight(InkTypeId.ElectricitySeeded, 1.0f));
             fc.SetFloat("_PressureElectricityGrown", GetClampedPressureWeight(InkTypeId.ElectricityGrown, 1.0f));
             fc.SetFloat("_PressureIce", GetClampedPressureWeight(InkTypeId.Ice, 1.0f));
+            fc.SetFloat("_PressureMetal", GetClampedPressureWeight(InkTypeId.Metal, 1.0f)); // M0: pressure-neutral
         }
 
         private float GetInkProp(InkTypeId type, System.Func<InkTypeDef, float> getter, float defaultValue)
@@ -1263,6 +1268,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         public float steam, glitter, blackBody;
         public float electricitySeeded, electricityGrown;
         public float ice;
+        public float metal;
         public float red, green, blue, alpha;
     }
 }

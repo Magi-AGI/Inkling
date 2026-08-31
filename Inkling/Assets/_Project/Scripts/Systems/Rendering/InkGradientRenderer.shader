@@ -70,7 +70,7 @@ Shader "Inkling/InkGradientRenderer"
             // Channel textures written by ParticleChannelSplat.compute.
             // Avoids reading StructuredBuffer<iparticle> in a fragment shader
             // where CGPROGRAM promotes half → float, causing a stride mismatch
-            // (28 bytes in C# vs 56 bytes expected by the shader).
+            // (a half iparticle would be 30 bytes in C# vs the 60 bytes expected by the shader).
             //   _Channels0: fire, water, plantSeeded, plantGrown
             //   _Channels1: steam, glitter, blackBody, ice
             //   _Channels2: electricitySeeded, electricityGrown, heat, reserved

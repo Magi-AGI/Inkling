@@ -27,6 +27,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             public float steam, glitter, blackBody;
             public float electricitySeeded, electricityGrown;
             public float ice;
+            public float metal;
             public float red, green, blue, alpha;
         }
 

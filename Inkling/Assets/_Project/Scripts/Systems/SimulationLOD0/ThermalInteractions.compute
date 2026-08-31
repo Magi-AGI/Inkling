@@ -33,8 +33,8 @@
 // Explicitly padded to 16-byte multiples (32 and 16 bytes) rather than relying on a fragile stride.
 struct GpuThermalTransition
 {
-    int fromField;      // absolute iparticle field index (0..9)
-    int toField;        // absolute iparticle field index (0..9), or -1 = SINK (CP8k): the source ink is
+    int fromField;      // absolute iparticle field index (0..10)
+    int toField;        // absolute iparticle field index (0..10), or -1 = SINK (CP8k): the source ink is
                         // REMOVED outright, with no destination credited. This is how cold fire goes out
                         // without minting smoke or a puddle. A sink only ever destroys ink, never creates
                         // it, so the no-minting invariant still holds.
@@ -51,7 +51,7 @@ struct GpuThermalTransition
 
 struct GpuThermalSource
 {
-    int field;                // absolute iparticle field index (0..9)
+    int field;                // absolute iparticle field index (0..10)
     float heatEmissionRate;   // raw heat per unit of this ink per second
     float fuelCost;           // ink burned per unit of heat ACTUALLY added (0 = add-only)
     int pad0;
@@ -87,7 +87,7 @@ float _MaxHeat;
 #define REGIME_COLD 0
 #define REGIME_HOT  1
 
-// Field-index accessors over the 10 ink channels (mirrors InkInteractions.compute).
+// Field-index accessors over the 11 ink channels 0..10 (mirrors InkInteractions.compute).
 float GetInkByIndex(iparticle p, int idx)
 {
     switch (idx)
@@ -102,6 +102,7 @@ float GetInkByIndex(iparticle p, int idx)
         case 7: return p.electricitySeeded;
         case 8: return p.electricityGrown;
         case 9: return p.ice;
+        case 10: return p.metal;
         default: return 0;
     }
 }
@@ -120,6 +121,7 @@ void SetInkByIndex(inout iparticle p, int idx, float value)
         case 7: p.electricitySeeded = value; break;
         case 8: p.electricityGrown = value; break;
         case 9: p.ice = value; break;
+        case 10: p.metal = value; break;
     }
 }
 

@@ -64,6 +64,7 @@ void AddInkByIndex(inout iparticle p, int inkIdx, float amount)
         case 7: p.electricitySeeded += (ifloat)amount; break;
         case 8: p.electricityGrown += (ifloat)amount; break;
         case 9: p.ice += (ifloat)amount; break;
+        case 10: p.metal += (ifloat)amount; break;
     }
 }
 

@@ -97,7 +97,7 @@ float _ReactionImpulseCurlBias;   // weight of tangential (swirl) component
 float _ReactionImpulseExpansionBias;  // weight of outward front-normal component
 float _ReactionImpulseDtScale;    // FrameDeltaTime/Timestep: matches other per-substep velocity impulses
 
-// Helper: Extract ink value by field index (0-9)
+// Helper: Extract ink value by field index (0-10)
 float GetInkByIndex(iparticle p, int idx)
 {
     switch (idx)
@@ -112,11 +112,12 @@ float GetInkByIndex(iparticle p, int idx)
         case 7: return p.electricitySeeded;
         case 8: return p.electricityGrown;
         case 9: return p.ice;
+        case 10: return p.metal;
         default: return 0;
     }
 }
 
-// Helper: Set ink value by field index (0-9)
+// Helper: Set ink value by field index (0-10)
 void SetInkByIndex(inout iparticle p, int idx, float value)
 {
     switch (idx)
@@ -131,6 +132,7 @@ void SetInkByIndex(inout iparticle p, int idx, float value)
         case 7: p.electricitySeeded = value; break;
         case 8: p.electricityGrown = value; break;
         case 9: p.ice = value; break;
+        case 10: p.metal = value; break;
     }
 }
 

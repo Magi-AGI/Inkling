@@ -339,7 +339,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [SerializeField] private float blackBodyClearingRateFallback = 0.05f;
 
         [Header("Ink Properties")]
-        [SerializeField] private InkTypeDef[] inkDefinitions = new InkTypeDef[10];
+        [SerializeField] private InkTypeDef[] inkDefinitions = new InkTypeDef[(int)InkTypeId.Count]; // 11 (incl. Metal)
 
         [Header("Particle Rendering")]
         [SerializeField] private ComputeShader particleToColorCompute;
@@ -366,9 +366,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         [Header("Runtime Selection")]
         [SerializeField] private int currentInkType = 0;
 
-        // CP8w: upper bound is now ColdSourceInkIndex (10), not 9 — the selection range covers the ten
-        // real inks PLUS the ColdAir temperature probe. Painting routes on the index, so widening this
-        // clamp is what makes ColdAir reachable from the brush and from right-mouse emitters.
+        // CP8w/M0: upper bound is ColdSourceInkIndex (== InkTypeId.Count, currently 11) — the selection
+        // range covers the Count real inks (0..Count-1, incl. Metal=10) PLUS the ColdAir temperature probe.
+        // Painting routes on the index, so widening this clamp is what makes ColdAir reachable from the
+        // brush and from right-mouse emitters.
         public int CurrentInkType
         {
             get => currentInkType;
@@ -813,11 +814,11 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         public void InjectDensity(Vector2 position, Color color, int inkTypeIndex = 0)
         {
-            // CP8w: ColdAir is intercepted FIRST — before every guard below. Two reasons this ordering
+            // CP8w/M0: ColdAir is intercepted FIRST — before every guard below. Two reasons this ordering
             // is load-bearing:
-            //   1. The Mathf.Clamp(inkTypeIndex, 0, 9) further down would silently turn index 10 into
-            //      ICE, seeding exactly the mass this feature exists to avoid. Nothing about that
-            //      failure would be visible: you would paint "cold air" and get ice.
+            //   1. ColdAir's index is ColdSourceInkIndex (== InkTypeId.Count), one past the real inks. The
+            //      Mathf.Clamp below caps to Count-1 (Metal, index 10); without this early return ColdAir
+            //      would be clamped down to Metal and paint metal instead of running heat-only.
             //   2. The density/colour guards are irrelevant to a temperature probe. ColdAir must still
             //      cool with DensityAmount at 0, and must not require a Density buffer at all.
             if (SimulationContext.IsColdSource(inkTypeIndex))
@@ -832,7 +833,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             float colorIntensity = Mathf.Max(color.r, Mathf.Max(color.g, color.b));
             if (colorIntensity <= 0f || ctx.DensityAmount <= 0f) return;
 
-            int validIndex = Mathf.Clamp(inkTypeIndex, 0, 9);
+            int validIndex = Mathf.Clamp(inkTypeIndex, 0, SimulationContext.ColdSourceInkIndex - 1); // 0..Count-1 (incl. Metal=10)
             operationQueue.EnqueueDensityInjection(position, color, validIndex);
         }
 

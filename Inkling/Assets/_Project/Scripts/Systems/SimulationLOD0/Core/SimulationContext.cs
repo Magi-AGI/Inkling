@@ -248,9 +248,10 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // That is the entire point — if water freezes after painting ColdAir, it froze because the
         // Water->Ice thermal rule reacted to the cold, not because we seeded ice behind Lake's back.
         //
-        // Deliberately NOT an iparticle channel: that struct is a fixed 10-field layout shared with
-        // InkTools, and expanding it is a structural package change we do not need for a thermal probe.
-        public const int ColdSourceInkIndex = (int)InkTypeId.Count;   // 10 — one past Ice (9)
+        // Deliberately NOT an iparticle channel: ColdAir has no mass channel and no InkTypeDef — it is a
+        // heat-only probe. It sits one past the real inks, so it tracks InkTypeId.Count automatically
+        // (M0: Count=11 with Metal=10 the last real ink, so ColdSourceInkIndex is 11).
+        public const int ColdSourceInkIndex = (int)InkTypeId.Count;   // 11 — one past Metal (10)
 
         /// <summary>True if this selection index is the ColdAir temperature probe rather than a real ink.</summary>
         public static bool IsColdSource(int inkTypeIndex) => inkTypeIndex == ColdSourceInkIndex;

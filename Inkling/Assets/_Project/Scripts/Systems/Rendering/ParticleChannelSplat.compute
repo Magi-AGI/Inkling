@@ -1,11 +1,12 @@
 // Compute-to-texture intermediate for particle-authoritative rendering.
-// Reads iparticle StructuredBuffer (half fields, stride 28) and writes
-// all 10 ink channels into 3 RGBA float render textures.
+// Reads the iparticle StructuredBuffer and writes the render-visible ink channels into 3 RGBA float
+// render textures. `ifloat` defaults to FLOAT in the committed mode, so the default iparticle stride is
+// 60 bytes / 15 fields (11 real ink channels 0..10 after Metal + 4 color overrides).
 //
-// This avoids a stride mismatch: CGPROGRAM fragment shaders on desktop
-// promote half → float, expecting stride 56 for iparticle. Compute
-// shaders read the half layout correctly, so we splat here and let the
-// fragment shader sample standard float textures.
+// This avoids a stride mismatch: CGPROGRAM fragment shaders on desktop promote half → float and would
+// expect a 60-byte iparticle; a transient half build would be 30 bytes. Compute shaders read the buffer
+// layout correctly, so we splat here and let the fragment shader sample standard float textures.
+// M0: this splat still packs the same channels; _Channels2.w stays reserved until M1 wires true-metal rendering.
 
 #pragma kernel ChannelSplat
 

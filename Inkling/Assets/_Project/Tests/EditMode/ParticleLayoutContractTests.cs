@@ -12,23 +12,31 @@ namespace Magi.Inkling.Tests.EditMode
     /// </summary>
     public class ParticleLayoutContractTests
     {
-        private const int ExpectedFloatStride = 14 * sizeof(float); // 56
+        private const int ExpectedFloatStride = 15 * sizeof(float); // 60 (M0: Metal field added at index 10)
 
         [Test]
-        public void Iparticle_Is56ByteFloatLayout()
+        public void Iparticle_Is60ByteFloatLayout()
         {
             Assert.AreEqual(ExpectedFloatStride, Marshal.SizeOf<iparticle>(),
-                "iparticle must be 56 bytes in the default float baseline.");
+                "iparticle must be 60 bytes in the default float baseline (15 fields incl. Metal at index 10).");
         }
 
         [Test]
         public void Iparticle_FieldsResolveToFloat()
         {
             var fields = typeof(iparticle).GetFields(BindingFlags.Instance | BindingFlags.Public);
-            Assert.AreEqual(14, fields.Length, "iparticle must have exactly 14 channel/color fields.");
+            Assert.AreEqual(15, fields.Length, "iparticle must have exactly 15 channel/color fields (incl. Metal).");
             foreach (var f in fields)
                 Assert.AreEqual(typeof(float), f.FieldType,
                     $"iparticle.{f.Name} must be float in the default baseline.");
+        }
+
+        [Test]
+        public void Iparticle_HasMetalFieldAtFloat()
+        {
+            var metal = typeof(iparticle).GetField("metal");
+            Assert.IsNotNull(metal, "iparticle must have a dedicated 'metal' field (M0 true Metal, index 10).");
+            Assert.AreEqual(typeof(float), metal.FieldType, "metal must be float in the default baseline.");
         }
 
         [Test]
@@ -45,9 +53,9 @@ namespace Magi.Inkling.Tests.EditMode
 
             int iparticleStride = Marshal.SizeOf<iparticle>();
             Assert.AreEqual(ExpectedFloatStride, Marshal.SizeOf(fluidSolverMirror),
-                "FluidSolver readback mirror must be 56 bytes.");
+                "FluidSolver readback mirror must be 60 bytes.");
             Assert.AreEqual(ExpectedFloatStride, Marshal.SizeOf(displayMirror),
-                "SimulationDisplay readback mirror must be 56 bytes.");
+                "SimulationDisplay readback mirror must be 60 bytes.");
             Assert.AreEqual(iparticleStride, Marshal.SizeOf(fluidSolverMirror),
                 "FluidSolver mirror stride must equal the iparticle stride.");
             Assert.AreEqual(iparticleStride, Marshal.SizeOf(displayMirror),
@@ -88,11 +96,13 @@ namespace Magi.Inkling.Tests.EditMode
         public void LayoutGuard_ThrowsOnDrift()
         {
             Assert.AreNotEqual(ExpectedFloatStride, Marshal.SizeOf<DriftedMirror>(),
-                "DriftedMirror must differ from 56 to be a valid negative fixture.");
+                "DriftedMirror must differ from 60 to be a valid negative fixture.");
             Assert.Throws<InvalidOperationException>(
                 () => LayoutGuard(Marshal.SizeOf<iparticle>(), Marshal.SizeOf<DriftedMirror>()));
             Assert.Throws<InvalidOperationException>(
-                () => LayoutGuard(28, ExpectedFloatStride));
+                // 30 = 15 half-sized fields (a transient half build). Half mode is guard-rejected and NOT
+                // runtime-validated; this only asserts the guard trips on the wrong stride.
+                () => LayoutGuard(30, ExpectedFloatStride));
         }
     }
 }

@@ -14,10 +14,11 @@ namespace Magi.Inkling.Tests.PlayMode
     public class ParticleBufferRoundTripTests
     {
         // Distinct, half-exact fractions (k/16) so the same sentinels stay exact if Slice B flips to half.
+        // Order matches the got[] read order below: fire..ice (0-9), metal (index 10), then red..alpha.
         private static readonly float[] Sentinels =
         {
             1f / 16f, 2f / 16f, 3f / 16f, 4f / 16f, 5f / 16f, 6f / 16f, 7f / 16f,
-            8f / 16f, 9f / 16f, 10f / 16f, 11f / 16f, 12f / 16f, 13f / 16f, 14f / 16f
+            8f / 16f, 9f / 16f, 10f / 16f, 15f / 16f, 11f / 16f, 12f / 16f, 13f / 16f, 14f / 16f
         };
 
         [UnityTest]
@@ -54,6 +55,7 @@ namespace Magi.Inkling.Tests.PlayMode
                     particle.fire, particle.water, particle.plantSeeded, particle.plantGrown,
                     particle.steam, particle.glitter, particle.blackBody,
                     particle.electricitySeeded, particle.electricityGrown, particle.ice,
+                    particle.metal,
                     particle.red, particle.green, particle.blue, particle.alpha
                 };
 

@@ -329,7 +329,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
 
         private Vector4[] BuildInkKeyColorPalette()
         {
-            var palette = new Vector4[10];
+            // Count-sized (ColdSourceInkIndex == (int)InkTypeId.Count == 11) so index 10 (Metal) is in-range.
+            // Metal has no authored key color in M0: its default tolerance is 0 so it NEVER matches a stamp
+            // pixel (no accidental metal, no fallback to another ink). M1's Metal asset supplies a real
+            // inputKeyColor/tolerance via the ctx.InkDefinitions override below.
+            int count = SimulationContext.ColdSourceInkIndex; // == (int)InkTypeId.Count == 11
+            var palette = new Vector4[count];
             var defaults = new Color[]
             {
                 new Color(1f, 0.3f, 0f),
@@ -342,12 +347,14 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                 new Color(1f, 1f, 0f),
                 new Color(0.5f, 0f, 1f),
                 new Color(0.5f, 0.8f, 1f),
+                new Color(0.6f, 0.6f, 0.65f), // 10 = Metal (placeholder; inactive via tolerance 0 in M0)
             };
 
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < count; i++)
             {
-                Color keyColor = defaults[i];
-                float tolerance = 0.3f;
+                Color keyColor = i < defaults.Length ? defaults[i] : Color.black;
+                // Metal (index count-1) is present-but-inactive in M0: tolerance 0 => never matches.
+                float tolerance = (i == count - 1) ? 0f : 0.3f;
 
                 if (ctx.InkDefinitions != null && i < ctx.InkDefinitions.Length && ctx.InkDefinitions[i] != null)
                 {
@@ -520,7 +527,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             {
                 Vector4[] inkPalette = BuildInkKeyColorPalette();
                 ctx.StampParticlesCompute.SetVectorArray("_InkKeyColors", inkPalette);
-                ctx.StampParticlesCompute.SetInt("_NumActiveInks", 10);
+                ctx.StampParticlesCompute.SetInt("_NumActiveInks", SimulationContext.ColdSourceInkIndex); // == InkTypeId.Count (11)
                 ctx.StampParticlesCompute.SetInt("_UsePaletteLookup", 1);
 
                 if (!hasLoggedFirstParticleStamp && pendingDensityStamps.Count > 0)
@@ -530,7 +537,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                     Debug.Log($"[SimDriver] First particle stamp: texture={firstStamp.stamp?.name}, " +
                               $"pos={firstStamp.uvPosition}, mul={firstStamp.multiplier}, " +
                               $"useOverride={firstStamp.useColorOverride}, override={firstStamp.overrideColor}");
-                    for (int i = 0; i < 10; i++)
+                    for (int i = 0; i < inkPalette.Length; i++)
                     {
                         Debug.Log($"[SimDriver] Ink palette[{i}]: RGB=({inkPalette[i].x:F2},{inkPalette[i].y:F2},{inkPalette[i].z:F2}), tolerance={inkPalette[i].w:F2}");
                     }
