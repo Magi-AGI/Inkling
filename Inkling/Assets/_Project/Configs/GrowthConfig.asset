@@ -25,5 +25,6 @@ MonoBehaviour:
   plantSpreadWaterThreshold: 0.01
   electricitySpreadWaterThreshold: 0.01
   electricitySpreadIceThreshold: 0.01
+  electricitySpreadMetalThreshold: 0.01
   enableDecay: 0
   decayRate: 0.01

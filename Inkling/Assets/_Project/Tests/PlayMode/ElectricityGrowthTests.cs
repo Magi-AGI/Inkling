@@ -13,11 +13,11 @@ namespace Magi.Inkling.Tests.PlayMode
     /// <summary>
     /// Electricity growth contract tests for the GrowSeeds kernel in Growth.compute.
     ///
-    /// Slice 2a: grown electricity now spreads like plants but through a CONDUCTIVE SUBSTRATE — it creeps
-    /// into neighboring cells that contain WATER or ICE (destination water>_ElectricitySpreadWaterThreshold
-    /// || ice>_ElectricitySpreadIceThreshold), replacing the old destination-electricitySeeded>0.001 gate.
-    /// Direct seeded->grown MATURATION stays deliberately water-INDEPENDENT (unchanged from slice 1).
-    /// Every dispatch path sets the new spread-threshold uniforms explicitly to avoid stale compute state.
+    /// M2: grown electricity spreads like plants but through a CONDUCTIVE SUBSTRATE — it creeps into
+    /// neighboring cells that contain WATER, ICE, or true METAL (destination water>_ElectricitySpreadWaterThreshold
+    /// || ice>_ElectricitySpreadIceThreshold || metal>_ElectricitySpreadMetalThreshold). BlackBody is
+    /// explicitly NON-conductive. Direct seeded->grown MATURATION stays deliberately substrate-INDEPENDENT.
+    /// Every dispatch path sets all three spread-threshold uniforms explicitly to avoid stale compute state.
     /// Reads are cast to float so the NUnit comparer is safe in both float and transient half builds.
     /// </summary>
     public class ElectricityGrowthTests
@@ -41,11 +41,13 @@ namespace Magi.Inkling.Tests.PlayMode
             growth.SetFloat("_PlantSpreadWaterThreshold", 1f);
         }
 
-        // Always set the slice-2a electricity spread substrate thresholds so no dispatch reads stale state.
-        private static void SetElectricitySpread(ComputeShader growth, float waterThreshold, float iceThreshold)
+        // Always set the M2 electricity spread substrate thresholds (water/ice/metal) so no dispatch reads
+        // stale compute state.
+        private static void SetElectricitySpread(ComputeShader growth, float waterThreshold, float iceThreshold, float metalThreshold)
         {
             growth.SetFloat("_ElectricitySpreadWaterThreshold", waterThreshold);
             growth.SetFloat("_ElectricitySpreadIceThreshold", iceThreshold);
+            growth.SetFloat("_ElectricitySpreadMetalThreshold", metalThreshold);
         }
 #endif
 
@@ -74,7 +76,7 @@ namespace Magi.Inkling.Tests.PlayMode
             growth.SetInt("_EnableSpread", 0);
             growth.SetFloat("_CardinalSpreadWeight", 0f);
             growth.SetFloat("_DiagonalSpreadWeight", 0f);
-            SetElectricitySpread(growth, 0.01f, 0.01f);
+            SetElectricitySpread(growth, 0.01f, 0.01f, 0.01f);
 
             growth.Dispatch(kernel, 1, 1, 1);
             yield return null;
@@ -114,7 +116,7 @@ namespace Magi.Inkling.Tests.PlayMode
             growth.SetInt("_EnableSpread", 0);
             growth.SetFloat("_CardinalSpreadWeight", 0f);
             growth.SetFloat("_DiagonalSpreadWeight", 0f);
-            SetElectricitySpread(growth, 0.01f, 0.01f);
+            SetElectricitySpread(growth, 0.01f, 0.01f, 0.01f);
 
             growth.Dispatch(kernel, 1, 1, 1);
             yield return null;
@@ -132,7 +134,7 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
-        // Slice 2a contract (replaces the old ElectricitySpread_OnlyEntersSeededCells seed-gated lock):
+        // M2 contract (replaces the old ElectricitySpread_OnlyEntersSeededCells seed-gated lock):
         // grown electricity conducts through WATER, NOT through a dry non-conductive cell, and — crucially —
         // NOT into a dry-but-SEEDED cell (proving the old electricitySeeded spread gate is truly gone).
         [UnityTest]
@@ -167,7 +169,7 @@ namespace Magi.Inkling.Tests.PlayMode
             growth.SetInt("_EnableSpread", 1);
             growth.SetFloat("_CardinalSpreadWeight", 1f);
             growth.SetFloat("_DiagonalSpreadWeight", 0f);
-            SetElectricitySpread(growth, 0.01f, 0.01f);
+            SetElectricitySpread(growth, 0.01f, 0.01f, 0.01f);
 
             growth.Dispatch(kernel, 1, 1, 1);
             yield return null;
@@ -184,7 +186,7 @@ namespace Magi.Inkling.Tests.PlayMode
 #endif
         }
 
-        // Slice 2a contract: grown electricity also conducts through ICE.
+        // M2 contract: grown electricity also conducts through ICE.
         [UnityTest]
         public IEnumerator ElectricitySpread_ConductsThroughIce()
         {
@@ -212,8 +214,8 @@ namespace Magi.Inkling.Tests.PlayMode
             growth.SetInt("_EnableSpread", 1);
             growth.SetFloat("_CardinalSpreadWeight", 1f);
             growth.SetFloat("_DiagonalSpreadWeight", 0f);
-            // Water threshold set high so ONLY ice can gate here; ice threshold low so the icy cell conducts.
-            SetElectricitySpread(growth, 1f, 0.01f);
+            // Water + metal thresholds high so ONLY ice can gate here; ice threshold low so the icy cell conducts.
+            SetElectricitySpread(growth, 1f, 0.01f, 1f);
 
             growth.Dispatch(kernel, 1, 1, 1);
             yield return null;
@@ -221,6 +223,92 @@ namespace Magi.Inkling.Tests.PlayMode
             buffer.GetData(particles);
             Assert.That((float)particles[3].electricityGrown, Is.GreaterThan(0f),
                 "An ICY cell adjacent to grown electricity must gain grown via conduction through ice.");
+#else
+            yield break;
+#endif
+        }
+
+        // M2 contract: grown electricity ALSO conducts through true METAL (iparticle.metal, index 10).
+        // RED before M2 (metal absent from the spread gate -> destination stays 0).
+        [UnityTest]
+        public IEnumerator ElectricitySpread_ConductsThroughMetal()
+        {
+#if UNITY_EDITOR
+            var growth = LoadGrowth();
+            int kernel = growth.FindKernel("GrowSeeds");
+
+            // 3x3. Center idx4 grown source. Cell A (idx3) has true METAL (no water/ice) adjacent to the
+            // source -> must gain grown via conduction through metal.
+            const int res = 3;
+            var particles = new iparticle[res * res];
+            particles[4].electricityGrown = IFloatTestValue.FromFloat(1f); // source
+            particles[3].metal = IFloatTestValue.FromFloat(0.5f);          // A: conductive substrate (true metal)
+
+            using var buffer = new ComputeBuffer(res * res, Marshal.SizeOf<iparticle>());
+            buffer.SetData(particles);
+
+            growth.SetBuffer(kernel, "_Particles", buffer);
+            growth.SetInt("_Resolution", res);
+            growth.SetFloat("_DeltaTime", 1f);
+            DisablePlant(growth);
+            growth.SetFloat("_ElectricityGrowthRate", 0f);
+            growth.SetFloat("_ElectricityMaxGrown", 1f);
+            growth.SetFloat("_ElectricitySeedThreshold", 1f);
+            growth.SetInt("_EnableSpread", 1);
+            growth.SetFloat("_CardinalSpreadWeight", 1f);
+            growth.SetFloat("_DiagonalSpreadWeight", 0f);
+            // Water + ice thresholds high so ONLY metal can gate here; metal threshold low so the metal cell conducts.
+            SetElectricitySpread(growth, 1f, 1f, 0.01f);
+
+            growth.Dispatch(kernel, 1, 1, 1);
+            yield return null;
+
+            buffer.GetData(particles);
+            Assert.That((float)particles[3].electricityGrown, Is.GreaterThan(0f),
+                "A true-METAL cell adjacent to grown electricity must gain grown via conduction through metal (M2).");
+#else
+            yield break;
+#endif
+        }
+
+        // M2 contract: BlackBody is explicitly NON-conductive. A BlackBody-only neighbor (no water/ice/metal)
+        // must NOT gain grown even with ALL substrate thresholds low — proving blackBody is not a metal surrogate.
+        [UnityTest]
+        public IEnumerator ElectricitySpread_DoesNotConductThroughBlackBody()
+        {
+#if UNITY_EDITOR
+            var growth = LoadGrowth();
+            int kernel = growth.FindKernel("GrowSeeds");
+
+            // 3x3. Center idx4 grown source. Cell A (idx3) has BlackBody only (no water/ice/metal) adjacent
+            // to the source -> must NOT gain grown.
+            const int res = 3;
+            var particles = new iparticle[res * res];
+            particles[4].electricityGrown = IFloatTestValue.FromFloat(1f); // source
+            particles[3].blackBody = IFloatTestValue.FromFloat(0.5f);      // A: BlackBody only (non-conductive)
+
+            using var buffer = new ComputeBuffer(res * res, Marshal.SizeOf<iparticle>());
+            buffer.SetData(particles);
+
+            growth.SetBuffer(kernel, "_Particles", buffer);
+            growth.SetInt("_Resolution", res);
+            growth.SetFloat("_DeltaTime", 1f);
+            DisablePlant(growth);
+            growth.SetFloat("_ElectricityGrowthRate", 0f);
+            growth.SetFloat("_ElectricityMaxGrown", 1f);
+            growth.SetFloat("_ElectricitySeedThreshold", 1f);
+            growth.SetInt("_EnableSpread", 1);
+            growth.SetFloat("_CardinalSpreadWeight", 1f);
+            growth.SetFloat("_DiagonalSpreadWeight", 0f);
+            // All substrate thresholds LOW: if blackBody were (wrongly) treated as conductive, it would conduct.
+            SetElectricitySpread(growth, 0.01f, 0.01f, 0.01f);
+
+            growth.Dispatch(kernel, 1, 1, 1);
+            yield return null;
+
+            buffer.GetData(particles);
+            Assert.That((float)particles[3].electricityGrown, Is.EqualTo(0f).Within(1e-4f),
+                "A BlackBody-only cell must NOT gain grown — BlackBody is non-conductive (not a metal surrogate).");
 #else
             yield break;
 #endif

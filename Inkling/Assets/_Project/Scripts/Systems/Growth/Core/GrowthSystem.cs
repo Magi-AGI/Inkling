@@ -194,6 +194,7 @@ namespace Magi.Inkling.Systems.Growth
             growthCompute.SetFloat("_PlantSpreadWaterThreshold", config.plantSpreadWaterThreshold);
             growthCompute.SetFloat("_ElectricitySpreadWaterThreshold", config.electricitySpreadWaterThreshold);
             growthCompute.SetFloat("_ElectricitySpreadIceThreshold", config.electricitySpreadIceThreshold);
+            growthCompute.SetFloat("_ElectricitySpreadMetalThreshold", config.electricitySpreadMetalThreshold);
 
             // Dispatch
             growthCompute.Dispatch(kernelGrowSeeds, threadGroups, threadGroups, 1);

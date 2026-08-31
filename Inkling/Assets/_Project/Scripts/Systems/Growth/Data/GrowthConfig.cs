@@ -69,6 +69,12 @@ namespace Magi.Inkling.Systems.Growth
         [Range(0f, 1f)]
         public float electricitySpreadIceThreshold = 0.01f;
 
+        [Tooltip("Grown electricity only spreads (neighbor expansion) into a neighbor whose true metal is above " +
+                 "this threshold — electricity conducts through true Metal (M2). Neighbor-spread only; does not " +
+                 "affect direct seeded->grown maturation. BlackBody is NOT conductive.")]
+        [Range(0f, 1f)]
+        public float electricitySpreadMetalThreshold = 0.01f;
+
         [Header("Decay")]
         [Tooltip("Enable decay of grown plants/electricity over time")]
         public bool enableDecay = false;
