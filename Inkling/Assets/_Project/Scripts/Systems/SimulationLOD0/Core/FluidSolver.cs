@@ -494,6 +494,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             fc.SetFloat("_ObstacleThresholdElectricitySeeded", GetObstacleThreshold(InkTypeId.ElectricitySeeded));
             fc.SetFloat("_ObstacleThresholdElectricityGrown", GetObstacleThreshold(InkTypeId.ElectricityGrown));
             fc.SetFloat("_ObstacleThresholdIce", GetObstacleThreshold(InkTypeId.Ice));
+            fc.SetFloat("_ObstacleThresholdMetal", GetObstacleThreshold(InkTypeId.Metal)); // M3a: metal blocks flow
 
             // Pressure
             fc.SetFloat("_PressureFire", GetClampedPressureWeight(InkTypeId.Fire, 1.0f));
