@@ -391,6 +391,9 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             // CP8o: ice concentration at/above which a cell conducts at the solid rate — its OWN threshold,
             // not the velocity/flow obstacle threshold, so painted ice conducts without blocking fluid.
             fc.SetFloat("_ThermalSolidThresholdIce", Mathf.Max(0f, ctx.ThermalSolidThresholdIce));
+            // M3b: metal concentration at/above which a cell conducts at the solid rate — same decoupled
+            // mechanism as ice, separate from Metal's 0.5 flow-obstacle threshold.
+            fc.SetFloat("_ThermalSolidThresholdMetal", Mathf.Max(0f, ctx.ThermalSolidThresholdMetal));
             // LEGACY (CP8q): fraction of neighbouring fluid velocity a SOLID cell borrows for HEAT
             // advection. The shader IGNORES this unless _HeatObstacleMode == 1; the default strict model
             // has no advective path through solids at all. Still uploaded every step so the legacy A/B
@@ -986,13 +989,19 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                             ctx.ParticlesBuffer[ctx.ParticleReadIndex]);
                         ctx.FluidCompute.SetFloat("_ThermalSolidThresholdIce",
                             Mathf.Max(0f, ctx.ThermalSolidThresholdIce));
+                        // M3b: metal thermal-solid threshold rides the SAME bind-or-zero guard as ice — the
+                        // shader reads _ParticlesRead[pidx].metal whenever this is > 0, so it must only be
+                        // live when the particle buffer is bound (this branch).
+                        ctx.FluidCompute.SetFloat("_ThermalSolidThresholdMetal",
+                            Mathf.Max(0f, ctx.ThermalSolidThresholdMetal));
                     }
                     else
                     {
-                        // No particles => disable ice-concentration classification for this dispatch,
+                        // No particles => disable ice/metal concentration classification for this dispatch,
                         // so the kernel genuinely falls back to the geometry mask alone and cannot read
                         // an unbound buffer.
                         ctx.FluidCompute.SetFloat("_ThermalSolidThresholdIce", 0f);
+                        ctx.FluidCompute.SetFloat("_ThermalSolidThresholdMetal", 0f);
                     }
 
                     ctx.FluidCompute.Dispatch(ctx.FluidKernelDiffuseHeat, threadGroups, threadGroups, 1);

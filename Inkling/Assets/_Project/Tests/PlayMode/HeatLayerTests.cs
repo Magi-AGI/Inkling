@@ -1193,8 +1193,13 @@ namespace Magi.Inkling.Tests.PlayMode
                 "DiffuseHeat must read the ice concentration against its own thermal threshold");
             StringAssert.Contains("_ParticlesRead[pidx].ice", src,
                 "…by reading the particle buffer directly, decoupled from the velocity obstacle mask");
-            StringAssert.Contains("iceThermalSolid || (IsObstacle(id.xy) > 0.5)", src,
-                "…OR-ed with the geometry mask so walls still conduct, but ice no longer DEPENDS on it");
+            StringAssert.Contains("iceThermalSolid || metalThermalSolid || (IsObstacle(id.xy) > 0.5)", src,
+                "…OR-ed with the geometry mask so walls still conduct, but ice/metal no longer DEPEND on it");
+            // M3b drift guard: true metal is thermal-solid by concentration, same decoupled mechanism as ice.
+            StringAssert.Contains("_ThermalSolidThresholdMetal", src,
+                "DiffuseHeat must read the metal concentration against its own thermal threshold (M3b)");
+            StringAssert.Contains("_ParticlesRead[pidx].metal", src,
+                "…metal thermal-solid is concentration-gated on the particle buffer, like ice (M3b)");
 #else
             Assert.Ignore("Editor-only source assertion");
 #endif

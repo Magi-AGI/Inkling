@@ -172,6 +172,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
                  "to fall back to the geometry obstacle mask alone (the CP8n behaviour).")]
         [Min(0f)]
         [SerializeField] private float thermalSolidThresholdIce = 0.1f;
+        [Tooltip("M3b: metal concentration at/above which a cell CONDUCTS at the solid rate. Same decoupled " +
+                 "mechanism as thermalSolidThresholdIce, SEPARATE from Metal's 0.5 flow-obstacle threshold. " +
+                 "0.1 lets thin painted metal conduct heat without damming flow; dense metal (>=0.5) already " +
+                 "conducts via the obstacle mask. Set 0 to disable the metal thermal-solid path.")]
+        [Min(0f)]
+        [SerializeField] private float thermalSolidThresholdMetal = 0.1f;
         [Tooltip("LEGACY (CP8q), ignored unless thermalObstacleHeatMode = 1. How much of the surrounding " +
                  "fluid velocity a SOLID cell borrows for HEAT advection. In the default strict model heat " +
                  "never advects through a solid, so this does nothing. Kept so the Fire-vs-Ice harness can " +
@@ -604,6 +610,7 @@ namespace Magi.Inkling.Systems.SimulationLOD0
             ctx.ThermalDiffusion = thermalDiffusion;
             ctx.ThermalDiffusionSolid = thermalDiffusionSolid;
             ctx.ThermalSolidThresholdIce = thermalSolidThresholdIce;
+            ctx.ThermalSolidThresholdMetal = thermalSolidThresholdMetal;
             ctx.ThermalSolidPermeability = thermalSolidPermeability;
             ctx.HeatObstacleMode = Mathf.Clamp(thermalObstacleHeatMode, 0, 1);
             ctx.QuenchCoolingPerUnit = quenchCoolingPerUnit;

@@ -1383,6 +1383,7 @@ MonoBehaviour:
   thermalDiffusion: 2
   thermalDiffusionSolid: 60
   thermalSolidThresholdIce: 0.1
+  thermalSolidThresholdMetal: 0.1
   thermalSolidPermeability: 1
   quenchCoolingPerUnit: 1
   neutralTemperature: 0.5

@@ -190,6 +190,12 @@ namespace Magi.Inkling.Systems.SimulationLOD0
         // fluid. Fixes the CP8n coupling where making ice conductive also made thin ice a flow obstacle.
         public float ThermalSolidThresholdIce = 0.1f;
 
+        // M3b: metal concentration at/above which a cell CONDUCTS at the solid rate — the same decoupled
+        // concentration mechanism as ThermalSolidThresholdIce, SEPARATE from Metal's 0.5 flow-obstacle
+        // threshold. 0.1 lets thin painted metal conduct heat without damming flow; dense metal (>=0.5)
+        // already conducts via the obstacle mask. 0 disables the metal thermal-solid path.
+        public float ThermalSolidThresholdMetal = 0.1f;
+
         // LEGACY (CP8q): fraction of the surrounding fluid velocity a SOLID cell borrows for HEAT
         // advection. IGNORED unless HeatObstacleMode == 1.
         //
